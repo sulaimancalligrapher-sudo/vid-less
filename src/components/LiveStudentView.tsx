@@ -33,11 +33,11 @@ const OPTION_LETTERS = ['أ', 'ب', 'ج', 'د', 'هـ', 'و'];
 export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) {
   const { t } = useLanguage();
 
-  // Student credentials - isolated per tab using sessionStorage so testing 2+ students works smoothly
+  // Student credentials - persisted across tabs and accidental closes
   const [username, setUsername] = useState(() => {
     if (typeof window !== 'undefined') {
       const p = new URLSearchParams(window.location.search);
-      return p.get('username') || p.get('name') || sessionStorage.getItem('liveStudentUsername') || '';
+      return p.get('username') || p.get('name') || sessionStorage.getItem('liveStudentUsername') || localStorage.getItem('liveStudentUsername') || '';
     }
     return '';
   });
@@ -45,7 +45,7 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
   const [sheetNumber, setSheetNumber] = useState(() => {
     if (typeof window !== 'undefined') {
       const p = new URLSearchParams(window.location.search);
-      return p.get('sheetNumber') || p.get('sheet') || p.get('id') || sessionStorage.getItem('liveStudentSheet') || '';
+      return p.get('sheetNumber') || p.get('sheet') || p.get('id') || sessionStorage.getItem('liveStudentSheet') || localStorage.getItem('liveStudentSheet') || '';
     }
     return '';
   });
@@ -53,7 +53,13 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
   const [isJoined, setIsJoined] = useState(false);
   const [sessionState, setSessionState] = useState<LiveSessionState | null>(null);
   const [connected, setConnected] = useState(false);
-  const [studentPin, setStudentPin] = useState('');
+  const [studentPin, setStudentPin] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const p = new URLSearchParams(window.location.search);
+      return p.get('pin') || sessionStorage.getItem('liveStudentPin') || localStorage.getItem('liveStudentPin') || '';
+    }
+    return '';
+  });
   const [isPinVerified, setIsPinVerified] = useState(false);
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
   const [textAnswer, setTextAnswer] = useState('');
@@ -63,7 +69,7 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
   const [timeLeft, setTimeLeft] = useState<number>(30);
   const [joinError, setJoinError] = useState<string | null>(null);
 
-  // Auto-join only if username is explicitly present from URL parameters
+  // Auto-join only if credentials are known and valid
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
     const urlUser = p.get('username') || p.get('name');
@@ -128,10 +134,23 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
       setTextAnswer('');
       setSubmittedAnswer(null);
 
-      // Check if student already submitted for this question
-      const studentKey = `${username.trim()}_${sheetNumber.trim()}`;
-      if (sessionState.answersForCurrentQuestion?.[studentKey]) {
-        const prev = sessionState.answersForCurrentQuestion[studentKey].answer;
+      // Check if student already submitted for this question (restore state if reloaded)
+      const u = username.trim();
+      const s = sheetNumber.trim();
+      const studentKey = s ? `${u}_${s}` : u;
+      const qIdx = sessionState.currentQuestionIndex ?? -1;
+
+      const prevSub = sessionState.answersForCurrentQuestion?.[u] ||
+                      sessionState.answersForCurrentQuestion?.[studentKey] ||
+                      (sessionState.allSessionAnswers?.[u]?.[qIdx] !== undefined 
+                        ? { answer: sessionState.allSessionAnswers[u][qIdx] } 
+                        : null) ||
+                      (sessionState.allSessionAnswers?.[studentKey]?.[qIdx] !== undefined 
+                        ? { answer: sessionState.allSessionAnswers[studentKey][qIdx] } 
+                        : null);
+
+      if (prevSub) {
+        const prev = typeof prevSub === 'object' ? prevSub.answer : String(prevSub);
         setSubmittedAnswer(prev);
         setSelectedOption(prev);
         setTextAnswer(prev);
@@ -172,6 +191,12 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
       setSheetNumber(cleanSheet);
       sessionStorage.setItem('liveStudentUsername', cleanUser);
       sessionStorage.setItem('liveStudentSheet', cleanSheet);
+      localStorage.setItem('liveStudentUsername', cleanUser);
+      localStorage.setItem('liveStudentSheet', cleanSheet);
+      if (pinToJoin) {
+        sessionStorage.setItem('liveStudentPin', pinToJoin.trim());
+        localStorage.setItem('liveStudentPin', pinToJoin.trim());
+      }
       localStorage.setItem('loggedInUsername', cleanUser);
       localStorage.setItem('loggedInSheetNumber', cleanSheet);
 
@@ -243,6 +268,31 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
               سجل اسمك للانضمام إلى شاشة العرض والإجابة على الأسئلة من جوالك مباشرة!
             </p>
           </div>
+
+          {/* Accidental Exit Recovery Banner */}
+          {username.trim().length > 0 && (
+            <motion.div 
+              initial={{ opacity: 0, y: -5 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-indigo-950/60 border border-indigo-500/30 rounded-2xl p-4 mb-5 text-right relative overflow-hidden"
+            >
+              <div className="flex items-center gap-2 mb-1.5 text-amber-400 font-bold text-xs">
+                <Sparkles className="w-4 h-4 text-amber-400" />
+                <span>مرحباً بك مجدداً يا {username}! 👋</span>
+              </div>
+              <p className="text-[11px] text-slate-300 leading-relaxed mb-3 font-medium">
+                إذا أغلقت الصفحة بالخطأ، يمكنك النقر على الزر أدناه للعودة واستئناف الحصة فوراً بدون فقدان إجاباتك السابقة.
+              </p>
+              <button
+                type="button"
+                onClick={() => handleJoin(username, sheetNumber, studentPin)}
+                className="w-full py-2.5 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white rounded-xl text-xs font-black shadow-lg shadow-emerald-900/30 transition-all cursor-pointer flex items-center justify-center gap-2"
+              >
+                <ArrowRight className="w-4 h-4" />
+                <span>العودة للحصة المباشرة فوراً 🚀</span>
+              </button>
+            </motion.div>
+          )}
 
           <form onSubmit={(e) => { e.preventDefault(); handleJoin(username, sheetNumber, studentPin); }} className="space-y-4">
             <div>

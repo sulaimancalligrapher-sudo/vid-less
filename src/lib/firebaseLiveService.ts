@@ -234,14 +234,32 @@ export async function joinLiveSession(
       }
     }
 
-    // Upsert student in connectedStudents list
-    const existing = (currentState.connectedStudents || []).filter(
-      (s) => !(s.sheetNumber === sheetNumber && s.username === username)
+    const cleanUser = String(username || '').trim();
+    const cleanSheet = String(sheetNumber || '').trim();
+    const normUser = cleanUser.toLowerCase();
+
+    // Check if student already exists in connectedStudents (by username case-insensitively OR by sheetNumber)
+    const oldStudent = (currentState.connectedStudents || []).find(
+      (s) => String(s.username || '').trim().toLowerCase() === normUser || 
+             (cleanSheet && String(s.sheetNumber || '').trim() === cleanSheet)
     );
+
+    // If student re-entered without sheetNumber this time, preserve previously saved sheetNumber!
+    const effectiveSheetNumber = cleanSheet || (oldStudent ? String(oldStudent.sheetNumber || '').trim() : '');
+
+    // Deduplicate: filter out any student with same username (case-insensitive) OR same sheet number
+    const existing = (currentState.connectedStudents || []).filter((s) => {
+      const sUser = String(s.username || '').trim().toLowerCase();
+      const sSheet = String(s.sheetNumber || '').trim();
+      if (sUser === normUser) return false;
+      if (effectiveSheetNumber && sSheet && effectiveSheetNumber === sSheet) return false;
+      return true;
+    });
+
     const newStudent: LiveConnectedStudent = {
-      username,
-      sheetNumber,
-      joinedAt: Date.now(),
+      username: cleanUser,
+      sheetNumber: effectiveSheetNumber,
+      joinedAt: oldStudent ? oldStudent.joinedAt : Date.now(),
       lastPing: Date.now(),
       pinVerified: true,
     };
@@ -261,11 +279,12 @@ export async function joinLiveSession(
 }
 
 // Student ping
-export async function pingLiveSession(username: string, sheetNumber: string): Promise<void> {
+export async function pingLiveSession(username: string, sheetNumber?: string): Promise<void> {
   try {
     const state = cachedState;
+    const cleanUser = String(username || '').trim().toLowerCase();
     const students = [...(state.connectedStudents || [])];
-    const idx = students.findIndex((s) => s.username === username && s.sheetNumber === sheetNumber);
+    const idx = students.findIndex((s) => String(s.username || '').trim().toLowerCase() === cleanUser);
     if (idx !== -1) {
       students[idx] = { ...students[idx], lastPing: Date.now() };
       await updateDoc(LIVE_DOC_REF, { connectedStudents: students });
@@ -274,12 +293,13 @@ export async function pingLiveSession(username: string, sheetNumber: string): Pr
 }
 
 // Student leaves
-export async function leaveLiveSession(username: string, sheetNumber: string): Promise<void> {
+export async function leaveLiveSession(username: string, sheetNumber?: string): Promise<void> {
   try {
     const state = await getLiveSessionState();
     if (!state) return;
+    const cleanUser = String(username || '').trim().toLowerCase();
     const updatedStudents = (state.connectedStudents || []).filter(
-      (s) => !(s.username === username && s.sheetNumber === sheetNumber)
+      (s) => String(s.username || '').trim().toLowerCase() !== cleanUser
     );
     await updateDoc(LIVE_DOC_REF, {
       connectedStudents: updatedStudents,
@@ -366,7 +386,18 @@ export async function submitLiveAnswer(payload: {
     const allAnswers = { ...(state.allSessionAnswers || {}) };
 
     const cleanUser = String(payload.username || '').trim();
-    const cleanSheet = String(payload.sheetNumber || '').trim();
+    let cleanSheet = String(payload.sheetNumber || '').trim();
+
+    // If student submitted without sheetNumber, recover from connectedStudents
+    if (!cleanSheet) {
+      const match = (state.connectedStudents || []).find(
+        (s) => String(s.username || '').trim().toLowerCase() === cleanUser.toLowerCase()
+      );
+      if (match && match.sheetNumber) {
+        cleanSheet = String(match.sheetNumber).trim();
+      }
+    }
+
     const studentKey = cleanSheet ? `${cleanUser}_${cleanSheet}` : cleanUser;
 
     const submission: LiveStudentAnswerSubmission = {
@@ -377,21 +408,19 @@ export async function submitLiveAnswer(payload: {
       submittedAt: Date.now(),
     };
 
-    // Store in current question submissions under both keys
-    currentAnswers[studentKey] = submission;
     currentAnswers[cleanUser] = submission;
+    currentAnswers[studentKey] = submission;
 
-    // Store in allSessionAnswers under studentKey
     if (!allAnswers[studentKey]) {
       allAnswers[studentKey] = {};
     }
     allAnswers[studentKey][payload.questionIndex] = String(payload.answer ?? '').trim();
 
-    // Also store under cleanUser for direct username lookup
-    if (!allAnswers[cleanUser]) {
-      allAnswers[cleanUser] = {};
+    // If an un-numbered entry existed for this student, merge into studentKey and delete un-numbered key
+    if (cleanSheet && allAnswers[cleanUser] && cleanUser !== studentKey) {
+      allAnswers[studentKey] = { ...allAnswers[cleanUser], ...allAnswers[studentKey] };
+      delete allAnswers[cleanUser];
     }
-    allAnswers[cleanUser][payload.questionIndex] = String(payload.answer ?? '').trim();
 
     await updateDoc(LIVE_DOC_REF, {
       answersForCurrentQuestion: currentAnswers,

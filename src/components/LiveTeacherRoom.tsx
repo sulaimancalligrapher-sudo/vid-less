@@ -255,33 +255,53 @@ export default function LiveTeacherRoom({
     const allAnswers = sessionState.allSessionAnswers || {};
     const students = sessionState.connectedStudents || [];
 
-    // Collect all students: from connectedStudents and any submitted answers
-    const studentMap = new Map<string, { username: string; sheetNumber: string }>();
+    // Collect unique students (one record per student identity)
+    const canonicalMap = new Map<string, { username: string; sheetNumber: string }>();
 
+    // 1. From connectedStudents
     students.forEach(s => {
       const u = String(s.username || '').trim();
       const num = String(s.sheetNumber || '').trim();
       if (u) {
-        studentMap.set(num ? `${u}_${num}` : u, { username: u, sheetNumber: num });
+        const key = u.toLowerCase();
+        const existing = canonicalMap.get(key);
+        canonicalMap.set(key, {
+          username: u,
+          sheetNumber: num || (existing ? existing.sheetNumber : '')
+        });
       }
     });
 
-    Object.keys(allAnswers).forEach(key => {
-      const trimmedKey = String(key || '').trim();
-      if (trimmedKey && !studentMap.has(trimmedKey)) {
-        if (trimmedKey.includes('_')) {
-          const parts = trimmedKey.split('_');
-          studentMap.set(trimmedKey, { username: parts[0] || '', sheetNumber: parts.slice(1).join('_') || '' });
-        } else {
-          studentMap.set(trimmedKey, { username: trimmedKey, sheetNumber: '' });
+    // 2. From allSessionAnswers (in case student disconnected before finish)
+    Object.keys(allAnswers).forEach(rawKey => {
+      const trimmed = String(rawKey || '').trim();
+      if (!trimmed) return;
+      let u = trimmed;
+      let num = '';
+      if (trimmed.includes('_')) {
+        const parts = trimmed.split('_');
+        u = parts[0] || '';
+        num = parts.slice(1).join('_') || '';
+      }
+      if (u) {
+        const key = u.toLowerCase();
+        const existing = canonicalMap.get(key);
+        if (!existing) {
+          canonicalMap.set(key, { username: u, sheetNumber: num });
+        } else if (!existing.sheetNumber && num) {
+          existing.sheetNumber = num;
         }
       }
     });
 
-    studentMap.forEach((studentInfo, studentKey) => {
+    canonicalMap.forEach((studentInfo) => {
       const uname = studentInfo.username;
       const snum = studentInfo.sheetNumber;
-      const studentAnswers = allAnswers[studentKey] || allAnswers[`${uname}_${snum}`] || allAnswers[uname] || {};
+      // Get all answers from allSessionAnswers under any key for this student
+      const studentAnswers = {
+        ...(allAnswers[uname] || {}),
+        ...(allAnswers[`${uname}_${snum}`] || {}),
+      };
       const formattedAnswers: Record<number, string> = {};
       
       let correctCount = 0;
