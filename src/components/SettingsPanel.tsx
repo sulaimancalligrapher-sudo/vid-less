@@ -2922,14 +2922,6 @@ function getLiveAnswersT() {
   }
 }
 
-function normalizeLiveKey(val) {
-  if (val === null || val === undefined) return '';
-  return String(val)
-    .trim()
-    .replace(/[٠-٩]/g, function(d) { return String(d.charCodeAt(0) - 1632); })
-    .toLowerCase();
-}
-
 function saveLiveAnswerT(payload) {
   try {
     if (!payload) return { success: false, message: 'بيانات مفقودة' };
@@ -2937,10 +2929,6 @@ function saveLiveAnswerT(payload) {
     var sheetNum = String(payload.sheetNumber || '').trim();
     var username = String(payload.username || '').trim();
     var lessonTitle = String(payload.lessonTitle || '').trim();
-    
-    var normSheet = normalizeLiveKey(sheetNum);
-    var normUser = normalizeLiveKey(username);
-    var normLesson = normalizeLiveKey(lessonTitle);
     
     var result = '';
     if (payload.isCorrect === null || payload.isCorrect === undefined) {
@@ -2955,39 +2943,27 @@ function saveLiveAnswerT(payload) {
     // البحث عن الصف الحالي لنفس الطالب وموضوع الدرس لتحديثه بدلاً من تكرار الصفوف
     var lastRow = sheet.getLastRow();
     var targetRow = 0;
-    var currentTimestamp = '';
     if (lastRow > 1) {
       var data = sheet.getRange(2, 1, lastRow - 1, 4).getValues();
       for (var r = 0; r < data.length; r++) {
-        var rowA = String(data[r][0] || '').trim();
-        var rowB = normalizeLiveKey(data[r][1]); // رقم المشترك
-        var rowC = normalizeLiveKey(data[r][2]); // اسم المشترك
-        var rowD = normalizeLiveKey(data[r][3]); // موضوع الدرس
+        var rowB = String(data[r][1] || '').trim(); // رقم المشترك
+        var rowC = String(data[r][2] || '').trim(); // اسم المشترك
+        var rowD = String(data[r][3] || '').trim(); // موضوع الدرس
         
-        var matchLesson = (rowD === normLesson);
-        var matchStudent = false;
-        if (normSheet && rowB && normSheet === rowB) {
-          matchStudent = true;
-        } else if (normUser && rowC && normUser === rowC) {
-          matchStudent = true;
-        }
-        
-        if (matchLesson && matchStudent) {
+        var matchStudent = (!sheetNum || rowB === sheetNum) && (!username || rowC === username);
+        if (matchStudent && rowD === lessonTitle) {
           targetRow = r + 2;
-          currentTimestamp = rowA;
           break;
         }
       }
     }
     
     if (targetRow > 1) {
-      if (payload.timestamp) {
-        sheet.getRange(targetRow, 1).setValue(payload.timestamp);
-      }
+      sheet.getRange(targetRow, 1).setValue(payload.timestamp || new Date().toLocaleString('ar-SA'));
       sheet.getRange(targetRow, targetCol).setValue(result);
     } else {
       var newRow = [
-        payload.timestamp || '',
+        payload.timestamp || new Date().toLocaleString('ar-SA'),
         sheetNum,
         username,
         lessonTitle
@@ -3019,40 +2995,22 @@ function batchRecordLiveAnswersT(records) {
       var recUsername = String(rec.username || '').trim();
       var recLesson = String(rec.lessonTitle || '').trim();
       var ansMap = rec.answers || {};
-      var totalScore = rec.totalScore !== undefined ? String(rec.totalScore) : '';
-      
-      var normSheet = normalizeLiveKey(recSheetNum);
-      var normUser = normalizeLiveKey(recUsername);
-      var normLesson = normalizeLiveKey(recLesson);
       
       var foundRow = 0;
-      var existingTimestamp = '';
       for (var r = 0; r < existingRows.length; r++) {
-        var rowA = String(existingRows[r][0] || '').trim();
-        var rowB = normalizeLiveKey(existingRows[r][1]);
-        var rowC = normalizeLiveKey(existingRows[r][2]);
-        var rowD = normalizeLiveKey(existingRows[r][3]);
+        var rowB = String(existingRows[r][1] || '').trim();
+        var rowC = String(existingRows[r][2] || '').trim();
+        var rowD = String(existingRows[r][3] || '').trim();
         
-        var matchLesson = (rowD === normLesson);
-        var matchStudent = false;
-        if (normSheet && rowB && normSheet === rowB) {
-          matchStudent = true;
-        } else if (normUser && rowC && normUser === rowC) {
-          matchStudent = true;
-        }
-        
-        if (matchLesson && matchStudent) {
+        var matchUser = (!recSheetNum || rowB === recSheetNum) && (!recUsername || rowC === recUsername);
+        if (matchUser && rowD === recLesson) {
           foundRow = r + 2;
-          existingTimestamp = rowA;
           break;
         }
       }
       
-      // إذا تم إرسال تاريخ ووقت (عند النقر على إنهاء الدرس) نستخدمه، وإلا نحتفظ بالتاريخ القديم أو نتركه فارغاً
-      var finalTimestamp = rec.timestamp ? String(rec.timestamp) : existingTimestamp;
-      
       var rowValues = [
-        finalTimestamp,
+        rec.timestamp || new Date().toLocaleString('ar-SA'),
         recSheetNum,
         recUsername,
         recLesson
@@ -3060,16 +3018,14 @@ function batchRecordLiveAnswersT(records) {
       for (var a = 0; a < 15; a++) {
         rowValues.push(ansMap[a] !== undefined ? String(ansMap[a]) : '');
       }
-      rowValues.push(totalScore); // العمود رقم 20 (T) للنتيجة النهائية
       
       if (foundRow > 1) {
-        // تحديث نفس الصف القائم دون تكرار أي صفوف
+        // تحديث نفس الصف القائم
         sheet.getRange(foundRow, 1, 1, rowValues.length).setValues([rowValues]);
-        existingRows[foundRow - 2] = [finalTimestamp, recSheetNum, recUsername, recLesson];
       } else {
         // إضافة صف جديد إذا كان أول تسجيل لهذا الطالب في هذا الدرس
         sheet.appendRow(rowValues);
-        existingRows.push([finalTimestamp, recSheetNum, recUsername, recLesson]);
+        existingRows.push([rowValues[0], recSheetNum, recUsername, recLesson]);
       }
     }
     

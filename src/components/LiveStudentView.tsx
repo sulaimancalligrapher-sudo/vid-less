@@ -33,11 +33,11 @@ const OPTION_LETTERS = ['أ', 'ب', 'ج', 'د', 'هـ', 'و'];
 export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) {
   const { t } = useLanguage();
 
-  // Student credentials - isolated per tab using sessionStorage so testing 2+ students works smoothly
+  // Student credentials
   const [username, setUsername] = useState(() => {
     if (typeof window !== 'undefined') {
       const p = new URLSearchParams(window.location.search);
-      return p.get('username') || p.get('name') || sessionStorage.getItem('liveStudentUsername') || '';
+      return p.get('username') || p.get('name') || localStorage.getItem('loggedInUsername') || '';
     }
     return '';
   });
@@ -45,7 +45,7 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
   const [sheetNumber, setSheetNumber] = useState(() => {
     if (typeof window !== 'undefined') {
       const p = new URLSearchParams(window.location.search);
-      return p.get('sheetNumber') || p.get('sheet') || p.get('id') || sessionStorage.getItem('liveStudentSheet') || '';
+      return p.get('sheetNumber') || p.get('sheet') || p.get('id') || localStorage.getItem('loggedInSheetNumber') || '';
     }
     return '';
   });
@@ -63,12 +63,10 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
   const [timeLeft, setTimeLeft] = useState<number>(30);
   const [joinError, setJoinError] = useState<string | null>(null);
 
-  // Auto-join only if username is explicitly present from URL parameters
+  // Auto-join if username is already saved
   useEffect(() => {
-    const p = new URLSearchParams(window.location.search);
-    const urlUser = p.get('username') || p.get('name');
-    if (urlUser && urlUser.trim()) {
-      handleJoin(urlUser.trim(), sheetNumber.trim(), studentPin.trim());
+    if (username.trim()) {
+      handleJoin(username.trim(), sheetNumber.trim(), studentPin.trim());
     }
   }, []);
 
@@ -85,15 +83,6 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
       es.onmessage = (event) => {
         try {
           const state: LiveSessionState = JSON.parse(event.data);
-          if (state.status === 'program_ended') {
-            setIsJoined(false);
-            setIsPinVerified(false);
-            setSubmittedAnswer(null);
-            setJoinError('تم إنهاء البرنامج والحصة التفاعلية بنجاح 🎓 شكراً لتفاعلكم!');
-            sessionStorage.removeItem('liveStudentUsername');
-            sessionStorage.removeItem('liveStudentSheet');
-            return;
-          }
           setSessionState(state);
           setConnected(true);
         } catch (err) {
@@ -107,15 +96,6 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
           pollInterval = setInterval(async () => {
             const s = await getLiveSessionState();
             if (s) {
-              if (s.status === 'program_ended') {
-                setIsJoined(false);
-                setIsPinVerified(false);
-                setSubmittedAnswer(null);
-                setJoinError('تم إنهاء البرنامج والحصة التفاعلية بنجاح 🎓 شكراً لتفاعلكم!');
-                sessionStorage.removeItem('liveStudentUsername');
-                sessionStorage.removeItem('liveStudentSheet');
-                return;
-              }
               setSessionState(s);
               setConnected(true);
             }
@@ -127,15 +107,6 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
       pollInterval = setInterval(async () => {
         const s = await getLiveSessionState();
         if (s) {
-          if (s.status === 'program_ended') {
-            setIsJoined(false);
-            setIsPinVerified(false);
-            setSubmittedAnswer(null);
-            setJoinError('تم إنهاء البرنامج والحصة التفاعلية بنجاح 🎓 شكراً لتفاعلكم!');
-            sessionStorage.removeItem('liveStudentUsername');
-            sessionStorage.removeItem('liveStudentSheet');
-            return;
-          }
           setSessionState(s);
           setConnected(true);
         }
@@ -157,6 +128,7 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
       if (pollInterval) clearInterval(pollInterval);
       clearInterval(pingTimer);
       window.removeEventListener('beforeunload', handleBeforeUnload);
+      leaveLiveSession(username, sheetNumber);
     };
   }, [isJoined, username, sheetNumber]);
 
@@ -212,16 +184,9 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
     }
     setJoinError(null);
     try {
-      const cleanUser = nameToJoin.trim();
-      const cleanSheet = sheetToJoin.trim();
-      setUsername(cleanUser);
-      setSheetNumber(cleanSheet);
-      sessionStorage.setItem('liveStudentUsername', cleanUser);
-      sessionStorage.setItem('liveStudentSheet', cleanSheet);
-      localStorage.setItem('loggedInUsername', cleanUser);
-      localStorage.setItem('loggedInSheetNumber', cleanSheet);
-
-      const res = await joinLiveSession(cleanUser, cleanSheet, pinToJoin ? pinToJoin.trim() : undefined);
+      localStorage.setItem('loggedInUsername', nameToJoin.trim());
+      localStorage.setItem('loggedInSheetNumber', sheetToJoin.trim());
+      const res = await joinLiveSession(nameToJoin.trim(), sheetToJoin.trim(), pinToJoin ? pinToJoin.trim() : undefined);
       if (res.success && res.state) {
         setSessionState(res.state);
         setIsJoined(true);
@@ -419,24 +384,19 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
 
           <div className="flex items-center gap-2">
             <button
-              onClick={async () => {
-                await leaveLiveSession(username, sheetNumber);
-                sessionStorage.removeItem('liveStudentUsername');
-                sessionStorage.removeItem('liveStudentSheet');
+              onClick={() => {
+                leaveLiveSession(username, sheetNumber);
                 setIsJoined(false);
-                setIsPinVerified(false);
-                setSubmittedAnswer(null);
               }}
-              title="تسجيل خروج أو تغيير اسم الطالب"
-              className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 text-xs font-bold"
+              title="تسجيل خروج أو تغيير الاسم"
+              className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 rounded-xl transition-all cursor-pointer"
             >
-              <LogOut className="w-4 h-4 text-rose-400" />
-              <span className="hidden sm:inline">تبديل الطالب</span>
+              <LogOut className="w-4 h-4" />
             </button>
             {onBackToMain && (
               <button
-                onClick={async () => {
-                  await leaveLiveSession(username, sheetNumber);
+                onClick={() => {
+                  leaveLiveSession(username, sheetNumber);
                   onBackToMain();
                 }}
                 className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl transition-all cursor-pointer"

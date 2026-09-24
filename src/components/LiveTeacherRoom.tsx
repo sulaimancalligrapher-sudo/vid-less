@@ -3,9 +3,9 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Play, Pause, Volume2, VolumeX, Maximize2, Minimize2, 
   QrCode, Users, CheckCircle2, AlertCircle, Sparkles, 
-  ChevronRight, ChevronLeft, ArrowLeft, RefreshCw, FileSpreadsheet, 
+  ChevronRight, ArrowLeft, RefreshCw, FileSpreadsheet, 
   Eye, FastForward, Clock, ShieldAlert, Check, X, Award, ExternalLink, Copy,
-  KeyRound, ShieldCheck, Tv
+  KeyRound, ShieldCheck
 } from 'lucide-react';
 import { 
   LiveLessonRow, LiveQuestionItem, LiveSessionState, LiveConnectedStudent, LiveAnswerRecord, evaluateLiveAnswer 
@@ -73,10 +73,13 @@ export default function LiveTeacherRoom({
   
   // UI Panels
   const [showQrModal, setShowQrModal] = useState(false);
+  const [showStudentsDrawer, setShowStudentsDrawer] = useState(false);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
-  const [isFinishingLesson, setIsFinishingLesson] = useState(false);
+  const [isSavingToSheet, setIsSavingToSheet] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedPin, setCopiedPin] = useState(false);
+  const [lastAutoSyncedAnswersCount, setLastAutoSyncedAnswersCount] = useState<number>(0);
+  const [isAutoSyncing, setIsAutoSyncing] = useState(false);
 
   // Triggered questions history in this playback session
   const triggeredQuestionsRef = useRef<Set<number>>(new Set());
@@ -269,26 +272,16 @@ export default function LiveTeacherRoom({
     }
   };
 
-  // Build current batch records helper - attaches timestamp only upon finishing lesson
-  const buildCurrentAnswerRecords = (includeTimestamp: boolean = true): LiveAnswerRecord[] => {
+  // Build current batch records helper
+  const buildCurrentAnswerRecords = (): LiveAnswerRecord[] => {
     if (!sessionState || !selectedLesson) return [];
     const records: LiveAnswerRecord[] = [];
-    const timestamp = includeTimestamp ? new Date().toLocaleString('ar-SA') : '';
+    const timestamp = new Date().toLocaleString('ar-SA');
     const allAnswers = sessionState.allSessionAnswers || {};
     const students = sessionState.connectedStudents || [];
 
-    // Only students who are currently connected to this live session
-    const studentKeys = new Set<string>();
-    students.forEach(s => {
-      if (s.username) {
-        studentKeys.add(`${s.username}_${s.sheetNumber || ''}`);
-      }
-    });
-
-    studentKeys.forEach(studentKey => {
-      const parts = studentKey.split('_');
-      const uname = parts[0] || '';
-      const snum = parts.slice(1).join('_') || '';
+    students.forEach(student => {
+      const studentKey = `${student.username}_${student.sheetNumber}`;
       const studentAnswers = allAnswers[studentKey] || {};
       const formattedAnswers: Record<number, string> = {};
       
@@ -319,8 +312,8 @@ export default function LiveTeacherRoom({
       if (hasAnyAnswer) {
         records.push({
           timestamp,
-          sheetNumber: snum,
-          username: uname,
+          sheetNumber: student.sheetNumber,
+          username: student.username,
           lessonTitle: selectedLesson.title,
           answers: formattedAnswers,
           totalScore: evaluatedCount > 0 ? `${correctCount}/${evaluatedCount}` : ''
@@ -331,41 +324,56 @@ export default function LiveTeacherRoom({
     return records;
   };
 
-  // Finish Lesson: Saves answers with current date & time to Answers-T, finishes session, and returns to awaiting new lesson
-  const handleFinishLesson = async () => {
+  // Background Auto-Save to Answers-T (debounce when new answers are received or question revealed)
+  useEffect(() => {
     if (!sessionState || !selectedLesson) return;
-    setIsFinishingLesson(true);
+    
+    // Count total submitted answers across all students in this session
+    let currentTotalSubmitted = 0;
+    const allAnswers = sessionState.allSessionAnswers || {};
+    Object.values(allAnswers).forEach(studentAns => {
+      currentTotalSubmitted += Object.keys(studentAns).length;
+    });
+
+    // Auto save if there are new answers that haven't been synced to Answers-T yet
+    if (currentTotalSubmitted > 0 && currentTotalSubmitted > lastAutoSyncedAnswersCount && !isAutoSyncing) {
+      const timer = setTimeout(async () => {
+        try {
+          setIsAutoSyncing(true);
+          const records = buildCurrentAnswerRecords();
+          if (records.length > 0) {
+            await recordLiveAnswersBatchT(records);
+            setLastAutoSyncedAnswersCount(currentTotalSubmitted);
+            setShowSaveSuccess(true);
+            setTimeout(() => setShowSaveSuccess(false), 3000);
+          }
+        } catch (err) {
+          console.warn('Background auto-save notice:', err);
+        } finally {
+          setIsAutoSyncing(false);
+        }
+      }, 3500); // 3.5 seconds debounce to avoid multiple quick hits
+
+      return () => clearTimeout(timer);
+    }
+  }, [sessionState?.allSessionAnswers, sessionState?.status, selectedLesson]);
+
+  // Export / Manual Sync Results to Google Sheets (Answers-T)
+  const handleSaveToAnswersSheet = async () => {
+    if (!sessionState || !selectedLesson) return;
+    setIsSavingToSheet(true);
 
     try {
-      // 1. Record student answers to Google Sheets Answers-T with final timestamp
-      const records = buildCurrentAnswerRecords(true);
+      const records = buildCurrentAnswerRecords();
       if (records.length > 0) {
         await recordLiveAnswersBatchT(records);
+        setShowSaveSuccess(true);
+        setTimeout(() => setShowSaveSuccess(false), 4000);
       }
-      // Clear localStorage emergency backup since successfully saved to Sheets
-      try {
-        localStorage.removeItem('pending_live_answers_backup');
-      } catch {}
-
-      // 2. Mark session finished in server
-      await finishLiveSession();
-
-      // 3. Stop video playback
-      if (videoRef.current) {
-        videoRef.current.pause();
-      }
-      setIsPlaying(false);
-
-      // 4. Show success toast
-      setShowSaveSuccess(true);
-      setTimeout(() => setShowSaveSuccess(false), 4000);
-
-      // 5. Exit video and return to awaiting next video or lesson selection
-      setSelectedLesson(null);
     } catch (err) {
-      console.error('Error finishing lesson and saving to Answers-T:', err);
+      console.error('Error saving answers batch to Answers-T:', err);
     } finally {
-      setIsFinishingLesson(false);
+      setIsSavingToSheet(false);
     }
   };
 
@@ -459,6 +467,16 @@ export default function LiveTeacherRoom({
             </div>
           )}
 
+          {/* Connected Students Button */}
+          <button
+            onClick={() => setShowStudentsDrawer(!showStudentsDrawer)}
+            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-200 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer shadow-sm"
+          >
+            <Users className="w-4 h-4 text-emerald-400" />
+            <span>{connectedStudents.length} طلاب متصلين</span>
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          </button>
+
           {/* QR Code Button for Classroom */}
           <button
             onClick={() => setShowQrModal(true)}
@@ -468,20 +486,20 @@ export default function LiveTeacherRoom({
             <span>رمز الدخول والحضور (PIN)</span>
           </button>
 
-          {/* Finish Lesson Button */}
+          {/* Save to Answers-T Button & Auto-sync Indicator */}
           <button
-            onClick={handleFinishLesson}
-            disabled={isFinishingLesson}
-            title="إنهاء الدرس الحالي وتسجيل تاريخ ونتائج إجابات الطلاب في ورقة Answers-T والعودة لاختيار درس جديد"
-            className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white rounded-xl text-xs font-black flex items-center gap-2 shadow-lg shadow-emerald-600/20 transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+            onClick={handleSaveToAnswersSheet}
+            disabled={isSavingToSheet || isAutoSyncing}
+            title="حفظ ومزامنة النتائج في ورقة Answers-T"
+            className="px-3 py-1.5 bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/30 text-amber-300 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
           >
-            {isFinishingLesson ? (
-              <RefreshCw className="w-4 h-4 animate-spin text-white" />
+            {isSavingToSheet || isAutoSyncing ? (
+              <RefreshCw className="w-4 h-4 animate-spin text-amber-400" />
             ) : (
-              <CheckCircle2 className="w-4 h-4 text-emerald-200" />
+              <FileSpreadsheet className="w-4 h-4 text-amber-400" />
             )}
-            <span>
-              {isFinishingLesson ? 'جارٍ الحفظ والإنهاء...' : 'إنهاء الدرس'}
+            <span className="hidden sm:inline">
+              {isAutoSyncing ? 'مزامنة تلقائية...' : 'حفظ النتائج للشيت'}
             </span>
           </button>
 
@@ -497,7 +515,33 @@ export default function LiveTeacherRoom({
 
       {/* Main Screen Video Theater Area */}
       <main className="flex-1 relative flex items-center justify-center bg-black overflow-hidden">
-        {selectedLesson && playableUrl ? (
+        {/* Projector Screen PIN Badge (Top Corner Floating Banner) */}
+        {sessionState?.sessionPin && (
+          <div 
+            onClick={handleCopyPin}
+            title="رمز تأكيد الحضور المعروض للطلاب في القاعة - انقر للنسخ"
+            className="absolute top-4 left-4 z-15 flex items-center gap-2.5 px-4 py-2 bg-slate-950/85 hover:bg-slate-900/95 border border-amber-500/40 hover:border-amber-400 rounded-2xl shadow-xl backdrop-blur-md cursor-pointer transition-all active:scale-95 group"
+          >
+            <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold">
+              <KeyRound className="w-4 h-4" />
+            </div>
+            <div className="text-right">
+              <div className="text-[10px] text-amber-400/90 font-bold uppercase tracking-wider">
+                رمز تأكيد الحضور (PIN)
+              </div>
+              <div className="font-mono text-xl font-black text-amber-300 tracking-widest leading-none mt-0.5">
+                {sessionState.sessionPin}
+              </div>
+            </div>
+            {copiedPin ? (
+              <Check className="w-4 h-4 text-emerald-400 ml-1" />
+            ) : (
+              <Copy className="w-3.5 h-3.5 text-slate-500 group-hover:text-slate-300 ml-1 transition-colors" />
+            )}
+          </div>
+        )}
+
+        {playableUrl ? (
           <video
             ref={videoRef}
             src={playableUrl}
@@ -511,61 +555,11 @@ export default function LiveTeacherRoom({
             className="w-full h-full object-contain cursor-pointer max-h-[calc(100vh-140px)]"
             playsInline
           />
-        ) : selectedLesson ? (
+        ) : (
           <div className="text-center p-8 space-y-3">
             <AlertCircle className="w-12 h-12 text-amber-500 mx-auto" />
-            <h3 className="text-lg font-bold text-slate-300">لم يتم تحديد رابط فيديو لهذا الدرس ({selectedLesson.title})</h3>
+            <h3 className="text-lg font-bold text-slate-300">لم يتم تحديد رابط فيديو لهذا الدرس</h3>
             <p className="text-xs text-slate-500">يرجى إضافة رابط الفيديو في ورقة Questions-T أو عبر لوحة الإدارة</p>
-          </div>
-        ) : (
-          /* Awaiting selection of new lesson/video */
-          <div className="max-w-2xl w-full mx-auto p-6 text-center space-y-6 animate-in fade-in zoom-in-95 duration-300">
-            <div className="w-20 h-20 mx-auto rounded-3xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center shadow-xl">
-              <Tv className="w-10 h-10" />
-            </div>
-            <div>
-              <h2 className="text-2xl font-black text-slate-100">
-                في انتظار اختيار فيديو أو درس جديد 🎯
-              </h2>
-              <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto leading-relaxed">
-                تم حفظ إجابات الدرس السابق وتسجيل تاريخ الحصة بنجاح في ورقة Answers-T. يمكنك الآن اختيار درس تفاعلي جديد من القائمة للبدء في عرضه:
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[48vh] overflow-y-auto p-1 custom-scrollbar">
-              {allLessons.map((lesson, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => setSelectedLesson(lesson)}
-                  className="p-4 bg-slate-900/90 hover:bg-slate-850 border border-slate-800 hover:border-amber-500/50 rounded-2xl text-right transition-all flex items-center justify-between group cursor-pointer shadow-md active:scale-98"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-amber-500/10 group-hover:bg-amber-500 text-amber-400 group-hover:text-slate-950 flex items-center justify-center font-bold text-xs transition-colors">
-                      <Play className="w-4 h-4 fill-current" />
-                    </div>
-                    <div>
-                      <div className="text-sm font-bold text-slate-100 group-hover:text-amber-400 transition-colors">
-                        {lesson.title}
-                      </div>
-                      <div className="text-[11px] text-slate-500 font-mono mt-0.5">
-                        {lesson.questions.length} سؤال تفاعلي
-                      </div>
-                    </div>
-                  </div>
-                  <ChevronLeft className="w-4 h-4 text-slate-600 group-hover:text-amber-400 transition-colors" />
-                </button>
-              ))}
-            </div>
-
-            {onBack && (
-              <button
-                onClick={onBack}
-                className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white rounded-xl text-xs font-bold transition-all inline-flex items-center gap-2 cursor-pointer border border-slate-800"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                <span>العودة للوحة الإدارة</span>
-              </button>
-            )}
           </div>
         )}
 
@@ -594,10 +588,37 @@ export default function LiveTeacherRoom({
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <span className="px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-bold font-mono">
-                    السؤال {(sessionState.currentQuestionIndex ?? 0) + 1} من {selectedLesson?.questions.length || 0}
-                  </span>
+                {/* Response Meter Badge */}
+                <div className="flex items-center gap-4 bg-slate-900 border border-slate-800 rounded-2xl px-5 py-3 shadow-inner">
+                  <div className="text-right">
+                    <div className="text-[11px] font-bold text-slate-400">إجابات الطلاب</div>
+                    <div className="text-base font-black text-emerald-400 font-mono">
+                      {answeredCount} / {totalStudentsCount} طالب
+                    </div>
+                  </div>
+                  <div className="w-14 h-14 relative flex items-center justify-center">
+                    <svg className="w-14 h-14 -rotate-90" viewBox="0 0 36 36">
+                      <path
+                        className="text-slate-800"
+                        strokeWidth="3.5"
+                        stroke="currentColor"
+                        fill="none"
+                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                      />
+                      <path
+                        className="text-emerald-500 transition-all duration-500 ease-out"
+                        strokeDasharray={`${answerPercentage}, 100`}
+                        strokeWidth="3.5"
+                        strokeLinecap="round"
+                        stroke="currentColor"
+                        fill="none"
+                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                      />
+                    </svg>
+                    <span className="absolute text-xs font-black font-mono text-slate-200">
+                      {answerPercentage}%
+                    </span>
+                  </div>
                 </div>
               </div>
 
@@ -1001,6 +1022,119 @@ export default function LiveTeacherRoom({
         )}
       </AnimatePresence>
 
+      {/* ========================================================================= */}
+      {/* CONNECTED STUDENTS DRAWER */}
+      {/* ========================================================================= */}
+      <AnimatePresence>
+        {showStudentsDrawer && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex justify-end">
+            <motion.div
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="w-full max-w-sm bg-slate-900 border-r border-slate-800 h-full p-5 flex flex-col justify-between shadow-2xl"
+            >
+              <div>
+                <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
+                  <div className="flex items-center gap-2">
+                    <Users className="w-5 h-5 text-emerald-400" />
+                    <h3 className="text-base font-black text-slate-100">
+                      الطلاب المتواجدون ({connectedStudents.length})
+                    </h3>
+                  </div>
+                  <button
+                    onClick={() => setShowStudentsDrawer(false)}
+                    className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-lg transition-all cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {connectedStudents.length === 0 ? (
+                  <div className="text-center py-12 text-slate-500 space-y-2">
+                    <Users className="w-10 h-10 mx-auto opacity-30" />
+                    <p className="text-xs font-bold">لا يوجد طلاب متصلين حالياً</p>
+                    <button
+                      onClick={() => { setShowStudentsDrawer(false); setShowQrModal(true); }}
+                      className="text-xs text-indigo-400 hover:underline font-bold"
+                    >
+                      اعرض رمز QR لدخول الطلاب
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-[70vh] overflow-y-auto pr-1">
+                    {connectedStudents.map((s, idx) => {
+                      const studentKey = `${s.username}_${s.sheetNumber}`;
+                      const hasAnsweredCurrent = !!answersMap[studentKey];
+
+                      return (
+                        <div
+                          key={idx}
+                          className="p-3 bg-slate-950 border border-slate-800/80 rounded-2xl flex items-center justify-between text-xs"
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-7 h-7 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold text-xs">
+                              {idx + 1}
+                            </div>
+                            <div>
+                              <div className="font-bold text-slate-200 flex items-center gap-1.5">
+                                <span>{s.username}</span>
+                                {s.pinVerified && (
+                                  <span 
+                                    title="حضور مؤكد برمز PIN"
+                                    className="px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[9px] font-bold flex items-center gap-0.5"
+                                  >
+                                    <ShieldCheck className="w-2.5 h-2.5" />
+                                    <span>حاضر ومؤكد</span>
+                                  </span>
+                                )}
+                              </div>
+                              {s.sheetNumber && (
+                                <div className="text-[10px] text-slate-500 font-mono">رقم: {s.sheetNumber}</div>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5">
+                            {isQuestionActive && (
+                              <span className={`px-2.5 py-1 rounded-xl text-[10px] font-black ${
+                                hasAnsweredCurrent 
+                                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
+                                  : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                              }`}>
+                                {hasAnsweredCurrent ? 'أجاب ✓' : 'يفكر...'}
+                              </span>
+                            )}
+                            <button
+                              onClick={async () => {
+                                await leaveLiveSession(s.username, s.sheetNumber);
+                              }}
+                              title="إزالة الطالب من القائمة"
+                              className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-all cursor-pointer"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <button
+                onClick={() => { setShowStudentsDrawer(false); setShowQrModal(true); }}
+                className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <QrCode className="w-4 h-4 text-indigo-400" />
+                <span>عرض رمز QR للطلاب</span>
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Save Success Alert Notification */}
       <AnimatePresence>
         {showSaveSuccess && (
@@ -1011,7 +1145,7 @@ export default function LiveTeacherRoom({
             className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-emerald-600 text-white font-bold px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-2 z-50 text-xs"
           >
             <CheckCircle2 className="w-5 h-5" />
-            <span>تم إنهاء الدرس وحفظ كافة النتائج والتاريخ في ورقة Answers-T بنجاح! 💾</span>
+            <span>تم حفظ نتائج الجلسة بالكامل في ورقة Answers-T بنجاح! 💾</span>
           </motion.div>
         )}
       </AnimatePresence>
