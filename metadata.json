@@ -1,0 +1,10 @@
+{
+  "name": "عرض الدروس",
+  "description": "تطبيق متكامل لتعليم القراءة التفاعلية للأطفال ومراقبة أداء الطلاب وعرض الدروس التفاعلية الصفية المباشرة متصل بـ Google Sheets.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
