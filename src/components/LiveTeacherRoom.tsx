@@ -14,7 +14,8 @@ import {
   initLiveSession, triggerLiveQuestion, revealLiveAnswer, resumeLiveVideo, 
   finishLiveSession, resetLiveSession, getLiveSessionState, recordLiveAnswersBatchT,
   updateLivePin, leaveLiveSession,
-  formatSecondsToTime, parseTimeToSeconds, formatDriveImageUrl 
+  formatSecondsToTime, parseTimeToSeconds, formatDriveImageUrl,
+  subscribeToLiveSession
 } from '../api';
 
 interface LiveTeacherRoomProps {
@@ -105,37 +106,14 @@ export default function LiveTeacherRoom({
     }
   }, [selectedLesson]);
 
-  // Connect to SSE stream
+  // Connect to Live Session via Firebase Real-time WebSockets
   useEffect(() => {
-    let es: EventSource | null = null;
-    let pollTimer: any = null;
-
-    try {
-      es = new EventSource('/api/live/stream');
-      es.onmessage = (e) => {
-        try {
-          const state: LiveSessionState = JSON.parse(e.data);
-          setSessionState(state);
-        } catch {}
-      };
-      es.onerror = () => {
-        if (!pollTimer) {
-          pollTimer = setInterval(async () => {
-            const s = await getLiveSessionState();
-            if (s) setSessionState(s);
-          }, 1500);
-        }
-      };
-    } catch {
-      pollTimer = setInterval(async () => {
-        const s = await getLiveSessionState();
-        if (s) setSessionState(s);
-      }, 1500);
-    }
+    const unsubscribe = subscribeToLiveSession((state) => {
+      if (state) setSessionState(state);
+    });
 
     return () => {
-      if (es) es.close();
-      if (pollTimer) clearInterval(pollTimer);
+      unsubscribe();
     };
   }, []);
 

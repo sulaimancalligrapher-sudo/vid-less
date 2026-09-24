@@ -14,7 +14,8 @@ import {
   fetchLiveQuestionsT, saveLiveLessonT, fetchLiveAnswersT, 
   getLiveSessionState, updateLivePin, leaveLiveSession, resetLiveSession,
   startLiveProgram, endLiveProgram, getLiveBackup, restoreLiveBackup, recordLiveAnswersBatchT,
-  formatSecondsToTime, parseTimeToSeconds, formatDriveImageUrl 
+  formatSecondsToTime, parseTimeToSeconds, formatDriveImageUrl,
+  subscribeToLiveSession
 } from '../api';
 
 interface LiveClassManagerProps {
@@ -86,40 +87,14 @@ export default function LiveClassManager({
 
   const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(studentJoinUrl)}`;
 
-  // Listen to Live Session updates (SSE + fallback polling)
+  // Listen to Live Session updates via Firebase Real-time WebSockets
   useEffect(() => {
-    let es: EventSource | null = null;
-    let pollTimer: any = null;
-
-    const fetchState = async () => {
-      try {
-        const s = await getLiveSessionState();
-        if (s) setSessionState(s);
-      } catch {}
-    };
-
-    fetchState();
-
-    try {
-      es = new EventSource('/api/live/stream');
-      es.onmessage = (e) => {
-        try {
-          const s = JSON.parse(e.data);
-          setSessionState(s);
-        } catch {}
-      };
-      es.onerror = () => {
-        if (!pollTimer) {
-          pollTimer = setInterval(fetchState, 2000);
-        }
-      };
-    } catch {
-      pollTimer = setInterval(fetchState, 2000);
-    }
+    const unsubscribe = subscribeToLiveSession((s) => {
+      if (s) setSessionState(s);
+    });
 
     return () => {
-      if (es) es.close();
-      if (pollTimer) clearInterval(pollTimer);
+      unsubscribe();
     };
   }, []);
 
@@ -302,8 +277,10 @@ export default function LiveClassManager({
         }
       }
       setTimeout(() => setProgramToast(null), 4000);
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to toggle program:', e);
+      setProgramToast('تعذر تغيير حالة البرنامج: ' + (e?.message || 'خطأ في الشبكة'));
+      setTimeout(() => setProgramToast(null), 5000);
     } finally {
       setIsTogglingProgram(false);
     }

@@ -20,7 +20,7 @@ export function getWebAppUrl(): string {
   }
 
   // 3. Default fallback hardcoded URL
-  const fallbackUrl: string = 'https://script.google.com/macros/s/AKfycbw9_hBJAwQV3rHfdpUyXZm1qhODuljKaogF_UPcHEZ0XT4P0dlKyhPrMkco9gWsrSrLrw/exec';
+  const fallbackUrl: string = 'https://script.google.com/macros/s/AKfycbxFKm-Is3TLJcFFthHdEFgU60qhrvYwT3jUqHd_oBUhlcfaWZiOuETelDCe40zEHk4OsQ/exec';
   if (fallbackUrl && fallbackUrl.trim().length > 0) {
     return fallbackUrl.trim();
   }
@@ -1881,173 +1881,30 @@ export async function saveLiveAnswerT(payload: {
 }
 
 // ----------------------------------------------------
-// Express Local Live Hub API (Ultra-fast 0.1s sync)
+// Real-Time Live Hub (Powered by Firebase Firestore)
+// Works seamlessly on Vercel and all static/serverless platforms
 // ----------------------------------------------------
 
-export async function getLiveSessionState(): Promise<LiveSessionState | null> {
-  try {
-    const res = await fetch('/api/live/state');
-    if (res.ok) {
-      return await res.json();
-    }
-  } catch (err) {
-    console.warn('Error fetching live session state:', err);
-  }
-  return null;
-}
+export {
+  subscribeToLiveSession,
+  getLiveSessionState,
+  initLiveSession,
+  joinLiveSession,
+  updateLivePin,
+  pingLiveSession,
+  leaveLiveSession,
+  triggerLiveQuestion,
+  submitLiveAnswer,
+  revealLiveAnswer,
+  resumeLiveVideo,
+  finishLiveSession,
+  resetLiveSession,
+  startLiveProgram,
+  endLiveProgram,
+  getLiveBackup,
+  restoreLiveBackup,
+} from './lib/firebaseLiveService';
 
-export async function initLiveSession(payload: {
-  lessonTitle: string;
-  videoUrl: string;
-  timeLimit?: number;
-  showResult?: 'نعم' | 'لا';
-}): Promise<{ success: boolean; state?: LiveSessionState }> {
-  const res = await fetch('/api/live/init', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-  return res.json();
-}
-
-export async function joinLiveSession(username: string, sheetNumber: string, pin?: string): Promise<{ success: boolean; state?: LiveSessionState; pinVerified?: boolean; error?: string }> {
-  const res = await fetch('/api/live/join', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, sheetNumber, pin })
-  });
-  return res.json();
-}
-
-export async function updateLivePin(pin?: string): Promise<{ success: boolean; pin?: string; state?: LiveSessionState }> {
-  const res = await fetch('/api/live/update-pin', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ pin })
-  });
-  return res.json();
-}
-
-export async function pingLiveSession(username: string, sheetNumber: string): Promise<void> {
-  try {
-    await fetch('/api/live/ping', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, sheetNumber })
-    });
-  } catch {}
-}
-
-export async function leaveLiveSession(username: string, sheetNumber: string): Promise<void> {
-  try {
-    await fetch('/api/live/leave', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, sheetNumber }),
-      keepalive: true
-    });
-  } catch {}
-}
-
-export async function triggerLiveQuestion(payload: {
-  questionIndex: number;
-  question: LiveQuestionItem;
-  timeLimit?: number;
-  showResult?: 'نعم' | 'لا';
-}): Promise<{ success: boolean; state?: LiveSessionState }> {
-  const res = await fetch('/api/live/trigger-question', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-  return res.json();
-}
-
-export async function submitLiveAnswer(payload: {
-  username: string;
-  sheetNumber: string;
-  answer: string;
-  questionIndex: number;
-  isCorrect?: boolean | null;
-}): Promise<{ success: boolean; state?: LiveSessionState }> {
-  const res = await fetch('/api/live/submit-answer', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-  return res.json();
-}
-
-export async function revealLiveAnswer(): Promise<{ success: boolean; state?: LiveSessionState }> {
-  const res = await fetch('/api/live/reveal-answer', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({})
-  });
-  return res.json();
-}
-
-export async function resumeLiveVideo(): Promise<{ success: boolean; state?: LiveSessionState }> {
-  const res = await fetch('/api/live/resume', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({})
-  });
-  return res.json();
-}
-
-export async function finishLiveSession(): Promise<{ success: boolean; state?: LiveSessionState }> {
-  const res = await fetch('/api/live/finish', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({})
-  });
-  return res.json();
-}
-
-export async function resetLiveSession(): Promise<{ success: boolean; state?: LiveSessionState }> {
-  const res = await fetch('/api/live/reset', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({})
-  });
-  return res.json();
-}
-
-export async function startLiveProgram(): Promise<{ success: boolean; pin?: string; state?: LiveSessionState }> {
-  const res = await fetch('/api/live/start-program', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({})
-  });
-  return res.json();
-}
-
-export async function endLiveProgram(): Promise<{ success: boolean; state?: LiveSessionState }> {
-  const res = await fetch('/api/live/end-program', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({})
-  });
-  return res.json();
-}
-
-export async function getLiveBackup(): Promise<{ success: boolean; backup?: any }> {
-  try {
-    const res = await fetch('/api/live/backup');
-    if (res.ok) return await res.json();
-  } catch {}
-  return { success: false };
-}
-
-export async function restoreLiveBackup(): Promise<{ success: boolean; state?: LiveSessionState }> {
-  const res = await fetch('/api/live/restore-backup', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({})
-  });
-  return res.json();
-}
 
 
 

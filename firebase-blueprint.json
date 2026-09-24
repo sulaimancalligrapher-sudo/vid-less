@@ -1,0 +1,24 @@
+{
+  "entities": {
+    "LiveSession": {
+      "collection": "live_sessions",
+      "fields": {
+        "sessionId": { "type": "string" },
+        "sessionPin": { "type": "string" },
+        "isProgramActive": { "type": "boolean" },
+        "lessonTitle": { "type": "string" },
+        "videoUrl": { "type": "string" },
+        "status": { "type": "string" },
+        "currentQuestionIndex": { "type": "number", "nullable": true },
+        "currentQuestion": { "type": "object", "nullable": true },
+        "questionTriggeredAt": { "type": "number", "nullable": true },
+        "timeLimit": { "type": "number" },
+        "showResult": { "type": "string" },
+        "connectedStudents": { "type": "array" },
+        "answersForCurrentQuestion": { "type": "object" },
+        "allSessionAnswers": { "type": "object" },
+        "updatedAt": { "type": "number" }
+      }
+    }
+  }
+}

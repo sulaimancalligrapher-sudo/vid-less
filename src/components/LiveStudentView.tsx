@@ -11,7 +11,7 @@ import {
 } from '../types';
 import { 
   getLiveSessionState, joinLiveSession, pingLiveSession, leaveLiveSession, submitLiveAnswer, 
-  formatDriveImageUrl 
+  formatDriveImageUrl, subscribeToLiveSession 
 } from '../api';
 import { useLanguage } from '../translations';
 
@@ -72,80 +72,35 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
     }
   }, []);
 
-  // SSE or Polling listener for live updates
+  // Firebase real-time subscription for live updates
   useEffect(() => {
     if (!isJoined) return;
 
-    let es: EventSource | null = null;
-    let pollInterval: any = null;
-
-    try {
-      es = new EventSource('/api/live/stream');
-      es.onopen = () => setConnected(true);
-      es.onmessage = (event) => {
-        try {
-          const state: LiveSessionState = JSON.parse(event.data);
-          if (state.status === 'program_ended') {
-            setIsJoined(false);
-            setIsPinVerified(false);
-            setSubmittedAnswer(null);
-            setJoinError('تم إنهاء البرنامج والحصة التفاعلية بنجاح 🎓 شكراً لتفاعلكم!');
-            sessionStorage.removeItem('liveStudentUsername');
-            sessionStorage.removeItem('liveStudentSheet');
-            return;
-          }
-          setSessionState(state);
-          setConnected(true);
-        } catch (err) {
-          console.warn('SSE parse error:', err);
+    setConnected(true);
+    const unsubscribe = subscribeToLiveSession(
+      (state) => {
+        setConnected(true);
+        if (state.status === 'program_ended') {
+          setIsJoined(false);
+          setIsPinVerified(false);
+          setSubmittedAnswer(null);
+          setJoinError('تم إنهاء البرنامج والحصة التفاعلية بنجاح 🎓 شكراً لتفاعلكم!');
+          sessionStorage.removeItem('liveStudentUsername');
+          sessionStorage.removeItem('liveStudentSheet');
+          return;
         }
-      };
-      es.onerror = () => {
+        setSessionState(state);
+      },
+      (err) => {
+        console.warn('Live subscription error:', err);
         setConnected(false);
-        // Fallback to REST polling if SSE disconnects
-        if (!pollInterval) {
-          pollInterval = setInterval(async () => {
-            const s = await getLiveSessionState();
-            if (s) {
-              if (s.status === 'program_ended') {
-                setIsJoined(false);
-                setIsPinVerified(false);
-                setSubmittedAnswer(null);
-                setJoinError('تم إنهاء البرنامج والحصة التفاعلية بنجاح 🎓 شكراً لتفاعلكم!');
-                sessionStorage.removeItem('liveStudentUsername');
-                sessionStorage.removeItem('liveStudentSheet');
-                return;
-              }
-              setSessionState(s);
-              setConnected(true);
-            }
-          }, 1500);
-        }
-      };
-    } catch {
-      // Direct polling fallback
-      pollInterval = setInterval(async () => {
-        const s = await getLiveSessionState();
-        if (s) {
-          if (s.status === 'program_ended') {
-            setIsJoined(false);
-            setIsPinVerified(false);
-            setSubmittedAnswer(null);
-            setJoinError('تم إنهاء البرنامج والحصة التفاعلية بنجاح 🎓 شكراً لتفاعلكم!');
-            sessionStorage.removeItem('liveStudentUsername');
-            sessionStorage.removeItem('liveStudentSheet');
-            return;
-          }
-          setSessionState(s);
-          setConnected(true);
-        }
-      }, 1500);
-    }
+      }
+    );
 
-    // Ping server every 5s to keep student active in teacher's list
+    // Ping session periodically to keep student active in teacher's list
     const pingTimer = setInterval(() => {
       pingLiveSession(username, sheetNumber);
-    }, 5000);
+    }, 10000);
 
     const handleBeforeUnload = () => {
       leaveLiveSession(username, sheetNumber);
@@ -153,8 +108,7 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
     window.addEventListener('beforeunload', handleBeforeUnload);
 
     return () => {
-      if (es) es.close();
-      if (pollInterval) clearInterval(pollInterval);
+      unsubscribe();
       clearInterval(pingTimer);
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
