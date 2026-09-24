@@ -2285,7 +2285,7 @@ export default function LessonDetail({
                         ) : (
                           <>
                             <button
-                              onClick={() => startCamera()}
+                              onClick={() => { void startCamera(); }}
                               className="px-5 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold rounded-xl transition-all flex items-center gap-1.5 text-xs active:scale-95 cursor-pointer shadow-md shadow-indigo-600/15"
                             >
                               <span>{t('capture_with_camera')}</span>

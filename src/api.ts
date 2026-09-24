@@ -4,15 +4,6 @@ import {
   TelegramConfig, TelegramTemplateItem, TelegramUserBinding, TelegramBroadcastMessage
 } from './types';
 
-// Helper to get Main Spreadsheet ID from localStorage or fallback
-export function getMainSpreadsheetId(): string {
-  const localId = localStorage.getItem('mainSpreadsheetId');
-  if (localId && localId.trim().length > 0) {
-    return localId.trim();
-  }
-  return '155gPdRszuGrjRBHx6jZ8vYovsougqH35HGIw4BhkxBs';
-}
-
 // Helper to get Web App URL from localStorage or environment variables
 export function getWebAppUrl(): string {
   // 1. Check localStorage first (allows individual overrides / testing)
@@ -27,7 +18,7 @@ export function getWebAppUrl(): string {
     return envUrl.trim();
   }
 
-  // 3. Default fallback URL (User's active project)
+  // 3. Default fallback hardcoded URL
   const fallbackUrl: string = 'https://script.google.com/macros/s/AKfycbxRHzgk-mpXY2kNbWb35vqAP1I-ubt3FhV3yAugOf8uqreO2wnQ5Hu5rw84yr0QJ7ZUCQ/exec';
   if (fallbackUrl && fallbackUrl.trim().length > 0) {
     return fallbackUrl.trim();
@@ -48,12 +39,6 @@ async function fetchGas(params: Record<string, string>, method: 'GET' | 'POST' =
     throw new Error('لم يتم تكوين رابط API الخاص بـ Google Sheet بعد.');
   }
 
-  // Ensure spreadsheetId is passed in GET parameters if not explicitly provided
-  const mainSpreadsheetId = getMainSpreadsheetId();
-  if (!params.spreadsheetId && mainSpreadsheetId) {
-    params.spreadsheetId = mainSpreadsheetId;
-  }
-
   // Construct query string for GET parameters or action specification
   const urlParams = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
@@ -68,10 +53,6 @@ async function fetchGas(params: Record<string, string>, method: 'GET' | 'POST' =
   };
 
   if (method === 'POST' && postBody) {
-    // If postBody is an object, attach spreadsheetId if not already present
-    if (typeof postBody === 'object' && !postBody.spreadsheetId && mainSpreadsheetId) {
-      postBody.spreadsheetId = mainSpreadsheetId;
-    }
     // To avoid CORS preflight (OPTIONS) requests which GAS does not support,
     // we send the content as text/plain. The backend will parse it as JSON.
     options.body = JSON.stringify(postBody);

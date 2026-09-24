@@ -31,9 +31,9 @@ export const DEFAULT_TRANSLATIONS: TranslationItem[] = [
     key: 'app_title_student',
     category: 'app',
     description: 'عنوان التطبيق للطلاب',
-    ar: 'عرض الدروس للطلاب',
+    ar: 'ملتقط الوسائط للطلاب',
     th: 'สื่อการเรียนรู้สำหรับนักเรียน',
-    en: 'Student Lesson Viewer',
+    en: 'Student Media Capturer',
   },
   {
     key: 'app_title_admin',
@@ -103,9 +103,9 @@ export const DEFAULT_TRANSLATIONS: TranslationItem[] = [
     key: 'footer_copyright',
     category: 'app',
     description: 'حقوق النشر',
-    ar: '© 2026 عرض الدروس',
-    th: '© 2026 ระบบแสดงบทเรียน',
-    en: '© 2026 Lesson Viewer',
+    ar: '© 2026 ملتقط الوسائط وقارئ الدروس',
+    th: '© 2026 โปรแกรมอ่านบทเรียนและบันทึกสื่อ',
+    en: '© 2026 Media Capturer & Lesson Reader',
   },
 
   // --- STUDENT LOGIN ---

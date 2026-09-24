@@ -8,15 +8,13 @@ import LessonDetail from './components/LessonDetail';
 import SettingsPanel from './components/SettingsPanel';
 import AdminPasswordModal from './components/AdminPasswordModal';
 import AdminPanel from './components/AdminPanel';
-import TeacherLiveScreen from './components/TeacherLiveScreen';
-import StudentLiveScreen from './components/StudentLiveScreen';
 import LanguageSelector from './components/LanguageSelector';
 import { useLanguage } from './translations';
 import { 
   Settings, RefreshCw, BookOpen, Sparkles, Database, Sun, Moon, 
   Lock, ShieldCheck, Copy, CheckCircle2, ArrowLeft, ExternalLink, 
   KeyRound, Layers, ShieldAlert, FileSpreadsheet, UserCheck,
-  Facebook, Instagram, Youtube, Tv, Radio
+  Facebook, Instagram, Youtube
 } from 'lucide-react';
 
 const LineIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
@@ -31,15 +29,11 @@ export default function App() {
   const [isConfigured, setIsConfigured] = useState(isApiConfigured());
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
-  // Page Routing Mode: 'student' | 'admin' | 'live-teacher' | 'live-student'
-  const [pageMode, setPageMode] = useState<'student' | 'admin' | 'live-teacher' | 'live-student'>(() => {
+  // Page Routing Mode: 'student' | 'admin'
+  const [pageMode, setPageMode] = useState<'student' | 'admin'>(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
-      const p = params.get('page') || params.get('mode');
-      if (p === 'admin') return 'admin';
-      if (p === 'live-teacher' || p === 'teacher' || p === 'live') return 'live-teacher';
-      if (p === 'live-student' || p === 'student-live' || params.has('pin')) return 'live-student';
-      return 'student';
+      return params.get('page') === 'admin' ? 'admin' : 'student';
     }
     return 'student';
   });
@@ -90,19 +84,14 @@ export default function App() {
   }, [webAppUrl, isConfigured]);
 
   // Sync route with URL query param and popstate
-  const navigateToPage = (mode: 'student' | 'admin' | 'live-teacher' | 'live-student') => {
+  const navigateToPage = (mode: 'student' | 'admin') => {
     setPageMode(mode);
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
       if (mode === 'admin') {
         url.searchParams.set('page', 'admin');
-      } else if (mode === 'live-teacher') {
-        url.searchParams.set('page', 'live-teacher');
-      } else if (mode === 'live-student') {
-        url.searchParams.set('page', 'live-student');
       } else {
         url.searchParams.delete('page');
-        url.searchParams.delete('mode');
       }
       window.history.pushState({}, '', url.toString());
     }
@@ -111,11 +100,7 @@ export default function App() {
   useEffect(() => {
     const handlePopState = () => {
       const params = new URLSearchParams(window.location.search);
-      const p = params.get('page') || params.get('mode');
-      if (p === 'admin') setPageMode('admin');
-      else if (p === 'live-teacher' || p === 'teacher' || p === 'live') setPageMode('live-teacher');
-      else if (p === 'live-student' || p === 'student-live' || params.has('pin')) setPageMode('live-student');
-      else setPageMode('student');
+      setPageMode(params.get('page') === 'admin' ? 'admin' : 'student');
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
@@ -223,20 +208,6 @@ export default function App() {
     setTimeout(() => setCopiedStudentUrl(false), 2500);
   };
 
-  if (pageMode === 'live-teacher') {
-    return <TeacherLiveScreen onBack={() => navigateToPage('student')} />;
-  }
-
-  if (pageMode === 'live-student') {
-    const searchParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
-    return (
-      <StudentLiveScreen
-        initialPin={searchParams.get('pin') || ''}
-        onExit={() => navigateToPage('student')}
-      />
-    );
-  }
-
   return (
     <div className="bg-gradient-to-br from-[#faf7f2] via-[#f5efe5] to-[#ebf3ed] dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 text-slate-800 dark:text-slate-100 min-h-screen flex flex-col font-sans selection:bg-amber-500/20 selection:text-amber-800 transition-colors duration-300">
       
@@ -269,7 +240,7 @@ export default function App() {
                 <span className="truncate">
                   {pageMode === 'admin'
                     ? (headerConfig?.title ? `${headerConfig.title} - الإدارة` : 'بوابة التحكم الإداري وقاعدة البيانات')
-                    : (headerConfig?.title || 'عرض الدروس للطلاب')}
+                    : (headerConfig?.title || 'ملتقط الوسائط للطلاب')}
                 </span>
                 {pageMode === 'admin' ? (
                   <span className="text-[10px] px-2 py-0.5 bg-purple-500/10 border border-purple-500/20 text-purple-600 dark:text-purple-400 rounded-full font-bold shrink-0">
@@ -318,16 +289,6 @@ export default function App() {
               title={darkMode ? "الوضع النهاري" : "الوضع الليلي"}
             >
               {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-            </button>
-
-            {/* Live Classroom Screen Switcher Button */}
-            <button
-              onClick={() => navigateToPage('live-teacher')}
-              className="px-3.5 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-black rounded-2xl cursor-pointer transition-all active:scale-95 shadow-md flex items-center gap-1.5 text-xs whitespace-nowrap"
-              title="فتح شاشة الأستاذ المستقلة لبث الدرس الصفي وطرح الأسئلة المباشرة"
-            >
-              <Tv className="w-4 h-4" />
-              <span>بث الفصل المباشر 📡</span>
             </button>
 
             {/* In Admin Mode */}
@@ -588,45 +549,6 @@ export default function App() {
                     >
                       <ExternalLink className="w-4 h-4 text-sky-400" />
                       <span>فتح</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Card 4: Live Classroom Projector & Interaction Mode */}
-                <div className="p-6 bg-slate-900/90 border border-amber-500/30 rounded-3xl shadow-lg space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2.5">
-                      <Tv className="w-5 h-5 text-amber-400" />
-                      <h3 className="text-sm font-black text-slate-100">نمط البث الصفي التفاعلي (شاشة الأستاذ المستقلة)</h3>
-                    </div>
-                    <span className="text-[11px] font-bold text-amber-400 bg-amber-500/10 px-3 py-1 rounded-full border border-amber-500/20">
-                      جديد ⚡
-                    </span>
-                  </div>
-
-                  <p className="text-xs text-slate-400 leading-relaxed">
-                    شاشة مخصصة للعرض على البروجكتور أو التلفاز في الفصل أو البث المباشر. يتم تشغيل الفيديو أمام الطلاب مع إرسال الأسئلة التفاعلية لحظياً على هواتفهم وكشف نسب الإجابات وسجل الحضور.
-                  </p>
-
-                  <div className="flex items-center gap-2.5">
-                    <button
-                      onClick={() => navigateToPage('live-teacher')}
-                      className="flex-1 py-3.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-black rounded-2xl text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg shadow-amber-500/10"
-                    >
-                      <Tv className="w-4 h-4" />
-                      <span>فتح شاشة الأستاذ للبث المباشر 📡</span>
-                    </button>
-                    <button
-                      onClick={() => {
-                        const url = `${window.location.origin}${window.location.pathname}?page=live-teacher`;
-                        navigator.clipboard.writeText(url);
-                        alert('تم نسخ الرابط المستقل لشاشة الأستاذ: ' + url);
-                      }}
-                      className="px-4 py-3.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-2xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
-                      title="نسخ الرابط المستقل للأستاذ"
-                    >
-                      <Copy className="w-4 h-4" />
-                      <span>نسخ الرابط</span>
                     </button>
                   </div>
                 </div>

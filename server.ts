@@ -1,45 +1,11 @@
 import express from "express";
 import path from "path";
-import http from "http";
 import { createServer as createViteServer } from "vite";
 import { Readable } from "stream";
-import { WebSocketServer } from "ws";
-import { liveManager } from "./server/liveManager";
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
-  const server = http.createServer(app);
-
-  app.use(express.json());
-
-  // WebSocket Server setup for real-time live interactive lessons
-  const wss = new WebSocketServer({ server, path: '/ws' });
-  liveManager.init(wss);
-
-  // REST API endpoints for Live Classroom
-  app.get("/api/live/rooms", (req, res) => {
-    res.json({ success: true, rooms: liveManager.getAllActiveRooms() });
-  });
-
-  app.get("/api/live/room/:pin", (req, res) => {
-    const room = liveManager.getRoom(req.params.pin);
-    if (!room) {
-      return res.status(404).json({ success: false, message: "الغرفة غير موجودة أو انتهت الجلسة" });
-    }
-    res.json({
-      success: true,
-      room: {
-        pin: room.pin,
-        teacherName: room.teacherName,
-        lessonTitle: room.lessonTitle,
-        status: room.status,
-        onlineCount: Array.from(room.students.values()).filter(s => s.online).length,
-        totalStudents: room.students.size,
-        attendanceHistory: room.attendanceHistory,
-      }
-    });
-  });
 
   // Google Drive Streaming Proxy Route with Auto Virus Warning Bypass
   app.get("/api/proxy-drive", async (req, res) => {
@@ -193,8 +159,8 @@ async function startServer() {
     });
   }
 
-  server.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://0.0.0.0:${PORT} with WebSocket on /ws`);
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on http://0.0.0.0:${PORT}`);
   });
 }
 

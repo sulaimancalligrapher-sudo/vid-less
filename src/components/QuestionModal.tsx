@@ -21,7 +21,7 @@ interface ResultModalState {
   isCorrect: boolean | null;
 }
 
-function getGoogleDriveFileId(url: string): string | null {
+function getGoogleDriveFileId(url?: string): string | null {
   if (!url) return null;
   const fileDMatch = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
   if (fileDMatch && fileDMatch[1]) return fileDMatch[1];

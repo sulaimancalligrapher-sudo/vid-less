@@ -10,17 +10,15 @@ interface SettingsPanelProps {
 
 export default function SettingsPanel({ onClose, onSave }: SettingsPanelProps) {
   const [url, setUrl] = useState(getWebAppUrl());
-  const [mainSheetId, setMainSheetId] = useState(() => localStorage.getItem('mainSpreadsheetId') || '155gPdRszuGrjRBHx6jZ8vYovsougqH35HGIw4BhkxBs');
   const [corrSheetId, setCorrSheetId] = useState(() => localStorage.getItem('correctionSheetId') || '1F3hDUfjgBEkUAIOaF66634EWQQ8XZSdyKjlTzrVA25k');
   const [copied, setCopied] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
   const handleSave = () => {
-    localStorage.setItem('webAppUrl', url.trim());
-    localStorage.setItem('mainSpreadsheetId', mainSheetId.trim());
+    localStorage.setItem('webAppUrl', url);
     localStorage.setItem('correctionSheetId', corrSheetId.trim());
-    onSave(url.trim());
+    onSave(url);
     onClose();
   };
 
@@ -32,24 +30,18 @@ export default function SettingsPanel({ onClose, onSave }: SettingsPanelProps) {
     setTesting(true);
     setTestResult(null);
     try {
-      const targetSsId = mainSheetId.trim() || '155gPdRszuGrjRBHx6jZ8vYovsougqH35HGIw4BhkxBs';
-      const response = await fetch(`${url.trim()}?action=getAdminQuestions&spreadsheetId=${encodeURIComponent(targetSsId)}`, {
+      const response = await fetch(`${url.trim()}?action=getWords&sheetName=test_dummy_nonexistent`, {
         method: 'GET',
         redirect: 'follow',
       });
+      // Since dummy sheet name might fail or return empty, any JSON response means server is alive!
       const data = await response.json();
-      if (Array.isArray(data)) {
-        setTestResult({
-          success: true,
-          message: `تم الاتصال بنجاح! تم استدعاء ورقة Questions واحتوت على (${data.length}) درساً/صفاً. خادم Apps Script متصل وقاعدة البيانات جاهزة.`,
-        });
-      } else {
-        setTestResult({
-          success: true,
-          message: 'تم الاتصال بالخادم بنجاح! خادم Apps Script نشط ومستعد.',
-        });
-      }
+      setTestResult({
+        success: true,
+        message: 'تم الاتصال بالخادم بنجاح! خادم Apps Script نشط ومستعد.',
+      });
     } catch (err: any) {
+      // Even if it returns error, if we get any CORS redirect response it's good, but let's be realistic:
       console.error('Test connection error:', err);
       setTestResult({
         success: false,
@@ -113,27 +105,7 @@ export default function SettingsPanel({ onClose, onSave }: SettingsPanelProps) {
 
           <div>
             <label className="block text-sm font-semibold text-slate-300 mb-2">
-              معرّف جدول البيانات الرئيسي (Main Spreadsheet ID):
-            </label>
-            <div className="relative">
-              <input
-                type="text"
-                dir="ltr"
-                value={mainSheetId}
-                onChange={(e) => setMainSheetId(e.target.value)}
-                placeholder="155gPdRszuGrjRBHx6jZ8vYovsougqH35HGIw4BhkxBs"
-                className="w-full px-4 py-3.5 bg-slate-950 border border-slate-800 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 text-slate-200 rounded-xl placeholder-slate-600 outline-none transition-all pr-12 text-sm font-mono text-amber-400"
-              />
-              <Settings className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-amber-500" />
-            </div>
-            <p className="text-[11px] text-slate-400 mt-1">
-              معرف الشيت الرئيسي الذي يحتوي على أوراق: <span className="text-amber-400 font-mono">Questions</span> و <span className="text-amber-400 font-mono">Answers</span> و <span className="text-amber-400 font-mono">Profile</span> وأرقام شيتات الطلاب.
-            </p>
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold text-slate-300 mb-2">
-              معرّف شيت التصحيح الخارجي (Correction Sheet ID) - اختياري:
+              معرّف شيت التصحيح الخارجي (Correction Sheet ID):
             </label>
             <div className="relative">
               <input
@@ -144,10 +116,10 @@ export default function SettingsPanel({ onClose, onSave }: SettingsPanelProps) {
                 placeholder="1F3hDUfjgBEkUAIOaF66634EWQQ8XZSdyKjlTzrVA25k"
                 className="w-full px-4 py-3.5 bg-slate-950 border border-slate-800 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 text-slate-200 rounded-xl placeholder-slate-600 outline-none transition-all pr-12 text-sm font-mono"
               />
-              <Settings className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
+              <Settings className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-amber-500" />
             </div>
             <p className="text-[11px] text-slate-500 mt-1">
-              خاص بورقة A1 لملاحظات تصحيح الأستاذ (تسجيلات الصوت والصور).
+              يقرأ التطبيق بيانات تصحيح الأستاذ وملاحظات الصوت والصورة من هذا الشيت (ورقة A1).
             </p>
           </div>
 
@@ -170,7 +142,7 @@ export default function SettingsPanel({ onClose, onSave }: SettingsPanelProps) {
               ) : (
                 <HelpCircle className="w-4.5 h-4.5 text-amber-400" />
               )}
-              <span>فحص الاتصال بالشيت</span>
+              <span>فحص الاتصال</span>
             </button>
           </div>
 
@@ -199,16 +171,18 @@ export default function SettingsPanel({ onClose, onSave }: SettingsPanelProps) {
         <div className="border-t border-slate-800/80 pt-6 text-right" dir="rtl">
           <h3 className="text-sm font-bold text-slate-200 flex items-center gap-2 mb-3">
             <HelpCircle className="w-4.5 h-4.5 text-amber-400" />
-            <span>كيف تتأكد من ربط الشيت الجديد مع Apps Script بنجاح؟</span>
+            <span>كيف تقوم بإعداد وربط جدول البيانات (Google Sheet)؟</span>
           </h3>
 
           <ol className="list-decimal list-inside space-y-2.5 text-xs text-slate-400 leading-relaxed pr-1 mb-6">
-            <li>في ملف Google Sheet الجديد، تأكد من وجود ورقة <code className="bg-slate-950 text-amber-400 px-1.5 py-0.5 rounded border border-slate-800 font-mono">Questions</code> و <code className="bg-slate-950 text-amber-400 px-1.5 py-0.5 rounded border border-slate-800 font-mono">Answers</code> و <code className="bg-slate-950 text-amber-400 px-1.5 py-0.5 rounded border border-slate-800 font-mono">Profile</code>.</li>
-            <li>من شريط القوائم العلوي، اضغط على <span className="text-slate-200 font-semibold">الإضافات (Extensions)</span> ثم <span className="text-slate-200 font-semibold">Apps Script</span>.</li>
-            <li>انسخ كود الـ Apps Script المطور بالكامل بالضغط على زر النسخ بالأسفل، واستبدل به الكود الموجود في محرر Apps Script.</li>
-            <li>تأكد من أن السطر رقم 6 في الكود يحمل معرف الشيت الجديد: <code className="bg-slate-950 text-amber-400 px-1.5 py-0.5 rounded border border-slate-800 font-mono font-bold">155gPdRszuGrjRBHx6jZ8vYovsougqH35HGIw4BhkxBs</code>.</li>
-            <li>اضغط على زر <span className="text-slate-200 font-semibold">نشر (Deploy)</span> ثم <span className="text-slate-200 font-semibold">إدارة عمليات النشر (Manage deployments)</span> واضغط على أيقونة القلم لتعديل النشر واختيار <span className="text-amber-400 font-semibold">إصدار جديد (New version)</span> ثم Deploy.</li>
-            <li>ضع رابط الـ Web App ومعرف الشيت في الحقول أعلاه واضغط حفظ الإعدادات وفحص الاتصال!</li>
+            <li>أنشئ ملف Google Sheet جديد في حسابك.</li>
+            <li>قم بتسمية الصفحات الداخلية بنفس الأسماء الأصلية: <code className="bg-slate-950 text-amber-400 px-1.5 py-0.5 rounded border border-slate-800 font-mono">Profile</code> و <code className="bg-slate-950 text-amber-400 px-1.5 py-0.5 rounded border border-slate-800 font-mono">Contact</code> و <code className="bg-slate-950 text-amber-400 px-1.5 py-0.5 rounded border border-slate-800 font-mono">About</code> و <code className="bg-slate-950 text-amber-400 px-1.5 py-0.5 rounded border border-slate-800 font-mono">Settings</code> و <code className="bg-slate-950 text-amber-400 px-1.5 py-0.5 rounded border border-slate-800 font-mono">Answers</code> بالإضافة لصفحات أرقام الشيتات للدروس.</li>
+            <li>من القائمة العلوية لـ Google Sheet، اختر <span className="text-slate-200 font-semibold">Extensions</span> ثم <span className="text-slate-200 font-semibold">Apps Script</span>.</li>
+            <li>احذف أي كود موجود هناك، ثم اضغط على الزر أدناه لنسخ كود Apps Script المطور بالكامل، وألصقه في المحرر.</li>
+            <li>قم بتغيير معرف الـ Spreadsheet ID في السطر رقم 14 في كود Apps Script ليتطابق مع رابط ملف الشيت الخاص بك.</li>
+            <li>اضغط على زر <span className="text-slate-200 font-semibold">Deploy</span> ثم <span className="text-slate-200 font-semibold">New Deployment</span>.</li>
+            <li>اختر نوع المشروع <span className="text-slate-200 font-semibold">Web App</span>، واجعل صلاحية الوصول <span className="text-amber-400 font-semibold">"Anyone"</span> لكي يتمكن الطلاب من التسجيل، ثم اضغط Deploy.</li>
+            <li>انسخ رابط الـ Web App URL الناتج وضعه في المربع المخصص في أعلى هذه النافذة ثم اضغط حفظ!</li>
           </ol>
 
           {/* Copy Code Section */}
@@ -256,28 +230,21 @@ function getFullAppsScriptCode(): string {
  * يدعم الاستدعاء كـ API كامل لصفحة الـ React الخارجية بدون مشاكل CORS وبأقصى درجات الحماية والأمان.
  */
 
-var SPREADSHEET_ID = '155gPdRszuGrjRBHx6jZ8vYovsougqH35HGIw4BhkxBs'; // معرف جدول البيانات الرئيسي
+var SPREADSHEET_ID = '1967wIJrB-0hVLHxH6rdkZbscO2S7GwxlHObtsmWFnFU'; // معرف جدول البيانات الاحتياطي
 var CORRECTION_SPREADSHEET_ID = '1F3hDUfjgBEkUAIOaF66634EWQQ8XZSdyKjlTzrVA25k'; // معرف شيت تصحيح الأستاذ
 var DEFAULT_BOT_TOKEN = '8748182366:AAHKxOlInR7aIeS7kP-_KfhpQk4D65dtegY';
 var DEFAULT_BOT_USERNAME = 'Httat_bot';
 var DEFAULT_TEACHER_CHAT_ID = ''; // معرف الأستاذ الافتراضي (يمكن تركه فارغاً أو تحديده هنا)
-var REQUEST_SPREADSHEET_ID = ''; // معرف جدول البيانات المرسل ديناميكياً مع الطلب
 
-// دالة مساعدة ذكية لفتح جدول البيانات تلقائياً
-function getSpreadsheet(customId) {
-  var id = customId || REQUEST_SPREADSHEET_ID;
-  if (id && typeof id === 'string' && id.trim().length > 0) {
-    try {
-      return SpreadsheetApp.openById(id.trim());
-    } catch (e) {}
-  }
+// دالة مساعدة لفتح جدول البيانات الحالي تلقائياً دون الاعتماد على المعرف الثابت فقط
+function getSpreadsheet() {
   try {
     var active = SpreadsheetApp.getActiveSpreadsheet();
     if (active) return active;
   } catch (e) {}
   try {
-    if (typeof SPREADSHEET_ID !== 'undefined' && SPREADSHEET_ID && SPREADSHEET_ID.trim()) {
-      return SpreadsheetApp.openById(SPREADSHEET_ID.trim());
+    if (typeof SPREADSHEET_ID !== 'undefined' && SPREADSHEET_ID) {
+      return SpreadsheetApp.openById(SPREADSHEET_ID);
     }
   } catch (e2) {}
   return SpreadsheetApp.getActive();
@@ -307,7 +274,6 @@ function TEST_BIND_STUDENT_222() {
 }
 
 function doGet(e) {
-  REQUEST_SPREADSHEET_ID = (e && e.parameter && (e.parameter.spreadsheetId || e.parameter.spreadsheet_id)) || '';
   var action = (e && e.parameter) ? e.parameter.action : '';
   var response;
   
@@ -372,8 +338,6 @@ function doPost(e) {
   try {
     var rawContents = (e && e.postData && e.postData.contents) ? e.postData.contents : '{}';
     var payload = JSON.parse(rawContents);
-    REQUEST_SPREADSHEET_ID = (payload && (payload.spreadsheetId || payload.spreadsheet_id)) || 
-                             (e && e.parameter && (e.parameter.spreadsheetId || e.parameter.spreadsheet_id)) || '';
 
     // --- إذا كان الطلب قادماً من Telegram Webhook مباشرة ---
     if (payload.update_id || payload.message || payload.callback_query) {
@@ -452,7 +416,7 @@ function doPost(e) {
 // ------------------- دوال استدعاء وقراءة البيانات -------------------
 
 function getData() {
-  var ss = getSpreadsheet();
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   var profileSheet = ss.getSheetByName('Profile');
   var contactSheet = ss.getSheetByName('Contact');
   var aboutSheet = ss.getSheetByName('About');
@@ -487,7 +451,7 @@ function getData() {
 }
 
 function getHeaderConfig() {
-  var ss = getSpreadsheet();
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   var sheet = ss.getSheetByName('header') || ss.getSheetByName('Header');
   if (!sheet) return { title: '', subtitle: '', logoUrl: '', loginLogoUrl: '', buttons: [], socials: {} };
   var data = sheet.getDataRange().getValues();
@@ -530,7 +494,7 @@ function getHeaderConfig() {
 
 function loginUser(username, sheet_number, deviceId, lat, lng) {
   try {
-    var ss = getSpreadsheet();
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     var settingsSheet = ss.getSheetByName('Settings');
     if (!settingsSheet) return { success: false, message: 'ورقة الإعدادات Settings غير موجودة' };
     var data = settingsSheet.getDataRange().getValues();
@@ -648,7 +612,7 @@ function formatDriveImageUrl(url) {
 }
 
 function getWords(sheetName, username) {
-  var ss = getSpreadsheet();
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   var questionsSheet = ss.getSheetByName('Questions');
   if (!questionsSheet) return [];
   
@@ -876,7 +840,7 @@ function findAnswersRowOnly(sheet, sheet_number, username, comment, word) {
 // ------------------- دوال حفظ الأداء والإجابات -------------------
 
 function saveAnswer(payload) {
-  var ss = getSpreadsheet();
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   var sheetName = 'Answers';
   var sheet = ss.getSheetByName(sheetName);
   
@@ -929,7 +893,7 @@ function saveAnswer(payload) {
 }
 
 function calculateResults(sheet_number, comment, rowNum) {
-  var ss = getSpreadsheet();
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   var questionsSheet = ss.getSheetByName('Questions');
   var answersSheet = ss.getSheetByName('Answers');
   if (!answersSheet) return;
@@ -980,7 +944,7 @@ function calculateResults(sheet_number, comment, rowNum) {
 }
 
 function calculateSectionTwo(sheet_number, comment, rowNum) {
-  var ss = getSpreadsheet();
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   var answersSheet = ss.getSheetByName('Answers');
   if (!answersSheet) return;
   var answersRow = answersSheet.getRange(rowNum, 23, 1, 2).getValues()[0];
@@ -1030,7 +994,7 @@ function getStatus(value) {
 }
 
 function getFullAudioScore(comment, sheet_number, username, word) {
-  var ss = getSpreadsheet();
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   var sheet = ss.getSheetByName('Answers');
   if (!sheet) return 0;
   var rowNum = findAnswersRowOnly(sheet, sheet_number, username, comment, word);
@@ -1045,7 +1009,7 @@ function getFullAudioScore(comment, sheet_number, username, word) {
 }
 
 function saveFullAudioScore(sheet_number, username, word, score, timestamp, comment) {
-  var ss = getSpreadsheet();
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   var sheet = ss.getSheetByName('Answers');
   if (!sheet) return { success: false };
 
@@ -1058,7 +1022,7 @@ function saveFullAudioScore(sheet_number, username, word, score, timestamp, comm
 }
 
 function getLetterListenScore(comment, sheet_number, username, word) {
-  var ss = getSpreadsheet();
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   var sheet = ss.getSheetByName('Answers');
   if (!sheet) return 0;
   var rowNum = findAnswersRowOnly(sheet, sheet_number, username, comment, word);
@@ -1076,7 +1040,7 @@ function getLetterListenScore(comment, sheet_number, username, word) {
 
 function saveLetterListenScore(sheet_number, username, word, score, timestamp, comment) {
   if (score !== 100) return { success: false };
-  var ss = getSpreadsheet();
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   var sheet = ss.getSheetByName('Answers');
   if (!sheet) return { success: false };
 
@@ -1088,7 +1052,7 @@ function saveLetterListenScore(sheet_number, username, word, score, timestamp, c
 }
 
 function getRecordingLink(comment, sheet_number, username, word) {
-  var ss = getSpreadsheet();
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   var sheet = ss.getSheetByName('Answers');
   if (!sheet) return '';
   var rowNum = findAnswersRowOnly(sheet, sheet_number, username, comment, word);
@@ -1099,7 +1063,7 @@ function getRecordingLink(comment, sheet_number, username, word) {
 }
 
 function getImageLink(comment, sheet_number, username, word) {
-  var ss = getSpreadsheet();
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   var sheet = ss.getSheetByName('Answers');
   if (!sheet) return '';
   var rowNum = findAnswersRowOnly(sheet, sheet_number, username, comment, word);
@@ -1171,7 +1135,7 @@ function uploadRecordingFromBase64(base64Data, mimeType, word, username, sheet_n
 }
 
 function saveImageLink(sheet_number, username, comment, link, timestamp, word) {
-  var ss = getSpreadsheet();
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   var sheet = ss.getSheetByName('Answers');
   if (!sheet) return;
   
@@ -1192,7 +1156,7 @@ function saveImageLink(sheet_number, username, comment, link, timestamp, word) {
 }
 
 function saveRecordingLink(sheet_number, username, comment, link, timestamp, word) {
-  var ss = getSpreadsheet();
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   var sheet = ss.getSheetByName('Answers');
   if (!sheet) return;
   
@@ -1215,7 +1179,7 @@ function saveRecordingLink(sheet_number, username, comment, link, timestamp, wor
 // ------------------- تتبع اكتمال الدروس ودرجات الطالب -------------------
 
 function markLessonCompleted(sheetName, lessonIndex, username, comment, word) {
-  var ss = getSpreadsheet();
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   var answersSheet = ss.getSheetByName('Answers');
   if (!answersSheet) return;
 
@@ -1250,7 +1214,7 @@ function markLessonCompleted(sheetName, lessonIndex, username, comment, word) {
 }
 
 function unmarkLessonCompleted(sheetName, lessonIndex, username, comment, word) {
-  var ss = getSpreadsheet();
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   var answersSheet = ss.getSheetByName('Answers');
   if (!answersSheet) return;
 
@@ -1262,7 +1226,7 @@ function unmarkLessonCompleted(sheetName, lessonIndex, username, comment, word) 
 }
 
 function resetToCompleted(sheetName, lessonIndex, username, comment, word) {
-  var ss = getSpreadsheet();
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   var answersSheet = ss.getSheetByName('Answers');
   if (!answersSheet) return;
 
@@ -1276,7 +1240,7 @@ function resetToCompleted(sheetName, lessonIndex, username, comment, word) {
 }
 
 function decrementRetryCount(sheetName, lessonIndex, username, comment, word) {
-  var ss = getSpreadsheet();
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   var answersSheet = ss.getSheetByName('Answers');
   if (!answersSheet) return;
 
@@ -1307,7 +1271,7 @@ function decrementRetryCount(sheetName, lessonIndex, username, comment, word) {
 // ------------------- دوال التحكم الإداري (قسم الإدارة) -------------------
 
 function getAdminQuestions() {
-  var ss = getSpreadsheet();
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   var sheet = ss.getSheetByName('Questions');
   if (!sheet) return [];
   var fullData = sheet.getDataRange().getValues();
@@ -1387,7 +1351,7 @@ function getAdminQuestions() {
 }
 
 function saveAdminQuestion(payload) {
-  var ss = getSpreadsheet();
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   var sheet = ss.getSheetByName('Questions');
   if (!sheet) return { success: false, message: 'ورقة الأسئلة غير موجودة' };
 
@@ -1493,7 +1457,7 @@ function saveAdminQuestion(payload) {
 }
 
 function deleteAdminQuestion(payload) {
-  var ss = getSpreadsheet();
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   var sheet = ss.getSheetByName('Questions');
   if (!sheet) return { success: false, message: 'ورقة الأسئلة غير موجودة' };
 
@@ -1518,7 +1482,7 @@ function deleteAdminQuestion(payload) {
 }
 
 function getAdminAnswers() {
-  var ss = getSpreadsheet();
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   var sheet = ss.getSheetByName('Answers');
   if (!sheet) return [];
   var data = sheet.getDataRange().getValues();
@@ -1565,7 +1529,7 @@ function getAdminAnswers() {
 }
 
 function updateAdminAnswer(payload) {
-  var ss = getSpreadsheet();
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   var sheet = ss.getSheetByName('Answers');
   if (!sheet) return { success: false, message: 'ورقة الإجابات غير موجودة' };
 
@@ -1727,7 +1691,7 @@ function arabicToWestern(numStr) {
 
 function getCommentForWord(sheetName, word) {
   try {
-    var ss = getSpreadsheet();
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     var sheet = ss.getSheetByName('Questions');
     if (!sheet) return word;
     var data = sheet.getDataRange().getValues();
