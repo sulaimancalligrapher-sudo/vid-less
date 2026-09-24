@@ -20,7 +20,7 @@ export function getWebAppUrl(): string {
   }
 
   // 3. Default fallback hardcoded URL
-  const fallbackUrl: string = 'https://script.google.com/macros/s/AKfycbx4u4sA1FhRY0O2WsTv_kbX7zVRvc19Msjc7RhzAOprfu8I9Ni0FPXOEd7rVTIIUORzaA/exec';
+  const fallbackUrl: string = 'https://script.google.com/macros/s/AKfycbw9_hBJAwQV3rHfdpUyXZm1qhODuljKaogF_UPcHEZ0XT4P0dlKyhPrMkco9gWsrSrLrw/exec';
   if (fallbackUrl && fallbackUrl.trim().length > 0) {
     return fallbackUrl.trim();
   }
@@ -1910,7 +1910,7 @@ export async function initLiveSession(payload: {
   return res.json();
 }
 
-export async function joinLiveSession(username: string, sheetNumber: string, pin?: string): Promise<{ success: boolean; state?: LiveSessionState; error?: string }> {
+export async function joinLiveSession(username: string, sheetNumber: string, pin?: string): Promise<{ success: boolean; state?: LiveSessionState; pinVerified?: boolean; error?: string }> {
   const res = await fetch('/api/live/join', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -2007,6 +2007,41 @@ export async function finishLiveSession(): Promise<{ success: boolean; state?: L
 
 export async function resetLiveSession(): Promise<{ success: boolean; state?: LiveSessionState }> {
   const res = await fetch('/api/live/reset', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  });
+  return res.json();
+}
+
+export async function startLiveProgram(): Promise<{ success: boolean; pin?: string; state?: LiveSessionState }> {
+  const res = await fetch('/api/live/start-program', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  });
+  return res.json();
+}
+
+export async function endLiveProgram(): Promise<{ success: boolean; state?: LiveSessionState }> {
+  const res = await fetch('/api/live/end-program', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  });
+  return res.json();
+}
+
+export async function getLiveBackup(): Promise<{ success: boolean; backup?: any }> {
+  try {
+    const res = await fetch('/api/live/backup');
+    if (res.ok) return await res.json();
+  } catch {}
+  return { success: false };
+}
+
+export async function restoreLiveBackup(): Promise<{ success: boolean; state?: LiveSessionState }> {
+  const res = await fetch('/api/live/restore-backup', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({})

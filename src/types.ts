@@ -236,9 +236,10 @@ export interface LiveStudentAnswerSubmission {
 export interface LiveSessionState {
   sessionId: string;
   sessionPin?: string;
+  isProgramActive?: boolean;
   lessonTitle: string;
   videoUrl: string;
-  status: 'idle' | 'waiting' | 'playing' | 'question_active' | 'revealed' | 'finished';
+  status: 'idle' | 'waiting' | 'playing' | 'question_active' | 'revealed' | 'finished' | 'program_ended';
   currentQuestionIndex: number | null;
   currentQuestion: LiveQuestionItem | null;
   questionTriggeredAt: number | null;

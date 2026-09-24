@@ -4,13 +4,16 @@ import {
   Tv, Plus, Play, Edit3, Trash2, Save, FileSpreadsheet, 
   Users, CheckCircle2, Clock, HelpCircle, Image, ExternalLink, 
   RefreshCw, Search, QrCode, Copy, Check, Sparkles, ChevronDown, 
-  ChevronUp, ArrowLeft, AlertCircle, X
+  ChevronUp, ArrowLeft, AlertCircle, X, KeyRound, ShieldCheck, UserX,
+  Power, ShieldAlert, DownloadCloud, History
 } from 'lucide-react';
 import { 
-  LiveLessonRow, LiveQuestionItem, LiveAnswerRecord 
+  LiveLessonRow, LiveQuestionItem, LiveAnswerRecord, LiveSessionState 
 } from '../types';
 import { 
   fetchLiveQuestionsT, saveLiveLessonT, fetchLiveAnswersT, 
+  getLiveSessionState, updateLivePin, leaveLiveSession, resetLiveSession,
+  startLiveProgram, endLiveProgram, getLiveBackup, restoreLiveBackup, recordLiveAnswersBatchT,
   formatSecondsToTime, parseTimeToSeconds, formatDriveImageUrl 
 } from '../api';
 
@@ -50,12 +53,23 @@ export default function LiveClassManager({
   onStartTeacherTheater,
   onBackToAdmin,
 }: LiveClassManagerProps) {
-  const [activeTab, setActiveTab] = useState<'lessons' | 'answers' | 'qrcode'>('lessons');
+  const [activeTab, setActiveTab] = useState<'lessons' | 'answers' | 'students' | 'qrcode'>('lessons');
   const [lessons, setLessons] = useState<LiveLessonRow[]>([]);
   const [answers, setAnswers] = useState<LiveAnswerRecord[]>([]);
+  const [sessionState, setSessionState] = useState<LiveSessionState | null>(null);
   const [loadingLessons, setLoadingLessons] = useState(false);
   const [loadingAnswers, setLoadingAnswers] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [studentSearch, setStudentSearch] = useState('');
+  const [copiedPin, setCopiedPin] = useState(false);
+  const [isRegeneratingPin, setIsRegeneratingPin] = useState(false);
+  const [isResettingSession, setIsResettingSession] = useState(false);
+  const [resetSuccess, setResetSuccess] = useState(false);
+  const [isTogglingProgram, setIsTogglingProgram] = useState(false);
+  const [programToast, setProgramToast] = useState<string | null>(null);
+  const [backupData, setBackupData] = useState<any | null>(null);
+  const [isCheckingBackup, setIsCheckingBackup] = useState(false);
+  const [isSavingRecovered, setIsSavingRecovered] = useState(false);
   
   // Editor Modal State
   const [isEditorOpen, setIsEditorOpen] = useState(false);
@@ -71,6 +85,101 @@ export default function LiveClassManager({
     : '';
 
   const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(studentJoinUrl)}`;
+
+  // Listen to Live Session updates (SSE + fallback polling)
+  useEffect(() => {
+    let es: EventSource | null = null;
+    let pollTimer: any = null;
+
+    const fetchState = async () => {
+      try {
+        const s = await getLiveSessionState();
+        if (s) setSessionState(s);
+      } catch {}
+    };
+
+    fetchState();
+
+    try {
+      es = new EventSource('/api/live/stream');
+      es.onmessage = (e) => {
+        try {
+          const s = JSON.parse(e.data);
+          setSessionState(s);
+        } catch {}
+      };
+      es.onerror = () => {
+        if (!pollTimer) {
+          pollTimer = setInterval(fetchState, 2000);
+        }
+      };
+    } catch {
+      pollTimer = setInterval(fetchState, 2000);
+    }
+
+    return () => {
+      if (es) es.close();
+      if (pollTimer) clearInterval(pollTimer);
+    };
+  }, []);
+
+  const handleRegeneratePin = async () => {
+    setIsRegeneratingPin(true);
+    try {
+      const res = await updateLivePin();
+      if (res.success && res.pin && sessionState) {
+        setSessionState({
+          ...sessionState,
+          sessionPin: res.pin
+        });
+      }
+    } catch (e) {
+      console.error('Failed to regenerate PIN:', e);
+    } finally {
+      setIsRegeneratingPin(false);
+    }
+  };
+
+  const handleCopyPin = () => {
+    if (sessionState?.sessionPin) {
+      navigator.clipboard.writeText(sessionState.sessionPin);
+      setCopiedPin(true);
+      setTimeout(() => setCopiedPin(false), 2500);
+    }
+  };
+
+  const handleRemoveStudent = async (username: string, sheetNumber: string) => {
+    try {
+      await leaveLiveSession(username, sheetNumber);
+      if (sessionState) {
+        setSessionState({
+          ...sessionState,
+          connectedStudents: sessionState.connectedStudents.filter(
+            s => !(s.username === username && s.sheetNumber === sheetNumber)
+          )
+        });
+      }
+    } catch (e) {
+      console.error('Failed to remove student:', e);
+    }
+  };
+
+  const handleResetSession = async () => {
+    if (!window.confirm('هل أنت متأكد من تصفير ومسح ذاكرة الجلسة الحالية وإعادة تعيين رمز PIN وقائمة الإجابات؟')) return;
+    setIsResettingSession(true);
+    try {
+      const res = await resetLiveSession();
+      if (res.success && res.state) {
+        setSessionState(res.state);
+        setResetSuccess(true);
+        setTimeout(() => setResetSuccess(false), 3000);
+      }
+    } catch (e) {
+      console.error('Failed to reset live session:', e);
+    } finally {
+      setIsResettingSession(false);
+    }
+  };
 
   // Load Lessons from Questions-T
   const loadLessons = async () => {
@@ -168,6 +277,106 @@ export default function LiveClassManager({
     }
   };
 
+  // Program Lifecycle: Start (generates PIN) / End (expels all students)
+  const handleToggleProgram = async () => {
+    const isCurrentlyActive = Boolean(sessionState?.isProgramActive);
+    if (isCurrentlyActive) {
+      if (!window.confirm('هل أنت متأكد من إنهاء البرنامج وإخراج جميع الطلاب المشتركين من الحصة المباشرة؟')) {
+        return;
+      }
+    }
+
+    setIsTogglingProgram(true);
+    try {
+      if (isCurrentlyActive) {
+        const res = await endLiveProgram();
+        if (res.success && res.state) {
+          setSessionState(res.state);
+          setProgramToast('تم إنهاء البرنامج وإخراج جميع الطلاب بنجاح 🛑');
+        }
+      } else {
+        const res = await startLiveProgram();
+        if (res.success && res.state) {
+          setSessionState(res.state);
+          setProgramToast(`تم بدء البرنامج وتوليد رمز الحضور (${res.pin}) بنجاح 🚀`);
+        }
+      }
+      setTimeout(() => setProgramToast(null), 4000);
+    } catch (e) {
+      console.error('Failed to toggle program:', e);
+    } finally {
+      setIsTogglingProgram(false);
+    }
+  };
+
+  // Emergency Backup: inspect & recover answers after sudden crash or power cut
+  const handleCheckBackup = async () => {
+    setIsCheckingBackup(true);
+    try {
+      const res = await getLiveBackup();
+      if (res.success && res.backup && res.backup.session) {
+        const sess = res.backup.session;
+        const answersCount = Object.keys(sess.allSessionAnswers || {}).length;
+        if (answersCount > 0) {
+          setBackupData(res.backup);
+        } else {
+          alert('النسخة الاحتياطية لا تحتوي على إجابات محفوظة.');
+        }
+      } else {
+        alert('لا توجد نسخة احتياطية محفوظة حالياً على الخادم.');
+      }
+    } catch (err) {
+      console.error('Error fetching backup:', err);
+    } finally {
+      setIsCheckingBackup(false);
+    }
+  };
+
+  const handleSaveBackupToSheets = async () => {
+    if (!backupData || !backupData.session) return;
+    setIsSavingRecovered(true);
+    try {
+      const sess = backupData.session;
+      const allAnswers = sess.allSessionAnswers || {};
+      const lessonTitle = sess.lessonTitle || 'درس مسترجع من النسخة الاحتياطية';
+      const timestamp = new Date().toLocaleString('ar-SA');
+      const records: LiveAnswerRecord[] = [];
+
+      Object.entries(allAnswers).forEach(([studentKey, answers]: [string, any]) => {
+        const parts = studentKey.split('_');
+        const uname = parts[0] || '';
+        const snum = parts.slice(1).join('_') || '';
+        const formatted: Record<number, string> = {};
+        Object.entries(answers).forEach(([qIdx, ans]) => {
+          formatted[Number(qIdx)] = String(ans);
+        });
+
+        if (Object.keys(formatted).length > 0) {
+          records.push({
+            timestamp,
+            sheetNumber: snum,
+            username: uname,
+            lessonTitle,
+            answers: formatted
+          });
+        }
+      });
+
+      if (records.length > 0) {
+        await recordLiveAnswersBatchT(records);
+        alert(`تم استرجاع وحفظ إجابات ${records.length} طالب بنجاح في ورقة Answers-T!`);
+        loadAnswers();
+        setBackupData(null);
+      } else {
+        alert('النسخة الاحتياطية لا تحتوي على إجابات قابلة للحفظ.');
+      }
+    } catch (err: any) {
+      alert('حدث خطأ أثناء حفظ النسخة المسترجعة: ' + err.message);
+    } finally {
+      setIsSavingRecovered(false);
+    }
+  };
+
   // Filtered answers
   const filteredAnswers = answers.filter(a => {
     const q = searchQuery.toLowerCase();
@@ -178,11 +387,21 @@ export default function LiveClassManager({
     );
   });
 
+  const isProgramRunning = Boolean(sessionState?.isProgramActive);
+
   return (
     <div className="space-y-6 text-slate-100">
+      {/* Toast Notification */}
+      {programToast && (
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 px-6 py-3 bg-slate-900 border-2 border-amber-500 rounded-2xl shadow-2xl text-amber-300 font-bold text-sm flex items-center gap-2 animate-bounce">
+          <Sparkles className="w-5 h-5 text-amber-400" />
+          <span>{programToast}</span>
+        </div>
+      )}
+
       {/* Top Banner & Navigation */}
       <div className="bg-gradient-to-r from-slate-900 via-indigo-950/40 to-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl relative overflow-hidden">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative z-10">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 relative z-10">
           <div className="flex items-center gap-3.5">
             <div className="w-14 h-14 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-2xl flex items-center justify-center shadow-inner">
               <Tv className="w-7 h-7" />
@@ -202,19 +421,56 @@ export default function LiveClassManager({
             </div>
           </div>
 
-          {onBackToAdmin && (
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* START / END PROGRAM LIFECYCLE BUTTON */}
             <button
-              onClick={onBackToAdmin}
-              className="px-4 py-2.5 bg-slate-800/80 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs transition-all flex items-center gap-2 self-start sm:self-auto cursor-pointer"
+              onClick={handleToggleProgram}
+              disabled={isTogglingProgram}
+              title={isProgramRunning ? 'إنهاء البرنامج وإخراج جميع المشتركين' : 'بدء البرنامج وتوليد رمز الحضور'}
+              className={`px-4 py-2.5 rounded-xl text-xs font-black flex items-center gap-2 shadow-lg transition-all cursor-pointer active:scale-95 disabled:opacity-50 ${
+                isProgramRunning
+                  ? 'bg-gradient-to-r from-rose-600 to-red-700 hover:from-rose-500 hover:to-red-600 text-white shadow-rose-900/30'
+                  : 'bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white shadow-emerald-900/30'
+              }`}
             >
-              <ArrowLeft className="w-4 h-4" />
-              <span>العودة للوحة الإدارة</span>
+              <Power className={`w-4 h-4 ${isTogglingProgram ? 'animate-spin' : ''}`} />
+              <span>
+                {isTogglingProgram
+                  ? 'جارٍ التنفيذ...'
+                  : isProgramRunning
+                  ? 'إنهاء البرنامج وإخراج الطلاب 🛑'
+                  : 'بداية البرنامج وتوليد الرمز 🚀'}
+              </span>
             </button>
-          )}
+
+            {/* Active PIN Indicator */}
+            {sessionState?.sessionPin && (
+              <div 
+                onClick={handleCopyPin}
+                title="رمز الحضور الحالي - انقر للنسخ"
+                className="px-3 py-2 bg-slate-950 border border-amber-500/40 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer hover:border-amber-400"
+              >
+                <KeyRound className="w-3.5 h-3.5 text-amber-400" />
+                <span className="text-[11px] text-amber-400/80 font-normal">الرمز:</span>
+                <span className="font-mono font-black text-amber-300 tracking-wider">{sessionState.sessionPin}</span>
+                {copiedPin ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3 h-3 text-slate-500" />}
+              </div>
+            )}
+
+            {onBackToAdmin && (
+              <button
+                onClick={onBackToAdmin}
+                className="px-4 py-2.5 bg-slate-800/80 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs transition-all flex items-center gap-2 cursor-pointer"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span>العودة للوحة الإدارة</span>
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Tab Switcher */}
-        <div className="flex items-center gap-2 mt-6 border-t border-slate-800/80 pt-4">
+        <div className="flex flex-wrap items-center gap-2 mt-6 border-t border-slate-800/80 pt-4">
           <button
             onClick={() => setActiveTab('lessons')}
             className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
@@ -237,6 +493,21 @@ export default function LiveClassManager({
           >
             <FileSpreadsheet className="w-4 h-4" />
             <span>سجل إجابات الطلاب Answers-T</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('students')}
+            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer relative ${
+              activeTab === 'students'
+                ? 'bg-amber-500 text-slate-950 font-black shadow-lg shadow-amber-500/10'
+                : 'bg-slate-900 text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Users className="w-4 h-4 text-emerald-400" />
+            <span>الطلاب المتصلون حالياً ({sessionState?.connectedStudents?.length || 0})</span>
+            {(sessionState?.connectedStudents?.length || 0) > 0 && (
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            )}
           </button>
 
           <button
@@ -391,15 +662,62 @@ export default function LiveClassManager({
               <Search className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
             </div>
 
-            <button
-              onClick={loadAnswers}
-              disabled={loadingAnswers}
-              className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer self-start sm:self-auto"
-            >
-              <RefreshCw className={`w-4 h-4 ${loadingAnswers ? 'animate-spin text-amber-500' : ''}`} />
-              <span>تحديث السجل</span>
-            </button>
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Emergency Recovery Button */}
+              <button
+                onClick={handleCheckBackup}
+                disabled={isCheckingBackup}
+                title="استرجاع إجابات الطلاب المحفوظة تلقائياً في الخادم تحسباً لانقطاع الكهرباء أو إغلاق المتصفح"
+                className="px-3.5 py-2 bg-indigo-950/60 hover:bg-indigo-900/80 border border-indigo-500/40 text-indigo-300 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95 disabled:opacity-50"
+              >
+                <DownloadCloud className={`w-4 h-4 text-indigo-400 ${isCheckingBackup ? 'animate-bounce' : ''}`} />
+                <span>فحص النسخة الاحتياطية الطارئة 🛡️</span>
+              </button>
+
+              <button
+                onClick={loadAnswers}
+                disabled={loadingAnswers}
+                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer self-start sm:self-auto"
+              >
+                <RefreshCw className={`w-4 h-4 ${loadingAnswers ? 'animate-spin text-amber-500' : ''}`} />
+                <span>تحديث السجل</span>
+              </button>
+            </div>
           </div>
+
+          {/* Emergency Backup Found Banner */}
+          {backupData && (
+            <div className="p-4 bg-gradient-to-r from-indigo-950/80 to-slate-900 border-2 border-indigo-500/60 rounded-2xl shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <ShieldAlert className="w-5 h-5 text-indigo-400 shrink-0 mt-0.5" />
+                <div>
+                  <div className="text-xs font-bold text-indigo-200">
+                    تم العثور على نسخة احتياطية محفوظة طارئة على الخادم!
+                  </div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">
+                    موضوع الدرس: <b className="text-amber-300">{backupData.session?.lessonTitle || 'درس تفاعلي'}</b> — وقت الحفظ: {new Date(backupData.savedAt).toLocaleTimeString('ar-SA')} — عدد الطلاب المسجلة إجاباتهم: {Object.keys(backupData.session?.allSessionAnswers || {}).length}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleSaveBackupToSheets}
+                  disabled={isSavingRecovered}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-emerald-600/20 cursor-pointer active:scale-95 disabled:opacity-50"
+                >
+                  <Save className={`w-4 h-4 ${isSavingRecovered ? 'animate-spin' : ''}`} />
+                  <span>{isSavingRecovered ? 'جارٍ الحفظ في الشيت...' : 'حفظ فوري في ورقة Answers-T 📥'}</span>
+                </button>
+                <button
+                  onClick={() => setBackupData(null)}
+                  className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 rounded-xl text-xs cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
 
           {loadingAnswers ? (
             <div className="p-12 text-center text-slate-500 bg-slate-900/50 rounded-3xl border border-slate-800">
@@ -491,7 +809,314 @@ export default function LiveClassManager({
       )}
 
       {/* ========================================================================= */}
-      {/* TAB 3: STUDENT JOIN QR & LINK */}
+      {/* TAB 3: CONNECTED STUDENTS (MANAGEMENT) */}
+      {/* ========================================================================= */}
+      {activeTab === 'students' && (
+        <div className="space-y-4">
+          {/* Top Control Header Card */}
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-xl space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold">
+                  <Users className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base sm:text-lg font-black text-slate-100">
+                      الطلاب المتصلون حالياً بالحصة المباشرة
+                    </h3>
+                    <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-black font-mono flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                      <span>{sessionState?.connectedStudents?.length || 0} متصل</span>
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    {sessionState?.lessonTitle ? (
+                      <span>الحصة الحالية: <b className="text-amber-400">{sessionState.lessonTitle}</b></span>
+                    ) : (
+                      <span>في انتظار بدء المعلم عرض درس على شاشة البروجكتر</span>
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {/* START / END PROGRAM LIFECYCLE BUTTON */}
+                <button
+                  onClick={handleToggleProgram}
+                  disabled={isTogglingProgram}
+                  title={isProgramRunning ? 'إنهاء البرنامج وإخراج جميع المشتركين' : 'بدء البرنامج وتوليد رمز الحضور'}
+                  className={`px-4 py-2.5 rounded-2xl text-xs font-black flex items-center gap-2 shadow-lg transition-all cursor-pointer active:scale-95 disabled:opacity-50 ${
+                    isProgramRunning
+                      ? 'bg-gradient-to-r from-rose-600 to-red-700 hover:from-rose-500 hover:to-red-600 text-white shadow-rose-900/30'
+                      : 'bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white shadow-emerald-900/30'
+                  }`}
+                >
+                  <Power className={`w-4 h-4 ${isTogglingProgram ? 'animate-spin' : ''}`} />
+                  <span>
+                    {isTogglingProgram
+                      ? 'جارٍ التنفيذ...'
+                      : isProgramRunning
+                      ? 'إنهاء البرنامج وإخراج المشتركين 🛑'
+                      : 'بداية البرنامج وتوليد الرمز 🚀'}
+                  </span>
+                </button>
+
+                {/* Reset Session Memory Button */}
+                <button
+                  onClick={handleResetSession}
+                  disabled={isResettingSession}
+                  title="تصفير ومسح ذاكرة الجلسة والبدء من جديد"
+                  className="px-3.5 py-2.5 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 hover:text-rose-300 font-bold rounded-2xl text-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isResettingSession ? 'animate-spin' : ''}`} />
+                  <span>تصفير الذاكرة 🔄</span>
+                </button>
+
+                {/* PIN Code Box */}
+                {sessionState?.sessionPin && (
+                  <div className="flex items-center gap-2 bg-slate-950 border border-amber-500/30 p-1.5 sm:p-2 rounded-2xl">
+                    <div className="px-2.5 text-right">
+                      <div className="text-[9px] text-amber-400 font-bold uppercase tracking-wider">رمز الحضور (PIN)</div>
+                      <div className="font-mono text-lg font-black text-amber-300 tracking-widest">{sessionState.sessionPin}</div>
+                    </div>
+                    <button
+                      onClick={handleCopyPin}
+                      title="نسخ رمز PIN"
+                      className="p-1.5 bg-slate-900 hover:bg-slate-800 text-amber-400 rounded-xl transition-all cursor-pointer"
+                    >
+                      {copiedPin ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                    </button>
+                    <button
+                      onClick={handleRegeneratePin}
+                      disabled={isRegeneratingPin}
+                      title="توليد رمز PIN جديد"
+                      className="p-1.5 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-amber-400 rounded-xl transition-all cursor-pointer disabled:opacity-50"
+                    >
+                      <RefreshCw className={`w-4 h-4 ${isRegeneratingPin ? 'animate-spin' : ''}`} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {resetSuccess && (
+              <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-2xl text-xs font-bold flex items-center gap-2">
+                <Check className="w-4 h-4" />
+                <span>تم تصفير ومسح ذاكرة الجلسة السحابية بنجاح! الجلسة جاهزة تماماً للبدء من جديد.</span>
+              </div>
+            )}
+
+            {/* Filter Search Bar & QR button */}
+            <div className="flex items-center justify-between gap-3 pt-3 border-t border-slate-800/80">
+              <div className="relative flex-1 max-w-md">
+                <Search className="w-4 h-4 text-slate-500 absolute right-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={studentSearch}
+                  onChange={(e) => setStudentSearch(e.target.value)}
+                  placeholder="بحث باسم الطالب أو رقم الشيت..."
+                  className="w-full pr-10 pl-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 placeholder-slate-500 outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setActiveTab('qrcode')}
+                  className="px-3.5 py-2 bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 font-bold rounded-xl text-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                >
+                  <QrCode className="w-4 h-4 text-indigo-400" />
+                  <span>عرض رمز QR</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Response Meter Badge Card (Transferred here as requested) */}
+          {(() => {
+            const currentQ = sessionState?.currentQuestion;
+            const answersMap = sessionState?.answersForCurrentQuestion || {};
+            const totalStudentsCount = sessionState?.connectedStudents?.length || 0;
+            const answeredCount = Object.keys(answersMap).length;
+            const answerPercentage = totalStudentsCount > 0 
+              ? Math.min(100, Math.round((answeredCount / totalStudentsCount) * 100)) 
+              : 0;
+
+            return (
+              <div className="bg-gradient-to-r from-slate-900 via-slate-850 to-slate-900 border border-slate-800 hover:border-slate-700 rounded-3xl p-5 shadow-xl transition-all">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className="w-7 h-7 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center font-black text-xs font-mono">
+                        {(sessionState?.currentQuestionIndex ?? 0) + 1}
+                      </span>
+                      <span className="text-xs font-bold text-amber-400">
+                        {sessionState?.status === 'question_active' 
+                          ? '⚡ سؤال تفاعلي نشط معروض على شاشة المعلم' 
+                          : sessionState?.status === 'revealed'
+                          ? '🎯 تم كشف الإجابة النموذجية'
+                          : 'متابعة إجابات وتفاعل الطلاب على الأسئلة'}
+                      </span>
+                    </div>
+                    <h4 className="text-sm sm:text-base font-black text-slate-100 line-clamp-1">
+                      {currentQ ? currentQ.question : 'في انتظار قيام المعلم بطرح سؤال من الفيديو...'}
+                    </h4>
+                  </div>
+
+                  {/* Transferred Badge */}
+                  <div className="flex items-center gap-4 bg-slate-950 border border-slate-800 rounded-2xl px-5 py-3 shadow-inner self-start sm:self-auto">
+                    <div className="text-right">
+                      <div className="text-[11px] font-bold text-slate-400">إجابات الطلاب</div>
+                      <div className="text-base font-black text-emerald-400 font-mono">
+                        {answeredCount} / {totalStudentsCount} طالب
+                      </div>
+                    </div>
+                    <div className="w-14 h-14 relative flex items-center justify-center">
+                      <svg className="w-14 h-14 -rotate-90" viewBox="0 0 36 36">
+                        <path
+                          className="text-slate-800"
+                          strokeWidth="3.5"
+                          stroke="currentColor"
+                          fill="none"
+                          d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                        />
+                        <path
+                          className="text-emerald-500 transition-all duration-500 ease-out"
+                          strokeDasharray={`${answerPercentage}, 100`}
+                          strokeWidth="3.5"
+                          strokeLinecap="round"
+                          stroke="currentColor"
+                          fill="none"
+                          d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                        />
+                      </svg>
+                      <span className="absolute text-xs font-black font-mono text-slate-200">
+                        {answerPercentage}%
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Students List */}
+          {(() => {
+            const answersMap = sessionState?.answersForCurrentQuestion || {};
+            const list = (sessionState?.connectedStudents || []).filter(s => {
+              if (!studentSearch.trim()) return true;
+              const q = studentSearch.toLowerCase();
+              return s.username.toLowerCase().includes(q) || (s.sheetNumber && s.sheetNumber.includes(q));
+            });
+
+            if (list.length === 0) {
+              return (
+                <div className="bg-slate-900 border border-slate-800 rounded-3xl p-12 text-center space-y-4">
+                  <div className="w-16 h-16 rounded-3xl bg-slate-800/60 text-slate-600 mx-auto flex items-center justify-center">
+                    <Users className="w-8 h-8" />
+                  </div>
+                  <div>
+                    <h4 className="text-base font-bold text-slate-300">
+                      {studentSearch ? 'لم يتم العثور على طالب يطابق البحث' : 'لا يوجد طلاب متصلون حالياً بالحصة'}
+                    </h4>
+                    <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+                      يمكن للطلاب الانضمام فوراً بمسح رمز QR أو فتح رابط الانضمام على هواتفهم الذكية.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setActiveTab('qrcode')}
+                    className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs transition-all inline-flex items-center gap-2 cursor-pointer shadow-lg shadow-indigo-600/20"
+                  >
+                    <QrCode className="w-4 h-4" />
+                    <span>عرض رمز ورابط دخول الطلاب</span>
+                  </button>
+                </div>
+              );
+            }
+
+            return (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {list.map((student, idx) => {
+                  const studentKey = `${student.username}_${student.sheetNumber || ''}`;
+                  const ansObj = answersMap[studentKey];
+                  const hasAnswered = Boolean(ansObj);
+
+                  return (
+                    <div
+                      key={idx}
+                      className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between gap-3 shadow-md hover:border-slate-700 transition-all group"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold text-sm">
+                            {idx + 1}
+                          </div>
+                          <div>
+                            <h4 className="text-sm font-bold text-slate-100 flex items-center gap-1.5">
+                              <span>{student.username}</span>
+                            </h4>
+                            <span className="text-[11px] text-slate-500 font-mono">
+                              رقم الشيت: {student.sheetNumber || 'غير محدد'}
+                            </span>
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => handleRemoveStudent(student.username, student.sheetNumber)}
+                          title="إزالة / فصل الطالب من الحصة"
+                          className="p-1.5 text-slate-600 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition-all cursor-pointer opacity-80 group-hover:opacity-100"
+                        >
+                          <UserX className="w-4 h-4" />
+                        </button>
+                      </div>
+
+                      {/* Question Answer Status */}
+                      <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800/80 text-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-400 text-[11px]">حالة السؤال الحالي:</span>
+                          {hasAnswered ? (
+                            <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold flex items-center gap-1">
+                              <CheckCircle2 className="w-3 h-3" />
+                              <span>تمت الإجابة: <b className="font-mono text-white">{ansObj.answer}</b></span>
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-400 border border-amber-500/30 text-[10px] font-bold flex items-center gap-1">
+                              <Clock className="w-3 h-3" />
+                              <span>في انتظار الإجابة...</span>
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-2 border-t border-slate-800/80 text-xs">
+                        {student.pinVerified ? (
+                          <span className="px-2 py-0.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold flex items-center gap-1">
+                            <ShieldCheck className="w-3 h-3" />
+                            <span>حاضر ومؤكد بـ PIN</span>
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-400 text-[10px] font-bold flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3" />
+                            <span>متصل (لم يدخل PIN)</span>
+                          </span>
+                        )}
+
+                        <span className="flex items-center gap-1.5 text-[11px] text-emerald-400 font-medium">
+                          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                          <span>متصل الآن</span>
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB 4: STUDENT JOIN QR & LINK */}
       {/* ========================================================================= */}
       {activeTab === 'qrcode' && (
         <div className="max-w-xl mx-auto bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 text-center space-y-6 shadow-2xl">
