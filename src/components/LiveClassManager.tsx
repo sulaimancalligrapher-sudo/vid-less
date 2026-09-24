@@ -77,6 +77,7 @@ export default function LiveClassManager({
   const [editingLesson, setEditingLesson] = useState<LiveLessonRow | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [showEndConfirmModal, setShowEndConfirmModal] = useState(false);
 
   // Link copy state
   const [copiedLink, setCopiedLink] = useState(false);
@@ -256,30 +257,41 @@ export default function LiveClassManager({
   const handleToggleProgram = async () => {
     const isCurrentlyActive = Boolean(sessionState?.isProgramActive);
     if (isCurrentlyActive) {
-      if (!window.confirm('هل أنت متأكد من إنهاء البرنامج وإخراج جميع الطلاب المشتركين من الحصة المباشرة؟')) {
-        return;
-      }
+      // Use in-app modal instead of window.confirm which gets blocked in iframes
+      setShowEndConfirmModal(true);
+      return;
     }
 
     setIsTogglingProgram(true);
     try {
-      if (isCurrentlyActive) {
-        const res = await endLiveProgram();
-        if (res.success && res.state) {
-          setSessionState(res.state);
-          setProgramToast('تم إنهاء البرنامج وإخراج جميع الطلاب بنجاح 🛑');
-        }
-      } else {
-        const res = await startLiveProgram();
-        if (res.success && res.state) {
-          setSessionState(res.state);
-          setProgramToast(`تم بدء البرنامج وتوليد رمز الحضور (${res.pin}) بنجاح 🚀`);
-        }
+      const res = await startLiveProgram();
+      if (res.success && res.state) {
+        setSessionState(res.state);
+        setProgramToast(`تم بدء البرنامج وتوليد رمز الحضور (${res.pin}) بنجاح 🚀`);
       }
       setTimeout(() => setProgramToast(null), 4000);
     } catch (e: any) {
-      console.error('Failed to toggle program:', e);
-      setProgramToast('تعذر تغيير حالة البرنامج: ' + (e?.message || 'خطأ في الشبكة'));
+      console.error('Failed to start program:', e);
+      setProgramToast('تعذر بدء البرنامج: ' + (e?.message || 'خطأ في الشبكة'));
+      setTimeout(() => setProgramToast(null), 5000);
+    } finally {
+      setIsTogglingProgram(false);
+    }
+  };
+
+  const handleConfirmEndProgram = async () => {
+    setShowEndConfirmModal(false);
+    setIsTogglingProgram(true);
+    try {
+      const res = await endLiveProgram();
+      if (res.success && res.state) {
+        setSessionState(res.state);
+        setProgramToast('تم إنهاء البرنامج وإخراج جميع الطلاب بنجاح 🛑');
+      }
+      setTimeout(() => setProgramToast(null), 4000);
+    } catch (e: any) {
+      console.error('Failed to end program:', e);
+      setProgramToast('تعذر إنهاء البرنامج: ' + (e?.message || 'خطأ في الشبكة'));
       setTimeout(() => setProgramToast(null), 5000);
     } finally {
       setIsTogglingProgram(false);
@@ -1487,6 +1499,55 @@ export default function LiveClassManager({
                     <span>حفظ الدرس في Questions-T 💾</span>
                   </button>
                 </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Confirmation Modal to End Program (100% works in iframes and mobile) */}
+      <AnimatePresence>
+        {showEndConfirmModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4 text-right"
+              dir="rtl"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center shrink-0">
+                  <Power className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-slate-100">تأكيد إنهاء الحصة المباشرة</h3>
+                  <p className="text-xs text-slate-400">إغلاق البرنامج وإخراج الطلاب</p>
+                </div>
+              </div>
+
+              <div className="text-sm text-slate-300 leading-relaxed bg-slate-950/70 border border-slate-800 p-4 rounded-2xl space-y-2">
+                <p>هل أنت متأكد من رغبتك في <b>إنهاء البرنامج المباشر</b>؟</p>
+                <p className="text-xs text-rose-400 font-medium">⚠️ سيتم إخراج جميع الطلاب المشتركين حالياً من الفصل التفاعلي، وإغلاق الرمز المعروض على الشاشة.</p>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowEndConfirmModal(false)}
+                  className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-all cursor-pointer"
+                >
+                  إلغاء وتراجع
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmEndProgram}
+                  disabled={isTogglingProgram}
+                  className="px-5 py-2.5 rounded-xl text-xs font-black bg-gradient-to-r from-rose-600 to-red-700 hover:from-rose-500 hover:to-red-600 text-white shadow-lg shadow-rose-900/40 transition-all cursor-pointer flex items-center gap-2"
+                >
+                  <Power className="w-4 h-4" />
+                  <span>تأكيد إنهاء الحصة والإخراج 🛑</span>
+                </button>
               </div>
             </motion.div>
           </div>

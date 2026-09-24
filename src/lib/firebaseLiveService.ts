@@ -365,20 +365,33 @@ export async function submitLiveAnswer(payload: {
     const currentAnswers = { ...(state.answersForCurrentQuestion || {}) };
     const allAnswers = { ...(state.allSessionAnswers || {}) };
 
+    const cleanUser = String(payload.username || '').trim();
+    const cleanSheet = String(payload.sheetNumber || '').trim();
+    const studentKey = cleanSheet ? `${cleanUser}_${cleanSheet}` : cleanUser;
+
     const submission: LiveStudentAnswerSubmission = {
-      username: payload.username,
-      sheetNumber: payload.sheetNumber,
-      answer: payload.answer,
+      username: cleanUser,
+      sheetNumber: cleanSheet,
+      answer: String(payload.answer ?? '').trim(),
       isCorrect: payload.isCorrect,
       submittedAt: Date.now(),
     };
 
-    currentAnswers[payload.username] = submission;
+    // Store in current question submissions under both keys
+    currentAnswers[studentKey] = submission;
+    currentAnswers[cleanUser] = submission;
 
-    if (!allAnswers[payload.username]) {
-      allAnswers[payload.username] = {};
+    // Store in allSessionAnswers under studentKey
+    if (!allAnswers[studentKey]) {
+      allAnswers[studentKey] = {};
     }
-    allAnswers[payload.username][payload.questionIndex] = payload.answer;
+    allAnswers[studentKey][payload.questionIndex] = String(payload.answer ?? '').trim();
+
+    // Also store under cleanUser for direct username lookup
+    if (!allAnswers[cleanUser]) {
+      allAnswers[cleanUser] = {};
+    }
+    allAnswers[cleanUser][payload.questionIndex] = String(payload.answer ?? '').trim();
 
     await updateDoc(LIVE_DOC_REF, {
       answersForCurrentQuestion: currentAnswers,

@@ -255,19 +255,33 @@ export default function LiveTeacherRoom({
     const allAnswers = sessionState.allSessionAnswers || {};
     const students = sessionState.connectedStudents || [];
 
-    // Only students who are currently connected to this live session
-    const studentKeys = new Set<string>();
+    // Collect all students: from connectedStudents and any submitted answers
+    const studentMap = new Map<string, { username: string; sheetNumber: string }>();
+
     students.forEach(s => {
-      if (s.username) {
-        studentKeys.add(`${s.username}_${s.sheetNumber || ''}`);
+      const u = String(s.username || '').trim();
+      const num = String(s.sheetNumber || '').trim();
+      if (u) {
+        studentMap.set(num ? `${u}_${num}` : u, { username: u, sheetNumber: num });
       }
     });
 
-    studentKeys.forEach(studentKey => {
-      const parts = studentKey.split('_');
-      const uname = parts[0] || '';
-      const snum = parts.slice(1).join('_') || '';
-      const studentAnswers = allAnswers[studentKey] || {};
+    Object.keys(allAnswers).forEach(key => {
+      const trimmedKey = String(key || '').trim();
+      if (trimmedKey && !studentMap.has(trimmedKey)) {
+        if (trimmedKey.includes('_')) {
+          const parts = trimmedKey.split('_');
+          studentMap.set(trimmedKey, { username: parts[0] || '', sheetNumber: parts.slice(1).join('_') || '' });
+        } else {
+          studentMap.set(trimmedKey, { username: trimmedKey, sheetNumber: '' });
+        }
+      }
+    });
+
+    studentMap.forEach((studentInfo, studentKey) => {
+      const uname = studentInfo.username;
+      const snum = studentInfo.sheetNumber;
+      const studentAnswers = allAnswers[studentKey] || allAnswers[`${uname}_${snum}`] || allAnswers[uname] || {};
       const formattedAnswers: Record<number, string> = {};
       
       let correctCount = 0;
@@ -318,7 +332,14 @@ export default function LiveTeacherRoom({
       // 1. Record student answers to Google Sheets Answers-T with final timestamp
       const records = buildCurrentAnswerRecords(true);
       if (records.length > 0) {
-        await recordLiveAnswersBatchT(records);
+        const res = await recordLiveAnswersBatchT(records);
+        if (res && res.success) {
+          setShowSaveSuccess(true);
+        } else {
+          alert('تعذر حفظ الإجابات في ورقة Answers-T:\n' + (res?.message || 'تحقق من رابط Google Apps Script وصلاحيات النشر (Who has access: Anyone)'));
+        }
+      } else {
+        alert('تنبيه: لم يتم العثور على أي إجابات مرسلة من الطلاب لهذا الدرس لحفظها في Answers-T.');
       }
       // Clear localStorage emergency backup since successfully saved to Sheets
       try {
@@ -334,14 +355,15 @@ export default function LiveTeacherRoom({
       }
       setIsPlaying(false);
 
-      // 4. Show success toast
+      // 4. Show success toast if not already shown
       setShowSaveSuccess(true);
       setTimeout(() => setShowSaveSuccess(false), 4000);
 
       // 5. Exit video and return to awaiting next video or lesson selection
       setSelectedLesson(null);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error finishing lesson and saving to Answers-T:', err);
+      alert('حدث خطأ أثناء إنهاء الدرس: ' + (err?.message || 'خطأ غير معروف'));
     } finally {
       setIsFinishingLesson(false);
     }
