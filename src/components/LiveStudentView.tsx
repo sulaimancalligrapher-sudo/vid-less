@@ -85,6 +85,15 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
       es.onmessage = (event) => {
         try {
           const state: LiveSessionState = JSON.parse(event.data);
+          if (state.status === 'program_ended') {
+            setIsJoined(false);
+            setIsPinVerified(false);
+            setSubmittedAnswer(null);
+            setJoinError('تم إنهاء البرنامج والحصة التفاعلية بنجاح 🎓 شكراً لتفاعلكم!');
+            sessionStorage.removeItem('liveStudentUsername');
+            sessionStorage.removeItem('liveStudentSheet');
+            return;
+          }
           setSessionState(state);
           setConnected(true);
         } catch (err) {
@@ -98,6 +107,15 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
           pollInterval = setInterval(async () => {
             const s = await getLiveSessionState();
             if (s) {
+              if (s.status === 'program_ended') {
+                setIsJoined(false);
+                setIsPinVerified(false);
+                setSubmittedAnswer(null);
+                setJoinError('تم إنهاء البرنامج والحصة التفاعلية بنجاح 🎓 شكراً لتفاعلكم!');
+                sessionStorage.removeItem('liveStudentUsername');
+                sessionStorage.removeItem('liveStudentSheet');
+                return;
+              }
               setSessionState(s);
               setConnected(true);
             }
@@ -109,6 +127,15 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
       pollInterval = setInterval(async () => {
         const s = await getLiveSessionState();
         if (s) {
+          if (s.status === 'program_ended') {
+            setIsJoined(false);
+            setIsPinVerified(false);
+            setSubmittedAnswer(null);
+            setJoinError('تم إنهاء البرنامج والحصة التفاعلية بنجاح 🎓 شكراً لتفاعلكم!');
+            sessionStorage.removeItem('liveStudentUsername');
+            sessionStorage.removeItem('liveStudentSheet');
+            return;
+          }
           setSessionState(s);
           setConnected(true);
         }

@@ -4,7 +4,8 @@ import {
   Tv, Plus, Play, Edit3, Trash2, Save, FileSpreadsheet, 
   Users, CheckCircle2, Clock, HelpCircle, Image, ExternalLink, 
   RefreshCw, Search, QrCode, Copy, Check, Sparkles, ChevronDown, 
-  ChevronUp, ArrowLeft, AlertCircle, X, KeyRound, ShieldCheck, UserX
+  ChevronUp, ArrowLeft, AlertCircle, X, KeyRound, ShieldCheck, UserX,
+  Power, ShieldAlert, DownloadCloud, History
 } from 'lucide-react';
 import { 
   LiveLessonRow, LiveQuestionItem, LiveAnswerRecord, LiveSessionState 
@@ -12,6 +13,7 @@ import {
 import { 
   fetchLiveQuestionsT, saveLiveLessonT, fetchLiveAnswersT, 
   getLiveSessionState, updateLivePin, leaveLiveSession, resetLiveSession,
+  startLiveProgram, endLiveProgram, getLiveBackup, restoreLiveBackup, recordLiveAnswersBatchT,
   formatSecondsToTime, parseTimeToSeconds, formatDriveImageUrl 
 } from '../api';
 
@@ -63,6 +65,11 @@ export default function LiveClassManager({
   const [isRegeneratingPin, setIsRegeneratingPin] = useState(false);
   const [isResettingSession, setIsResettingSession] = useState(false);
   const [resetSuccess, setResetSuccess] = useState(false);
+  const [isTogglingProgram, setIsTogglingProgram] = useState(false);
+  const [programToast, setProgramToast] = useState<string | null>(null);
+  const [backupData, setBackupData] = useState<any | null>(null);
+  const [isCheckingBackup, setIsCheckingBackup] = useState(false);
+  const [isSavingRecovered, setIsSavingRecovered] = useState(false);
   
   // Editor Modal State
   const [isEditorOpen, setIsEditorOpen] = useState(false);
@@ -270,6 +277,106 @@ export default function LiveClassManager({
     }
   };
 
+  // Program Lifecycle: Start (generates PIN) / End (expels all students)
+  const handleToggleProgram = async () => {
+    const isCurrentlyActive = Boolean(sessionState?.isProgramActive);
+    if (isCurrentlyActive) {
+      if (!window.confirm('هل أنت متأكد من إنهاء البرنامج وإخراج جميع الطلاب المشتركين من الحصة المباشرة؟')) {
+        return;
+      }
+    }
+
+    setIsTogglingProgram(true);
+    try {
+      if (isCurrentlyActive) {
+        const res = await endLiveProgram();
+        if (res.success && res.state) {
+          setSessionState(res.state);
+          setProgramToast('تم إنهاء البرنامج وإخراج جميع الطلاب بنجاح 🛑');
+        }
+      } else {
+        const res = await startLiveProgram();
+        if (res.success && res.state) {
+          setSessionState(res.state);
+          setProgramToast(`تم بدء البرنامج وتوليد رمز الحضور (${res.pin}) بنجاح 🚀`);
+        }
+      }
+      setTimeout(() => setProgramToast(null), 4000);
+    } catch (e) {
+      console.error('Failed to toggle program:', e);
+    } finally {
+      setIsTogglingProgram(false);
+    }
+  };
+
+  // Emergency Backup: inspect & recover answers after sudden crash or power cut
+  const handleCheckBackup = async () => {
+    setIsCheckingBackup(true);
+    try {
+      const res = await getLiveBackup();
+      if (res.success && res.backup && res.backup.session) {
+        const sess = res.backup.session;
+        const answersCount = Object.keys(sess.allSessionAnswers || {}).length;
+        if (answersCount > 0) {
+          setBackupData(res.backup);
+        } else {
+          alert('النسخة الاحتياطية لا تحتوي على إجابات محفوظة.');
+        }
+      } else {
+        alert('لا توجد نسخة احتياطية محفوظة حالياً على الخادم.');
+      }
+    } catch (err) {
+      console.error('Error fetching backup:', err);
+    } finally {
+      setIsCheckingBackup(false);
+    }
+  };
+
+  const handleSaveBackupToSheets = async () => {
+    if (!backupData || !backupData.session) return;
+    setIsSavingRecovered(true);
+    try {
+      const sess = backupData.session;
+      const allAnswers = sess.allSessionAnswers || {};
+      const lessonTitle = sess.lessonTitle || 'درس مسترجع من النسخة الاحتياطية';
+      const timestamp = new Date().toLocaleString('ar-SA');
+      const records: LiveAnswerRecord[] = [];
+
+      Object.entries(allAnswers).forEach(([studentKey, answers]: [string, any]) => {
+        const parts = studentKey.split('_');
+        const uname = parts[0] || '';
+        const snum = parts.slice(1).join('_') || '';
+        const formatted: Record<number, string> = {};
+        Object.entries(answers).forEach(([qIdx, ans]) => {
+          formatted[Number(qIdx)] = String(ans);
+        });
+
+        if (Object.keys(formatted).length > 0) {
+          records.push({
+            timestamp,
+            sheetNumber: snum,
+            username: uname,
+            lessonTitle,
+            answers: formatted
+          });
+        }
+      });
+
+      if (records.length > 0) {
+        await recordLiveAnswersBatchT(records);
+        alert(`تم استرجاع وحفظ إجابات ${records.length} طالب بنجاح في ورقة Answers-T!`);
+        loadAnswers();
+        setBackupData(null);
+      } else {
+        alert('النسخة الاحتياطية لا تحتوي على إجابات قابلة للحفظ.');
+      }
+    } catch (err: any) {
+      alert('حدث خطأ أثناء حفظ النسخة المسترجعة: ' + err.message);
+    } finally {
+      setIsSavingRecovered(false);
+    }
+  };
+
   // Filtered answers
   const filteredAnswers = answers.filter(a => {
     const q = searchQuery.toLowerCase();
@@ -280,11 +387,21 @@ export default function LiveClassManager({
     );
   });
 
+  const isProgramRunning = Boolean(sessionState?.isProgramActive);
+
   return (
     <div className="space-y-6 text-slate-100">
+      {/* Toast Notification */}
+      {programToast && (
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 px-6 py-3 bg-slate-900 border-2 border-amber-500 rounded-2xl shadow-2xl text-amber-300 font-bold text-sm flex items-center gap-2 animate-bounce">
+          <Sparkles className="w-5 h-5 text-amber-400" />
+          <span>{programToast}</span>
+        </div>
+      )}
+
       {/* Top Banner & Navigation */}
       <div className="bg-gradient-to-r from-slate-900 via-indigo-950/40 to-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl relative overflow-hidden">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative z-10">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 relative z-10">
           <div className="flex items-center gap-3.5">
             <div className="w-14 h-14 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-2xl flex items-center justify-center shadow-inner">
               <Tv className="w-7 h-7" />
@@ -304,15 +421,52 @@ export default function LiveClassManager({
             </div>
           </div>
 
-          {onBackToAdmin && (
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* START / END PROGRAM LIFECYCLE BUTTON */}
             <button
-              onClick={onBackToAdmin}
-              className="px-4 py-2.5 bg-slate-800/80 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs transition-all flex items-center gap-2 self-start sm:self-auto cursor-pointer"
+              onClick={handleToggleProgram}
+              disabled={isTogglingProgram}
+              title={isProgramRunning ? 'إنهاء البرنامج وإخراج جميع المشتركين' : 'بدء البرنامج وتوليد رمز الحضور'}
+              className={`px-4 py-2.5 rounded-xl text-xs font-black flex items-center gap-2 shadow-lg transition-all cursor-pointer active:scale-95 disabled:opacity-50 ${
+                isProgramRunning
+                  ? 'bg-gradient-to-r from-rose-600 to-red-700 hover:from-rose-500 hover:to-red-600 text-white shadow-rose-900/30'
+                  : 'bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white shadow-emerald-900/30'
+              }`}
             >
-              <ArrowLeft className="w-4 h-4" />
-              <span>العودة للوحة الإدارة</span>
+              <Power className={`w-4 h-4 ${isTogglingProgram ? 'animate-spin' : ''}`} />
+              <span>
+                {isTogglingProgram
+                  ? 'جارٍ التنفيذ...'
+                  : isProgramRunning
+                  ? 'إنهاء البرنامج وإخراج الطلاب 🛑'
+                  : 'بداية البرنامج وتوليد الرمز 🚀'}
+              </span>
             </button>
-          )}
+
+            {/* Active PIN Indicator */}
+            {sessionState?.sessionPin && (
+              <div 
+                onClick={handleCopyPin}
+                title="رمز الحضور الحالي - انقر للنسخ"
+                className="px-3 py-2 bg-slate-950 border border-amber-500/40 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer hover:border-amber-400"
+              >
+                <KeyRound className="w-3.5 h-3.5 text-amber-400" />
+                <span className="text-[11px] text-amber-400/80 font-normal">الرمز:</span>
+                <span className="font-mono font-black text-amber-300 tracking-wider">{sessionState.sessionPin}</span>
+                {copiedPin ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3 h-3 text-slate-500" />}
+              </div>
+            )}
+
+            {onBackToAdmin && (
+              <button
+                onClick={onBackToAdmin}
+                className="px-4 py-2.5 bg-slate-800/80 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs transition-all flex items-center gap-2 cursor-pointer"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span>العودة للوحة الإدارة</span>
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Tab Switcher */}
@@ -508,15 +662,62 @@ export default function LiveClassManager({
               <Search className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
             </div>
 
-            <button
-              onClick={loadAnswers}
-              disabled={loadingAnswers}
-              className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer self-start sm:self-auto"
-            >
-              <RefreshCw className={`w-4 h-4 ${loadingAnswers ? 'animate-spin text-amber-500' : ''}`} />
-              <span>تحديث السجل</span>
-            </button>
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Emergency Recovery Button */}
+              <button
+                onClick={handleCheckBackup}
+                disabled={isCheckingBackup}
+                title="استرجاع إجابات الطلاب المحفوظة تلقائياً في الخادم تحسباً لانقطاع الكهرباء أو إغلاق المتصفح"
+                className="px-3.5 py-2 bg-indigo-950/60 hover:bg-indigo-900/80 border border-indigo-500/40 text-indigo-300 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95 disabled:opacity-50"
+              >
+                <DownloadCloud className={`w-4 h-4 text-indigo-400 ${isCheckingBackup ? 'animate-bounce' : ''}`} />
+                <span>فحص النسخة الاحتياطية الطارئة 🛡️</span>
+              </button>
+
+              <button
+                onClick={loadAnswers}
+                disabled={loadingAnswers}
+                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer self-start sm:self-auto"
+              >
+                <RefreshCw className={`w-4 h-4 ${loadingAnswers ? 'animate-spin text-amber-500' : ''}`} />
+                <span>تحديث السجل</span>
+              </button>
+            </div>
           </div>
+
+          {/* Emergency Backup Found Banner */}
+          {backupData && (
+            <div className="p-4 bg-gradient-to-r from-indigo-950/80 to-slate-900 border-2 border-indigo-500/60 rounded-2xl shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <ShieldAlert className="w-5 h-5 text-indigo-400 shrink-0 mt-0.5" />
+                <div>
+                  <div className="text-xs font-bold text-indigo-200">
+                    تم العثور على نسخة احتياطية محفوظة طارئة على الخادم!
+                  </div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">
+                    موضوع الدرس: <b className="text-amber-300">{backupData.session?.lessonTitle || 'درس تفاعلي'}</b> — وقت الحفظ: {new Date(backupData.savedAt).toLocaleTimeString('ar-SA')} — عدد الطلاب المسجلة إجاباتهم: {Object.keys(backupData.session?.allSessionAnswers || {}).length}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleSaveBackupToSheets}
+                  disabled={isSavingRecovered}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-emerald-600/20 cursor-pointer active:scale-95 disabled:opacity-50"
+                >
+                  <Save className={`w-4 h-4 ${isSavingRecovered ? 'animate-spin' : ''}`} />
+                  <span>{isSavingRecovered ? 'جارٍ الحفظ في الشيت...' : 'حفظ فوري في ورقة Answers-T 📥'}</span>
+                </button>
+                <button
+                  onClick={() => setBackupData(null)}
+                  className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 rounded-xl text-xs cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
 
           {loadingAnswers ? (
             <div className="p-12 text-center text-slate-500 bg-slate-900/50 rounded-3xl border border-slate-800">
@@ -640,6 +841,27 @@ export default function LiveClassManager({
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
+                {/* START / END PROGRAM LIFECYCLE BUTTON */}
+                <button
+                  onClick={handleToggleProgram}
+                  disabled={isTogglingProgram}
+                  title={isProgramRunning ? 'إنهاء البرنامج وإخراج جميع المشتركين' : 'بدء البرنامج وتوليد رمز الحضور'}
+                  className={`px-4 py-2.5 rounded-2xl text-xs font-black flex items-center gap-2 shadow-lg transition-all cursor-pointer active:scale-95 disabled:opacity-50 ${
+                    isProgramRunning
+                      ? 'bg-gradient-to-r from-rose-600 to-red-700 hover:from-rose-500 hover:to-red-600 text-white shadow-rose-900/30'
+                      : 'bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white shadow-emerald-900/30'
+                  }`}
+                >
+                  <Power className={`w-4 h-4 ${isTogglingProgram ? 'animate-spin' : ''}`} />
+                  <span>
+                    {isTogglingProgram
+                      ? 'جارٍ التنفيذ...'
+                      : isProgramRunning
+                      ? 'إنهاء البرنامج وإخراج المشتركين 🛑'
+                      : 'بداية البرنامج وتوليد الرمز 🚀'}
+                  </span>
+                </button>
+
                 {/* Reset Session Memory Button */}
                 <button
                   onClick={handleResetSession}
@@ -648,7 +870,7 @@ export default function LiveClassManager({
                   className="px-3.5 py-2.5 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 hover:text-rose-300 font-bold rounded-2xl text-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                 >
                   <RefreshCw className={`w-4 h-4 ${isResettingSession ? 'animate-spin' : ''}`} />
-                  <span>تصفير ومسح الذاكرة 🔄</span>
+                  <span>تصفير الذاكرة 🔄</span>
                 </button>
 
                 {/* PIN Code Box */}

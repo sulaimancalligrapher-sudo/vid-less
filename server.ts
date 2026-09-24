@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { Readable } from "stream";
 
@@ -44,12 +45,15 @@ async function startServer() {
     return String(Math.floor(1000 + Math.random() * 9000));
   }
 
+  const BACKUP_FILE = path.join(process.cwd(), '.live_session_backup.json');
+
   let currentLiveSession = {
     sessionId: 'live-main',
     sessionPin: '1234',
+    isProgramActive: false,
     lessonTitle: '',
     videoUrl: '',
-    status: 'idle' as 'idle' | 'waiting' | 'playing' | 'question_active' | 'revealed' | 'finished',
+    status: 'idle' as 'idle' | 'waiting' | 'playing' | 'question_active' | 'revealed' | 'finished' | 'program_ended',
     currentQuestionIndex: null as number | null,
     currentQuestion: null as LiveQuestionPayload | null,
     questionTriggeredAt: null as number | null,
@@ -59,6 +63,33 @@ async function startServer() {
     answersForCurrentQuestion: {} as Record<string, LiveStudentAnswerSubmission>,
     allSessionAnswers: {} as Record<string, Record<number, string>>,
   };
+
+  function saveBackup() {
+    try {
+      const dataToSave = {
+        savedAt: new Date().toISOString(),
+        session: currentLiveSession
+      };
+      fs.writeFileSync(BACKUP_FILE, JSON.stringify(dataToSave, null, 2), 'utf-8');
+    } catch (err) {
+      console.warn('Failed to save session backup:', err);
+    }
+  }
+
+  function loadBackup() {
+    try {
+      if (fs.existsSync(BACKUP_FILE)) {
+        const raw = fs.readFileSync(BACKUP_FILE, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.session) {
+          return parsed;
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to load session backup:', err);
+    }
+    return null;
+  }
 
   const sseClients = new Set<express.Response>();
 
@@ -95,11 +126,66 @@ async function startServer() {
     res.json(currentLiveSession);
   });
 
-  // Teacher initializes or changes lesson
+  // Teacher starts program session (Generates PIN, activates program, resets students)
+  app.post("/api/live/start-program", (req, res) => {
+    const pin = generatePinCode();
+    currentLiveSession.sessionId = 'live-' + Date.now();
+    currentLiveSession.sessionPin = pin;
+    currentLiveSession.isProgramActive = true;
+    currentLiveSession.status = 'idle';
+    currentLiveSession.connectedStudents = [];
+    currentLiveSession.answersForCurrentQuestion = {};
+    currentLiveSession.allSessionAnswers = {};
+    currentLiveSession.currentQuestion = null;
+    currentLiveSession.currentQuestionIndex = null;
+    saveBackup();
+    broadcastLiveState();
+    res.json({ success: true, pin, state: currentLiveSession });
+  });
+
+  // Teacher ends program session (Expels all students, clears PIN, ends session)
+  app.post("/api/live/end-program", (req, res) => {
+    currentLiveSession.isProgramActive = false;
+    currentLiveSession.status = 'program_ended';
+    currentLiveSession.connectedStudents = []; // Expel / log out all connected students
+    currentLiveSession.sessionPin = '';
+    currentLiveSession.currentQuestion = null;
+    currentLiveSession.currentQuestionIndex = null;
+    currentLiveSession.answersForCurrentQuestion = {};
+    saveBackup();
+    broadcastLiveState();
+    res.json({ success: true, state: currentLiveSession });
+  });
+
+  // Emergency Session Backup check & restore
+  app.get("/api/live/backup", (req, res) => {
+    const backup = loadBackup();
+    res.json({ success: true, backup });
+  });
+
+  app.post("/api/live/restore-backup", (req, res) => {
+    const backup = loadBackup();
+    if (backup) {
+      currentLiveSession = { ...backup };
+      broadcastLiveState();
+      return res.json({ success: true, state: currentLiveSession });
+    }
+    res.status(404).json({ success: false, error: 'لا توجد نسخة احتياطية محفوظة' });
+  });
+
+  // Teacher initializes or changes lesson (KEEPS current sessionPin if program is running!)
   app.post("/api/live/init", (req, res) => {
     const { lessonTitle, videoUrl, timeLimit, showResult, sessionPin } = req.body;
     currentLiveSession.sessionId = 'live-' + Date.now();
-    currentLiveSession.sessionPin = sessionPin && String(sessionPin).trim() ? String(sessionPin).trim() : generatePinCode();
+    
+    // Preserve existing PIN so students stay joined across video changes!
+    if (sessionPin && String(sessionPin).trim()) {
+      currentLiveSession.sessionPin = String(sessionPin).trim();
+    } else if (!currentLiveSession.sessionPin) {
+      currentLiveSession.sessionPin = generatePinCode();
+    }
+    
+    currentLiveSession.isProgramActive = true;
     currentLiveSession.lessonTitle = lessonTitle || 'درس تفاعلي مباشر';
     currentLiveSession.videoUrl = videoUrl || '';
     currentLiveSession.status = 'waiting';
@@ -109,7 +195,8 @@ async function startServer() {
     currentLiveSession.timeLimit = typeof timeLimit === 'number' && timeLimit > 0 ? timeLimit : 30;
     currentLiveSession.showResult = showResult || 'نعم';
     currentLiveSession.answersForCurrentQuestion = {};
-    currentLiveSession.allSessionAnswers = {}; // Clear old session answers memory
+    currentLiveSession.allSessionAnswers = {}; // Clear old session answers memory for new video
+    saveBackup();
     broadcastLiveState();
     res.json({ success: true, state: currentLiveSession });
   });
@@ -260,6 +347,7 @@ async function startServer() {
     }
     currentLiveSession.allSessionAnswers[studentKey][qIdx] = String(answer);
 
+    saveBackup(); // Instant persistent disk write to prevent data loss on crash or power failure!
     broadcastLiveState();
     res.json({ success: true, state: currentLiveSession });
   });
@@ -298,6 +386,7 @@ async function startServer() {
     currentLiveSession = {
       sessionId: 'live-' + Date.now(),
       sessionPin: generatePinCode(),
+      isProgramActive: false,
       lessonTitle: '',
       videoUrl: '',
       status: 'idle',
@@ -310,6 +399,7 @@ async function startServer() {
       answersForCurrentQuestion: {},
       allSessionAnswers: {},
     };
+    saveBackup();
     broadcastLiveState();
     res.json({ success: true, state: currentLiveSession });
   });

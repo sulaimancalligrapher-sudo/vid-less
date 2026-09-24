@@ -342,6 +342,10 @@ export default function LiveTeacherRoom({
       if (records.length > 0) {
         await recordLiveAnswersBatchT(records);
       }
+      // Clear localStorage emergency backup since successfully saved to Sheets
+      try {
+        localStorage.removeItem('pending_live_answers_backup');
+      } catch {}
 
       // 2. Mark session finished in server
       await finishLiveSession();
@@ -493,32 +497,6 @@ export default function LiveTeacherRoom({
 
       {/* Main Screen Video Theater Area */}
       <main className="flex-1 relative flex items-center justify-center bg-black overflow-hidden">
-        {/* Projector Screen PIN Badge (Top Corner Floating Banner) */}
-        {sessionState?.sessionPin && (
-          <div 
-            onClick={handleCopyPin}
-            title="رمز تأكيد الحضور المعروض للطلاب في القاعة - انقر للنسخ"
-            className="absolute top-4 left-4 z-15 flex items-center gap-2.5 px-4 py-2 bg-slate-950/85 hover:bg-slate-900/95 border border-amber-500/40 hover:border-amber-400 rounded-2xl shadow-xl backdrop-blur-md cursor-pointer transition-all active:scale-95 group"
-          >
-            <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold">
-              <KeyRound className="w-4 h-4" />
-            </div>
-            <div className="text-right">
-              <div className="text-[10px] text-amber-400/90 font-bold uppercase tracking-wider">
-                رمز تأكيد الحضور (PIN)
-              </div>
-              <div className="font-mono text-xl font-black text-amber-300 tracking-widest leading-none mt-0.5">
-                {sessionState.sessionPin}
-              </div>
-            </div>
-            {copiedPin ? (
-              <Check className="w-4 h-4 text-emerald-400 ml-1" />
-            ) : (
-              <Copy className="w-3.5 h-3.5 text-slate-500 group-hover:text-slate-300 ml-1 transition-colors" />
-            )}
-          </div>
-        )}
-
         {selectedLesson && playableUrl ? (
           <video
             ref={videoRef}

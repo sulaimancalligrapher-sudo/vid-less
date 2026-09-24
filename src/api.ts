@@ -2014,6 +2014,41 @@ export async function resetLiveSession(): Promise<{ success: boolean; state?: Li
   return res.json();
 }
 
+export async function startLiveProgram(): Promise<{ success: boolean; pin?: string; state?: LiveSessionState }> {
+  const res = await fetch('/api/live/start-program', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  });
+  return res.json();
+}
+
+export async function endLiveProgram(): Promise<{ success: boolean; state?: LiveSessionState }> {
+  const res = await fetch('/api/live/end-program', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  });
+  return res.json();
+}
+
+export async function getLiveBackup(): Promise<{ success: boolean; backup?: any }> {
+  try {
+    const res = await fetch('/api/live/backup');
+    if (res.ok) return await res.json();
+  } catch {}
+  return { success: false };
+}
+
+export async function restoreLiveBackup(): Promise<{ success: boolean; state?: LiveSessionState }> {
+  const res = await fetch('/api/live/restore-backup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  });
+  return res.json();
+}
+
 
 
 
