@@ -193,3 +193,116 @@ export interface TelegramBroadcastMessage {
   buttonUrl?: string;
 }
 
+// ==========================================
+// --- LIVE CLASSROOM (Questions-T & Answers-T) ---
+// ==========================================
+
+export interface LiveQuestionItem {
+  index: number;
+  time: number; // in seconds (Column C, H, M...)
+  timeFormatted?: string; // e.g. "00:15"
+  image?: string; // Column D, I, N... (flexible / Drive thumbnail / direct)
+  question: string; // Column E, J, O... (نص السؤال)
+  options: string[]; // parsed from Column F, K, P... (خيارات مفصولة بفاصلة)
+  isTextAnswer?: boolean; // true if Column F is 'نص'
+  correctAnswer: string; // Column G, L, Q... (رقم خيار 1, 2.. أو نص مطابقة أو فارغ للحرة)
+}
+
+export interface LiveLessonRow {
+  rowIndex?: number;
+  title: string; // Column A (موضوع الدرس)
+  videoUrl: string; // Column B (رابط الفيديو)
+  questions: LiveQuestionItem[]; // Dynamic starting from Column C (5 cols per question: C:G, H:L, M:Q...)
+  settingTimeLimit?: number;
+  settingShowResult?: 'نعم' | 'لا';
+}
+
+export interface LiveConnectedStudent {
+  username: string;
+  sheetNumber: string;
+  joinedAt: number;
+  lastPing: number;
+  pinVerified?: boolean;
+}
+
+export interface LiveStudentAnswerSubmission {
+  username: string;
+  sheetNumber: string;
+  answer: string;
+  isCorrect?: boolean | null;
+  submittedAt: number;
+}
+
+export interface LiveSessionState {
+  sessionId: string;
+  sessionPin?: string;
+  lessonTitle: string;
+  videoUrl: string;
+  status: 'idle' | 'waiting' | 'playing' | 'question_active' | 'revealed' | 'finished';
+  currentQuestionIndex: number | null;
+  currentQuestion: LiveQuestionItem | null;
+  questionTriggeredAt: number | null;
+  timeLimit: number;
+  showResult: 'نعم' | 'لا';
+  connectedStudents: LiveConnectedStudent[];
+  answersForCurrentQuestion: Record<string, LiveStudentAnswerSubmission>;
+  allSessionAnswers: Record<string, Record<number, string>>;
+}
+
+export interface LiveAnswerRecord {
+  rowIndex?: number;
+  timestamp: string; // Column A (تاريخ وتوقيت الإجابة)
+  sheetNumber: string; // Column B (رقم المشترك)
+  username: string; // Column C (اسم المشترك)
+  lessonTitle: string; // Column D (موضوع الدرس)
+  answers: Record<number, string>; // Columns E+ (إجابات الأسئلة س1، س2، ... "صح" / "خطأ" أو نص الإجابة)
+  totalScore?: string;
+}
+
+/**
+ * Evaluates a student's answer against the 3 cases in Column G:
+ * Case 1: Option index (1, 2, 3...) when Column F contains options
+ * Case 2: Specific text match when Column F is 'نص' and Column G has text
+ * Case 3: Free text answer when Column G is empty (isCorrect: null, not evaluated as right or wrong)
+ */
+export function evaluateLiveAnswer(
+  question: LiveQuestionItem,
+  answer: string
+): { isCorrect: boolean | null; correctLabel?: string } {
+  const trimmedAnswer = (answer || '').trim();
+  const rawCorrect = (question.correctAnswer || '').trim();
+  const validOptions = (question.options || []).map(o => String(o || '').trim()).filter(Boolean);
+  const isMultipleChoice = validOptions.length > 0 && !question.isTextAnswer;
+
+  if (isMultipleChoice) {
+    // Case 1: G contains a number (1, 2, 3...) pointing to 1-based index in options
+    const numAnswer = parseInt(rawCorrect, 10);
+    let correctOptionText = '';
+    if (!isNaN(numAnswer) && numAnswer >= 1 && numAnswer <= validOptions.length) {
+      correctOptionText = validOptions[numAnswer - 1];
+    } else if (rawCorrect) {
+      correctOptionText = rawCorrect;
+    }
+
+    if (correctOptionText) {
+      const isCorrect = trimmedAnswer === correctOptionText;
+      return { isCorrect, correctLabel: correctOptionText };
+    } else {
+      // Ungraded multiple choice
+      return { isCorrect: null };
+    }
+  } else {
+    // Text question (Column F is 'نص' or no options)
+    if (rawCorrect) {
+      // Case 2: Specific model answer required
+      const isCorrect = trimmedAnswer.toLowerCase() === rawCorrect.toLowerCase();
+      return { isCorrect, correctLabel: rawCorrect };
+    } else {
+      // Case 3: Free text answer, not graded as right or wrong
+      return { isCorrect: null };
+    }
+  }
+}
+
+
+

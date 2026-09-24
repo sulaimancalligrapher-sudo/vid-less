@@ -1,7 +1,8 @@
 import { 
   WordData, AdminQuestionRow, AdminAnswerRow, Question, AdminQuestionItem, 
   HeaderNavButton, HeaderConfig, StudentCorrection,
-  TelegramConfig, TelegramTemplateItem, TelegramUserBinding, TelegramBroadcastMessage
+  TelegramConfig, TelegramTemplateItem, TelegramUserBinding, TelegramBroadcastMessage,
+  LiveQuestionItem, LiveLessonRow, LiveAnswerRecord, LiveSessionState, LiveStudentAnswerSubmission
 } from './types';
 
 // Helper to get Web App URL from localStorage or environment variables
@@ -19,7 +20,7 @@ export function getWebAppUrl(): string {
   }
 
   // 3. Default fallback hardcoded URL
-  const fallbackUrl: string = 'https://script.google.com/macros/s/AKfycbxRHzgk-mpXY2kNbWb35vqAP1I-ubt3FhV3yAugOf8uqreO2wnQ5Hu5rw84yr0QJ7ZUCQ/exec';
+  const fallbackUrl: string = 'https://script.google.com/macros/s/AKfycbw9_hBJAwQV3rHfdpUyXZm1qhODuljKaogF_UPcHEZ0XT4P0dlKyhPrMkco9gWsrSrLrw/exec';
   if (fallbackUrl && fallbackUrl.trim().length > 0) {
     return fallbackUrl.trim();
   }
@@ -997,7 +998,7 @@ export function parseMultiUrls(rawStr?: any): string[] {
 }
 
 export async function fetchStudentCorrections(username: string, sheetNumber: string): Promise<StudentCorrection[]> {
-  const correctionSheetId = localStorage.getItem('correctionSheetId') || '1F3hDUfjgBEkUAIOaF66634EWQQ8XZSdyKjlTzrVA25k';
+  const correctionSheetId = localStorage.getItem('correctionSheetId') || '155gPdRszuGrjRBHx6jZ8vYovsougqH35HGIw4BhkxBs';
   
   try {
     const res = await fetchGas({
@@ -1751,6 +1752,268 @@ export async function clearCorrectionCacheInGas(): Promise<{ success: boolean; m
     return { success: false, message: err.message || 'تعذر مسح كاش التصحيحات' };
   }
 }
+
+// ==========================================
+// --- LIVE CLASSROOM (Questions-T & Answers-T) API ---
+// ==========================================
+
+// Parse time string e.g. "01:30" or 90 to seconds
+export function parseTimeToSeconds(timeVal: any): number {
+  if (typeof timeVal === 'number') return timeVal;
+  if (!timeVal) return 0;
+  const s = String(timeVal).trim();
+  if (s.includes(':')) {
+    const parts = s.split(':');
+    if (parts.length === 2) {
+      const min = parseInt(parts[0], 10) || 0;
+      const sec = parseFloat(parts[1]) || 0;
+      return min * 60 + sec;
+    } else if (parts.length === 3) {
+      const hr = parseInt(parts[0], 10) || 0;
+      const min = parseInt(parts[1], 10) || 0;
+      const sec = parseFloat(parts[2]) || 0;
+      return hr * 3600 + min * 60 + sec;
+    }
+  }
+  return parseFloat(s) || 0;
+}
+
+export function formatSecondsToTime(sec: number): string {
+  if (isNaN(sec) || sec < 0) return '00:00';
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
+const LOCAL_STORAGE_LIVE_QUESTIONS = 'local_live_questions_cache';
+
+// Fetch Live Lessons from Google Sheets (Questions-T)
+export async function fetchLiveQuestionsT(): Promise<LiveLessonRow[]> {
+  try {
+    const res = await fetchGas({ action: 'getLiveQuestionsT' }, 'GET');
+    if (res && res.success && Array.isArray(res.data)) {
+      localStorage.setItem(LOCAL_STORAGE_LIVE_QUESTIONS, JSON.stringify(res.data));
+      return res.data;
+    }
+  } catch (err) {
+    console.warn('Could not fetch Questions-T from Google Sheets, checking local cache:', err);
+  }
+
+  // Fallback to local cache if offline or script not yet updated
+  const cached = localStorage.getItem(LOCAL_STORAGE_LIVE_QUESTIONS);
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch {}
+  }
+
+  return [];
+}
+
+// Save or Update a Live Lesson in Google Sheets (Questions-T)
+export async function saveLiveLessonT(lesson: LiveLessonRow): Promise<{ success: boolean; message?: string }> {
+  // Update local cache immediately
+  const existing = await fetchLiveQuestionsT();
+  const index = existing.findIndex(l => l.title === lesson.title || (lesson.rowIndex && l.rowIndex === lesson.rowIndex));
+  if (index >= 0) {
+    existing[index] = { ...lesson };
+  } else {
+    existing.push({ ...lesson });
+  }
+  localStorage.setItem(LOCAL_STORAGE_LIVE_QUESTIONS, JSON.stringify(existing));
+
+  try {
+    const res = await fetchGas({ action: 'saveLiveQuestionsT' }, 'POST', {
+      action: 'saveLiveQuestionsT',
+      lesson: lesson
+    });
+    return res || { success: true, message: 'تم حفظ الدرس التفاعلي بنجاح' };
+  } catch (err: any) {
+    console.warn('Google Sheets save notice:', err.message);
+    return { success: true, message: 'تم حفظ الدرس محلياً (حدث كود Apps Script للشيت لحفظه سحابياً)' };
+  }
+}
+
+// Fetch Live Answers from Google Sheets (Answers-T)
+export async function fetchLiveAnswersT(): Promise<LiveAnswerRecord[]> {
+  try {
+    const res = await fetchGas({ action: 'getLiveAnswersT' }, 'GET');
+    if (res && res.success && Array.isArray(res.data)) {
+      return res.data;
+    }
+  } catch (err) {
+    console.warn('Could not fetch Answers-T from Google Sheets:', err);
+  }
+  return [];
+}
+
+// Batch Record Student Answers to Google Sheets (Answers-T)
+export async function recordLiveAnswersBatchT(records: LiveAnswerRecord[]): Promise<{ success: boolean; count?: number; message?: string }> {
+  try {
+    const res = await fetchGas({ action: 'batchRecordLiveAnswersT' }, 'POST', {
+      action: 'batchRecordLiveAnswersT',
+      records: records
+    });
+    return res || { success: true, count: records.length };
+  } catch (err: any) {
+    console.error('Error recording batch answers to Answers-T:', err);
+    return { success: false, message: err.message };
+  }
+}
+
+// Single Live Answer Record (Immediate sync to Answers-T)
+export async function saveLiveAnswerT(payload: {
+  sheetNumber: string;
+  username: string;
+  lessonTitle: string;
+  questionIndex: number;
+  answer: string;
+  isCorrect?: boolean | null;
+  timestamp?: string;
+}): Promise<{ success: boolean; message?: string }> {
+  try {
+    const res = await fetchGas({ action: 'saveLiveAnswerT' }, 'POST', payload);
+    return res || { success: true };
+  } catch (err: any) {
+    console.warn('Could not save live answer to Answers-T:', err);
+    return { success: false, message: err.message };
+  }
+}
+
+// ----------------------------------------------------
+// Express Local Live Hub API (Ultra-fast 0.1s sync)
+// ----------------------------------------------------
+
+export async function getLiveSessionState(): Promise<LiveSessionState | null> {
+  try {
+    const res = await fetch('/api/live/state');
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (err) {
+    console.warn('Error fetching live session state:', err);
+  }
+  return null;
+}
+
+export async function initLiveSession(payload: {
+  lessonTitle: string;
+  videoUrl: string;
+  timeLimit?: number;
+  showResult?: 'نعم' | 'لا';
+}): Promise<{ success: boolean; state?: LiveSessionState }> {
+  const res = await fetch('/api/live/init', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  return res.json();
+}
+
+export async function joinLiveSession(username: string, sheetNumber: string, pin?: string): Promise<{ success: boolean; state?: LiveSessionState; pinVerified?: boolean; error?: string }> {
+  const res = await fetch('/api/live/join', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, sheetNumber, pin })
+  });
+  return res.json();
+}
+
+export async function updateLivePin(pin?: string): Promise<{ success: boolean; pin?: string; state?: LiveSessionState }> {
+  const res = await fetch('/api/live/update-pin', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pin })
+  });
+  return res.json();
+}
+
+export async function pingLiveSession(username: string, sheetNumber: string): Promise<void> {
+  try {
+    await fetch('/api/live/ping', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, sheetNumber })
+    });
+  } catch {}
+}
+
+export async function leaveLiveSession(username: string, sheetNumber: string): Promise<void> {
+  try {
+    await fetch('/api/live/leave', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, sheetNumber }),
+      keepalive: true
+    });
+  } catch {}
+}
+
+export async function triggerLiveQuestion(payload: {
+  questionIndex: number;
+  question: LiveQuestionItem;
+  timeLimit?: number;
+  showResult?: 'نعم' | 'لا';
+}): Promise<{ success: boolean; state?: LiveSessionState }> {
+  const res = await fetch('/api/live/trigger-question', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  return res.json();
+}
+
+export async function submitLiveAnswer(payload: {
+  username: string;
+  sheetNumber: string;
+  answer: string;
+  questionIndex: number;
+  isCorrect?: boolean | null;
+}): Promise<{ success: boolean; state?: LiveSessionState }> {
+  const res = await fetch('/api/live/submit-answer', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  return res.json();
+}
+
+export async function revealLiveAnswer(): Promise<{ success: boolean; state?: LiveSessionState }> {
+  const res = await fetch('/api/live/reveal-answer', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  });
+  return res.json();
+}
+
+export async function resumeLiveVideo(): Promise<{ success: boolean; state?: LiveSessionState }> {
+  const res = await fetch('/api/live/resume', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  });
+  return res.json();
+}
+
+export async function finishLiveSession(): Promise<{ success: boolean; state?: LiveSessionState }> {
+  const res = await fetch('/api/live/finish', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  });
+  return res.json();
+}
+
+export async function resetLiveSession(): Promise<{ success: boolean; state?: LiveSessionState }> {
+  const res = await fetch('/api/live/reset', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  });
+  return res.json();
+}
+
 
 
 

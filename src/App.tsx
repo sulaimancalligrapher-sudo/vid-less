@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Student, WordData, HeaderConfig } from './types';
-import { fetchLessons, isApiConfigured, getWebAppUrl, fetchHeaderConfig } from './api';
+import { Student, WordData, HeaderConfig, LiveLessonRow } from './types';
+import { fetchLessons, isApiConfigured, getWebAppUrl, fetchHeaderConfig, fetchLiveQuestionsT } from './api';
 import StudentLogin from './components/StudentLogin';
 import LessonList from './components/LessonList';
 import LessonDetail from './components/LessonDetail';
@@ -9,12 +9,14 @@ import SettingsPanel from './components/SettingsPanel';
 import AdminPasswordModal from './components/AdminPasswordModal';
 import AdminPanel from './components/AdminPanel';
 import LanguageSelector from './components/LanguageSelector';
+import LiveTeacherRoom from './components/LiveTeacherRoom';
+import LiveStudentView from './components/LiveStudentView';
 import { useLanguage } from './translations';
 import { 
   Settings, RefreshCw, BookOpen, Sparkles, Database, Sun, Moon, 
   Lock, ShieldCheck, Copy, CheckCircle2, ArrowLeft, ExternalLink, 
   KeyRound, Layers, ShieldAlert, FileSpreadsheet, UserCheck,
-  Facebook, Instagram, Youtube
+  Facebook, Instagram, Youtube, Tv
 } from 'lucide-react';
 
 const LineIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
@@ -29,11 +31,14 @@ export default function App() {
   const [isConfigured, setIsConfigured] = useState(isApiConfigured());
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
-  // Page Routing Mode: 'student' | 'admin'
-  const [pageMode, setPageMode] = useState<'student' | 'admin'>(() => {
+  // Page Routing Mode: 'student' | 'admin' | 'live-teacher' | 'live-student'
+  const [pageMode, setPageMode] = useState<'student' | 'admin' | 'live-teacher' | 'live-student'>(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
-      return params.get('page') === 'admin' ? 'admin' : 'student';
+      const p = params.get('page');
+      if (p === 'admin') return 'admin';
+      if (p === 'live-teacher') return 'live-teacher';
+      if (p === 'live-student') return 'live-student';
     }
     return 'student';
   });
@@ -43,6 +48,16 @@ export default function App() {
   const [showFirstPassModal, setShowFirstPassModal] = useState(false);
   const [showSecondPassModal, setShowSecondPassModal] = useState(false);
   const [copiedStudentUrl, setCopiedStudentUrl] = useState(false);
+
+  // Live Classroom Lessons & Selected
+  const [allLiveLessons, setAllLiveLessons] = useState<LiveLessonRow[]>([]);
+  const [activeLiveLesson, setActiveLiveLesson] = useState<LiveLessonRow | null>(null);
+
+  useEffect(() => {
+    fetchLiveQuestionsT().then(data => {
+      if (data && data.length > 0) setAllLiveLessons(data);
+    }).catch(() => {});
+  }, []);
 
   // Admin login input state for inline unlock
   const [adminInputPassword, setAdminInputPassword] = useState('');
@@ -84,12 +99,16 @@ export default function App() {
   }, [webAppUrl, isConfigured]);
 
   // Sync route with URL query param and popstate
-  const navigateToPage = (mode: 'student' | 'admin') => {
+  const navigateToPage = (mode: 'student' | 'admin' | 'live-teacher' | 'live-student') => {
     setPageMode(mode);
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
       if (mode === 'admin') {
         url.searchParams.set('page', 'admin');
+      } else if (mode === 'live-teacher') {
+        url.searchParams.set('page', 'live-teacher');
+      } else if (mode === 'live-student') {
+        url.searchParams.set('page', 'live-student');
       } else {
         url.searchParams.delete('page');
       }
@@ -100,7 +119,11 @@ export default function App() {
   useEffect(() => {
     const handlePopState = () => {
       const params = new URLSearchParams(window.location.search);
-      setPageMode(params.get('page') === 'admin' ? 'admin' : 'student');
+      const p = params.get('page');
+      if (p === 'admin') setPageMode('admin');
+      else if (p === 'live-teacher') setPageMode('live-teacher');
+      else if (p === 'live-student') setPageMode('live-student');
+      else setPageMode('student');
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
@@ -208,6 +231,26 @@ export default function App() {
     setTimeout(() => setCopiedStudentUrl(false), 2500);
   };
 
+  // Dedicated Fullscreen Mode: Live Classroom Teacher Theater
+  if (pageMode === 'live-teacher') {
+    return (
+      <LiveTeacherRoom
+        initialLesson={activeLiveLesson || undefined}
+        allLessons={allLiveLessons}
+        onBack={() => navigateToPage('admin')}
+      />
+    );
+  }
+
+  // Dedicated Fullscreen Mode: Live Classroom Student Device Remote
+  if (pageMode === 'live-student') {
+    return (
+      <LiveStudentView
+        onBackToMain={() => navigateToPage('student')}
+      />
+    );
+  }
+
   return (
     <div className="bg-gradient-to-br from-[#faf7f2] via-[#f5efe5] to-[#ebf3ed] dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 text-slate-800 dark:text-slate-100 min-h-screen flex flex-col font-sans selection:bg-amber-500/20 selection:text-amber-800 transition-colors duration-300">
       
@@ -240,7 +283,7 @@ export default function App() {
                 <span className="truncate">
                   {pageMode === 'admin'
                     ? (headerConfig?.title ? `${headerConfig.title} - الإدارة` : 'بوابة التحكم الإداري وقاعدة البيانات')
-                    : (headerConfig?.title || 'ملتقط الوسائط للطلاب')}
+                    : (headerConfig?.title || 'فيديو الدروس')}
                 </span>
                 {pageMode === 'admin' ? (
                   <span className="text-[10px] px-2 py-0.5 bg-purple-500/10 border border-purple-500/20 text-purple-600 dark:text-purple-400 rounded-full font-bold shrink-0">
@@ -291,9 +334,29 @@ export default function App() {
               {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
 
+            {/* Live Interactive Classroom Quick Entry Button */}
+            <button
+              onClick={() => navigateToPage('live-student')}
+              className="px-3.5 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-black rounded-2xl text-xs transition-all shadow-md shadow-amber-500/10 flex items-center gap-1.5 active:scale-95 cursor-pointer whitespace-nowrap"
+              title="دخول الحصة التفاعلية المباشرة كطالب"
+            >
+              <Tv className="w-4 h-4" />
+              <span>حصة مباشرة 🎯</span>
+            </button>
+
             {/* In Admin Mode */}
             {pageMode === 'admin' ? (
               <>
+                {/* Switch to Live Teacher Theater Room */}
+                <button
+                  onClick={() => navigateToPage('live-teacher')}
+                  className="px-3.5 py-2.5 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 text-indigo-400 rounded-2xl cursor-pointer transition-all active:scale-95 shadow-sm flex items-center gap-1.5 text-xs font-black whitespace-nowrap"
+                  title="فتح شاشة البروجكتر للعرض المباشر بالفصل"
+                >
+                  <Tv className="w-4 h-4" />
+                  <span>عرض البروجكتر 📽️</span>
+                </button>
+
                 {/* Switch to Student Page */}
                 <button
                   onClick={() => navigateToPage('student')}
@@ -509,6 +572,41 @@ export default function App() {
                       <span>تعديل رابط الاتصال بالشيت ⚙️</span>
                     </button>
                   </div>
+
+                  {/* Card 3: Live Classroom Hub (Questions-T & Answers-T) */}
+                  <div className="md:col-span-2 p-6 bg-gradient-to-r from-slate-900 via-indigo-950/30 to-slate-900 border border-amber-500/30 rounded-3xl shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                    <div className="flex items-start gap-3.5">
+                      <div className="p-3.5 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-2xl shrink-0">
+                        <Tv className="w-7 h-7" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-base font-black text-slate-100">الحصص التفاعلية المباشرة (Questions-T & Answers-T)</h3>
+                          <span className="px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[10px] font-bold">جديد 🎯</span>
+                        </div>
+                        <p className="text-xs text-slate-400 mt-1 leading-relaxed max-w-xl">
+                          عرض الفيديو على البروجكتر بالفصل وبث الأسئلة لهواتف الطلاب لحظياً دون استهلاك باقات الطلاب لعرض الفيديو.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 w-full sm:w-auto">
+                      <button
+                        onClick={() => navigateToPage('live-teacher')}
+                        className="flex-1 sm:flex-initial px-5 py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-black rounded-2xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 active:scale-95 transition-all cursor-pointer whitespace-nowrap"
+                      >
+                        <Tv className="w-4 h-4" />
+                        <span>فتح شاشة البروجكتر 📽️</span>
+                      </button>
+
+                      <button
+                        onClick={() => setIsAdminPanelOpen(true)}
+                        className="px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold rounded-2xl text-xs flex items-center justify-center gap-2 transition-all cursor-pointer whitespace-nowrap"
+                      >
+                        <span>إدارة الأسئلة</span>
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
                 {/* Card 3: Student Direct Share Link Box */}
@@ -687,7 +785,14 @@ export default function App() {
       {/* ----------------- MODALS & OVERLAYS ----------------- */}
       <AnimatePresence>
         {isAdminPanelOpen && (
-          <AdminPanel onClose={() => setIsAdminPanelOpen(false)} />
+          <AdminPanel 
+            onClose={() => setIsAdminPanelOpen(false)}
+            onStartTeacherTheater={(lesson) => {
+              setActiveLiveLesson(lesson);
+              setIsAdminPanelOpen(false);
+              navigateToPage('live-teacher');
+            }}
+          />
         )}
 
         {isSettingsOpen && (

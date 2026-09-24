@@ -10,7 +10,7 @@ interface SettingsPanelProps {
 
 export default function SettingsPanel({ onClose, onSave }: SettingsPanelProps) {
   const [url, setUrl] = useState(getWebAppUrl());
-  const [corrSheetId, setCorrSheetId] = useState(() => localStorage.getItem('correctionSheetId') || '1F3hDUfjgBEkUAIOaF66634EWQQ8XZSdyKjlTzrVA25k');
+  const [corrSheetId, setCorrSheetId] = useState(() => localStorage.getItem('correctionSheetId') || '155gPdRszuGrjRBHx6jZ8vYovsougqH35HGIw4BhkxBs');
   const [copied, setCopied] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
@@ -113,7 +113,7 @@ export default function SettingsPanel({ onClose, onSave }: SettingsPanelProps) {
                 dir="ltr"
                 value={corrSheetId}
                 onChange={(e) => setCorrSheetId(e.target.value)}
-                placeholder="1F3hDUfjgBEkUAIOaF66634EWQQ8XZSdyKjlTzrVA25k"
+                placeholder="155gPdRszuGrjRBHx6jZ8vYovsougqH35HGIw4BhkxBs"
                 className="w-full px-4 py-3.5 bg-slate-950 border border-slate-800 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 text-slate-200 rounded-xl placeholder-slate-600 outline-none transition-all pr-12 text-sm font-mono"
               />
               <Settings className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-amber-500" />
@@ -230,8 +230,8 @@ function getFullAppsScriptCode(): string {
  * يدعم الاستدعاء كـ API كامل لصفحة الـ React الخارجية بدون مشاكل CORS وبأقصى درجات الحماية والأمان.
  */
 
-var SPREADSHEET_ID = '1967wIJrB-0hVLHxH6rdkZbscO2S7GwxlHObtsmWFnFU'; // معرف جدول البيانات الاحتياطي
-var CORRECTION_SPREADSHEET_ID = '1F3hDUfjgBEkUAIOaF66634EWQQ8XZSdyKjlTzrVA25k'; // معرف شيت تصحيح الأستاذ
+var SPREADSHEET_ID = '155gPdRszuGrjRBHx6jZ8vYovsougqH35HGIw4BhkxBs'; // معرف جدول البيانات الاحتياطي
+var CORRECTION_SPREADSHEET_ID = '155gPdRszuGrjRBHx6jZ8vYovsougqH35HGIw4BhkxBs'; // معرف شيت تصحيح الأستاذ
 var DEFAULT_BOT_TOKEN = '8748182366:AAHKxOlInR7aIeS7kP-_KfhpQk4D65dtegY';
 var DEFAULT_BOT_USERNAME = 'Httat_bot';
 var DEFAULT_TEACHER_CHAT_ID = ''; // معرف الأستاذ الافتراضي (يمكن تركه فارغاً أو تحديده هنا)
@@ -294,6 +294,10 @@ function doGet(e) {
       response = { link: getImageLink(e.parameter.comment, e.parameter.sheet_number, e.parameter.username, e.parameter.word) };
     } else if (action === 'getHeaderConfig' || action === 'getHeader') {
       response = getHeaderConfig();
+    } else if (action === 'getLiveQuestionsT') {
+      response = getLiveQuestionsT();
+    } else if (action === 'getLiveAnswersT') {
+      response = getLiveAnswersT();
     } else if (action === 'getAdminQuestions') {
       response = getAdminQuestions();
     } else if (action === 'getAdminAnswers') {
@@ -400,6 +404,12 @@ function doPost(e) {
       response = sendTelegramNotification(payload);
     } else if (action === 'setupTelegramSheets') {
       response = setupTelegramSheets();
+    } else if (action === 'saveLiveQuestionsT') {
+      response = saveLiveQuestionsT(payload.lesson);
+    } else if (action === 'saveLiveAnswerT') {
+      response = saveLiveAnswerT(payload);
+    } else if (action === 'batchRecordLiveAnswersT') {
+      response = batchRecordLiveAnswersT(payload.records);
     } else if (action === 'getAllSettingsStudents') {
       response = getAllSettingsStudents();
     } else {
@@ -2684,6 +2694,388 @@ function handleTelegramWebhookUpdate(update) {
     try {
       logTelegramEvent('خطأ أثناء استقبال التحديث', '', '', '', 'السبب: ' + err.message);
     } catch(e) {}
+  }
+}
+
+// ==========================================
+// --- LIVE CLASSROOM (Questions-T & Answers-T) ---
+// ==========================================
+
+function getOrCreateLiveQuestionsSheet() {
+  var ss = getSpreadsheet();
+  var sheet = ss.getSheetByName('Questions-T');
+  if (!sheet) {
+    sheet = ss.insertSheet('Questions-T');
+    // هيكل ورقة Questions-T:
+    // A: موضوع الدرس | B: رابط الفيديو
+    // ثم 5 أعمدة لكل سؤال (C:G, H:L, M:Q...)
+    var headers = ['موضوع الدرس', 'رابط الفيديو'];
+    for (var i = 1; i <= 15; i++) {
+      headers.push('وقت ظهور س' + i);      // العمود C, H, M...
+      headers.push('رابط صورة س' + i);      // العمود D, I, N...
+      headers.push('نص س' + i);            // العمود E, J, O...
+      headers.push('نوع/خيارات س' + i);    // العمود F, K, P... (خيارات أو كلمة 'نص')
+      headers.push('طريقة إجابة س' + i);   // العمود G, L, Q... (رقم خيار 1,2.. أو نص الإجابة أو فارغ للحرة)
+    }
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#f3f4f6');
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+function getOrCreateLiveAnswersSheet() {
+  var ss = getSpreadsheet();
+  var sheet = ss.getSheetByName('Answers-T');
+  if (!sheet) {
+    sheet = ss.insertSheet('Answers-T');
+    // هيكل ورقة Answers-T:
+    // A: تاريخ وتوقيت الإجابة | B: رقم المشترك | C: اسم المشترك | D: موضوع الدرس
+    // ثم أعمدة الإجابات تباعاً (E: إجابة س1، F: إجابة س2 ...)
+    var headers = ['تاريخ وتوقيت الإجابة', 'رقم المشترك', 'اسم المشترك', 'موضوع الدرس'];
+    for (var i = 1; i <= 15; i++) {
+      headers.push('إجابة س' + i);
+    }
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#f3f4f6');
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+function parseLiveTimeToSeconds(val) {
+  if (!val) return 0;
+  if (typeof val === 'number') return val;
+  var s = String(val).trim();
+  if (s.indexOf(':') !== -1) {
+    var parts = s.split(':');
+    if (parts.length === 2) return (parseInt(parts[0], 10) || 0) * 60 + (parseFloat(parts[1]) || 0);
+    if (parts.length === 3) return (parseInt(parts[0], 10) || 0) * 3600 + (parseInt(parts[1], 10) || 0) * 60 + (parseFloat(parts[2]) || 0);
+  }
+  return parseFloat(s) || 0;
+}
+
+function getLiveQuestionsT() {
+  try {
+    var sheet = getOrCreateLiveQuestionsSheet();
+    var lastRow = sheet.getLastRow();
+    if (lastRow <= 1) return { success: true, data: [] };
+    
+    var lastCol = sheet.getLastColumn();
+    if (lastCol < 2) return { success: true, data: [] };
+    
+    var rows = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    var list = [];
+    
+    for (var r = 0; r < rows.length; r++) {
+      var row = rows[r];
+      var title = String(row[0] || '').trim();
+      if (!title) continue;
+      
+      var videoUrl = String(row[1] || '').trim();
+      var questions = [];
+      var qIndex = 0;
+      
+      // الأعمدة من C فصاعداً (index 2)، كل سؤال 5 أعمدة:
+      // col + 0: وقت ظهور السؤال
+      // col + 1: رابط الصورة
+      // col + 2: نص السؤال
+      // col + 3: نوع / خيارات (خيارات مفصولة بفاصلة أو 'نص')
+      // col + 4: طريقة الإجابة (رقم خيار، أو نص مطابق، أو فارغ للحرة)
+      for (var col = 2; col < row.length; col += 5) {
+        var qTimeRaw = row[col];
+        var qImageRaw = row[col + 1];
+        var qTextRaw = row[col + 2];
+        var qTypeOrOptionsRaw = row[col + 3];
+        var qCorrectAnswerRaw = row[col + 4];
+        
+        var qText = String(qTextRaw || '').trim();
+        var qImage = formatDriveImageUrl(String(qImageRaw || '').trim());
+        var typeOrOptsStr = String(qTypeOrOptionsRaw || '').trim();
+        var correctAnswer = String(qCorrectAnswerRaw !== undefined && qCorrectAnswerRaw !== null ? qCorrectAnswerRaw : '').trim();
+        var timeSec = parseLiveTimeToSeconds(qTimeRaw);
+        
+        if (qText !== '' || qImage !== '' || (row[col] !== undefined && row[col] !== null && String(row[col]).trim() !== '')) {
+          var options = [];
+          var isTextAnswer = false;
+          
+          if (typeOrOptsStr === 'نص') {
+            isTextAnswer = true;
+          } else if (typeOrOptsStr) {
+            options = typeOrOptsStr.split(/[,،]/).map(function(s) { return s.trim(); }).filter(Boolean);
+          } else {
+            isTextAnswer = true;
+          }
+          
+          questions.push({
+            index: qIndex,
+            time: timeSec,
+            timeFormatted: String(qTimeRaw || '00:00'),
+            image: qImage,
+            question: qText,
+            options: options,
+            isTextAnswer: isTextAnswer,
+            correctAnswer: correctAnswer
+          });
+          qIndex++;
+        }
+      }
+      
+      list.push({
+        rowIndex: r + 2,
+        title: title,
+        videoUrl: videoUrl,
+        questions: questions
+      });
+    }
+    return { success: true, data: list };
+  } catch (err) {
+    return { success: false, message: err.message };
+  }
+}
+
+function saveLiveQuestionsT(lesson) {
+  try {
+    if (!lesson || !lesson.title) return { success: false, message: 'موضوع الدرس مطلوب' };
+    var sheet = getOrCreateLiveQuestionsSheet();
+    
+    var rowValues = [
+      lesson.title,
+      lesson.videoUrl || ''
+    ];
+    
+    var qs = lesson.questions || [];
+    var totalQuestionsCount = Math.max(15, qs.length);
+    for (var i = 0; i < totalQuestionsCount; i++) {
+      var q = qs[i];
+      if (q && (q.question || q.time || q.image)) {
+        rowValues.push(q.timeFormatted || (q.time !== undefined ? q.time : '00:00')); // C: وقت
+        rowValues.push(q.image || '');                                                  // D: صورة
+        rowValues.push(q.question || '');                                               // E: نص السؤال
+        if (q.isTextAnswer) {
+          rowValues.push('نص');                                                         // F: نص
+        } else {
+          rowValues.push((q.options || []).join(', '));                                 // F: خيارات مفصولة بفاصلة
+        }
+        rowValues.push(q.correctAnswer || '');                                          // G: طريقة الإجابة
+      } else {
+        rowValues.push('', '', '', '', '');
+      }
+    }
+    
+    var targetRow = 0;
+    if (lesson.rowIndex && lesson.rowIndex > 1) {
+      targetRow = lesson.rowIndex;
+    } else {
+      var lastRow = sheet.getLastRow();
+      if (lastRow > 1) {
+        var titles = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+        for (var t = 0; t < titles.length; t++) {
+          if (String(titles[t][0]).trim() === String(lesson.title).trim()) {
+            targetRow = t + 2;
+            break;
+          }
+        }
+      }
+    }
+    
+    if (targetRow > 1) {
+      sheet.getRange(targetRow, 1, 1, rowValues.length).setValues([rowValues]);
+    } else {
+      sheet.appendRow(rowValues);
+    }
+    
+    return { success: true, message: 'تم حفظ الدرس في Questions-T بنجاح' };
+  } catch (err) {
+    return { success: false, message: err.message };
+  }
+}
+
+function getLiveAnswersT() {
+  try {
+    var sheet = getOrCreateLiveAnswersSheet();
+    var lastRow = sheet.getLastRow();
+    if (lastRow <= 1) return { success: true, data: [] };
+    
+    var lastCol = Math.max(sheet.getLastColumn(), 19);
+    var rows = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    var list = [];
+    for (var r = 0; r < rows.length; r++) {
+      var row = rows[r];
+      var answersMap = {};
+      for (var a = 0; a < (lastCol - 4); a++) {
+        var val = String(row[4 + a] !== undefined && row[4 + a] !== null ? row[4 + a] : '').trim();
+        if (val) answersMap[a] = val;
+      }
+      list.push({
+        rowIndex: r + 2,
+        timestamp: String(row[0] || ''),
+        sheetNumber: String(row[1] || ''),
+        username: String(row[2] || ''),
+        lessonTitle: String(row[3] || ''),
+        answers: answersMap
+      });
+    }
+    return { success: true, data: list };
+  } catch (err) {
+    return { success: false, message: err.message };
+  }
+}
+
+function normalizeLiveKey(val) {
+  if (val === null || val === undefined) return '';
+  return String(val)
+    .trim()
+    .replace(/[٠-٩]/g, function(d) { return String(d.charCodeAt(0) - 1632); })
+    .toLowerCase();
+}
+
+function saveLiveAnswerT(payload) {
+  try {
+    if (!payload) return { success: false, message: 'بيانات مفقودة' };
+    var sheet = getOrCreateLiveAnswersSheet();
+    var sheetNum = String(payload.sheetNumber || '').trim();
+    var username = String(payload.username || '').trim();
+    var lessonTitle = String(payload.lessonTitle || '').trim();
+    
+    var normSheet = normalizeLiveKey(sheetNum);
+    var normUser = normalizeLiveKey(username);
+    var normLesson = normalizeLiveKey(lessonTitle);
+    
+    var result = '';
+    if (payload.isCorrect === null || payload.isCorrect === undefined) {
+      result = String(payload.answer || '').trim();
+    } else {
+      result = payload.isCorrect ? 'صح' : 'خطأ';
+    }
+    
+    var qIndex = payload.questionIndex !== undefined ? parseInt(payload.questionIndex, 10) : 0;
+    var targetCol = 5 + qIndex; // Column E = 5 (إجابة س1)
+    
+    // البحث عن الصف الحالي لنفس الطالب وموضوع الدرس لتحديثه بدلاً من تكرار الصفوف
+    var lastRow = sheet.getLastRow();
+    var targetRow = 0;
+    var currentTimestamp = '';
+    if (lastRow > 1) {
+      var data = sheet.getRange(2, 1, lastRow - 1, 4).getValues();
+      for (var r = 0; r < data.length; r++) {
+        var rowA = String(data[r][0] || '').trim();
+        var rowB = normalizeLiveKey(data[r][1]); // رقم المشترك
+        var rowC = normalizeLiveKey(data[r][2]); // اسم المشترك
+        var rowD = normalizeLiveKey(data[r][3]); // موضوع الدرس
+        
+        var matchLesson = (rowD === normLesson);
+        var matchStudent = false;
+        if (normSheet && rowB && normSheet === rowB) {
+          matchStudent = true;
+        } else if (normUser && rowC && normUser === rowC) {
+          matchStudent = true;
+        }
+        
+        if (matchLesson && matchStudent) {
+          targetRow = r + 2;
+          currentTimestamp = rowA;
+          break;
+        }
+      }
+    }
+    
+    if (targetRow > 1) {
+      if (payload.timestamp) {
+        sheet.getRange(targetRow, 1).setValue(payload.timestamp);
+      }
+      sheet.getRange(targetRow, targetCol).setValue(result);
+    } else {
+      var newRow = [
+        payload.timestamp || '',
+        sheetNum,
+        username,
+        lessonTitle
+      ];
+      for (var q = 0; q < Math.max(15, qIndex + 1); q++) {
+        newRow.push(q === qIndex ? result : '');
+      }
+      sheet.appendRow(newRow);
+    }
+    
+    return { success: true };
+  } catch (err) {
+    return { success: false, message: err.message };
+  }
+}
+
+function batchRecordLiveAnswersT(records) {
+  try {
+    if (!records || !records.length) return { success: true, count: 0 };
+    var sheet = getOrCreateLiveAnswersSheet();
+    var lastRow = sheet.getLastRow();
+    
+    // جلب البيانات الحالية للبحث عن الصف المطابق (رقم المشترك + اسم المشترك + موضوع الدرس)
+    var existingRows = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, 4).getValues() : [];
+    
+    for (var i = 0; i < records.length; i++) {
+      var rec = records[i];
+      var recSheetNum = String(rec.sheetNumber || '').trim();
+      var recUsername = String(rec.username || '').trim();
+      var recLesson = String(rec.lessonTitle || '').trim();
+      var ansMap = rec.answers || {};
+      var totalScore = rec.totalScore !== undefined ? String(rec.totalScore) : '';
+      
+      var normSheet = normalizeLiveKey(recSheetNum);
+      var normUser = normalizeLiveKey(recUsername);
+      var normLesson = normalizeLiveKey(recLesson);
+      
+      var foundRow = 0;
+      var existingTimestamp = '';
+      for (var r = 0; r < existingRows.length; r++) {
+        var rowA = String(existingRows[r][0] || '').trim();
+        var rowB = normalizeLiveKey(existingRows[r][1]);
+        var rowC = normalizeLiveKey(existingRows[r][2]);
+        var rowD = normalizeLiveKey(existingRows[r][3]);
+        
+        var matchLesson = (rowD === normLesson);
+        var matchStudent = false;
+        if (normSheet && rowB && normSheet === rowB) {
+          matchStudent = true;
+        } else if (normUser && rowC && normUser === rowC) {
+          matchStudent = true;
+        }
+        
+        if (matchLesson && matchStudent) {
+          foundRow = r + 2;
+          existingTimestamp = rowA;
+          break;
+        }
+      }
+      
+      // إذا تم إرسال تاريخ ووقت (عند النقر على إنهاء الدرس) نستخدمه، وإلا نحتفظ بالتاريخ القديم أو نتركه فارغاً
+      var finalTimestamp = rec.timestamp ? String(rec.timestamp) : existingTimestamp;
+      
+      var rowValues = [
+        finalTimestamp,
+        recSheetNum,
+        recUsername,
+        recLesson
+      ];
+      for (var a = 0; a < 15; a++) {
+        rowValues.push(ansMap[a] !== undefined ? String(ansMap[a]) : '');
+      }
+      rowValues.push(totalScore); // العمود رقم 20 (T) للنتيجة النهائية
+      
+      if (foundRow > 1) {
+        // تحديث نفس الصف القائم دون تكرار أي صفوف
+        sheet.getRange(foundRow, 1, 1, rowValues.length).setValues([rowValues]);
+        existingRows[foundRow - 2] = [finalTimestamp, recSheetNum, recUsername, recLesson];
+      } else {
+        // إضافة صف جديد إذا كان أول تسجيل لهذا الطالب في هذا الدرس
+        sheet.appendRow(rowValues);
+        existingRows.push([finalTimestamp, recSheetNum, recUsername, recLesson]);
+      }
+    }
+    
+    return { success: true, count: records.length };
+  } catch (err) {
+    return { success: false, message: err.message };
   }
 }
 `;

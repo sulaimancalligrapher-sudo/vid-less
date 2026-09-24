@@ -7,6 +7,313 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  app.use(express.json({ limit: '10mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+  // ==========================================
+  // --- IN-MEMORY REALTIME LIVE CLASS STATE ---
+  // ==========================================
+  interface LiveQuestionPayload {
+    index: number;
+    time: number;
+    timeFormatted?: string;
+    question: string;
+    options: string[];
+    isTextAnswer?: boolean;
+    correctAnswer: string;
+    image?: string;
+  }
+
+  interface LiveConnectedStudent {
+    username: string;
+    sheetNumber: string;
+    joinedAt: number;
+    lastPing: number;
+    pinVerified?: boolean;
+  }
+
+  interface LiveStudentAnswerSubmission {
+    username: string;
+    sheetNumber: string;
+    answer: string;
+    isCorrect?: boolean | null;
+    submittedAt: number;
+  }
+
+  function generatePinCode(): string {
+    return String(Math.floor(1000 + Math.random() * 9000));
+  }
+
+  let currentLiveSession = {
+    sessionId: 'live-main',
+    sessionPin: '1234',
+    lessonTitle: '',
+    videoUrl: '',
+    status: 'idle' as 'idle' | 'waiting' | 'playing' | 'question_active' | 'revealed' | 'finished',
+    currentQuestionIndex: null as number | null,
+    currentQuestion: null as LiveQuestionPayload | null,
+    questionTriggeredAt: null as number | null,
+    timeLimit: 30,
+    showResult: 'نعم' as 'نعم' | 'لا',
+    connectedStudents: [] as LiveConnectedStudent[],
+    answersForCurrentQuestion: {} as Record<string, LiveStudentAnswerSubmission>,
+    allSessionAnswers: {} as Record<string, Record<number, string>>,
+  };
+
+  const sseClients = new Set<express.Response>();
+
+  function broadcastLiveState() {
+    const payload = JSON.stringify(currentLiveSession);
+    for (const client of sseClients) {
+      try {
+        client.write(`data: ${payload}\n\n`);
+      } catch (err) {
+        sseClients.delete(client);
+      }
+    }
+  }
+
+  // SSE Stream for Real-time Instant Updates (<0.1s latency)
+  app.get("/api/live/stream", (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.flushHeaders?.();
+
+    // Send immediate current state
+    res.write(`data: ${JSON.stringify(currentLiveSession)}\n\n`);
+    sseClients.add(res);
+
+    req.on('close', () => {
+      sseClients.delete(res);
+    });
+  });
+
+  // Get current state (REST fallback)
+  app.get("/api/live/state", (req, res) => {
+    res.json(currentLiveSession);
+  });
+
+  // Teacher initializes or changes lesson
+  app.post("/api/live/init", (req, res) => {
+    const { lessonTitle, videoUrl, timeLimit, showResult, sessionPin } = req.body;
+    currentLiveSession.sessionId = 'live-' + Date.now();
+    currentLiveSession.sessionPin = sessionPin && String(sessionPin).trim() ? String(sessionPin).trim() : generatePinCode();
+    currentLiveSession.lessonTitle = lessonTitle || 'درس تفاعلي مباشر';
+    currentLiveSession.videoUrl = videoUrl || '';
+    currentLiveSession.status = 'waiting';
+    currentLiveSession.currentQuestionIndex = null;
+    currentLiveSession.currentQuestion = null;
+    currentLiveSession.questionTriggeredAt = null;
+    currentLiveSession.timeLimit = typeof timeLimit === 'number' && timeLimit > 0 ? timeLimit : 30;
+    currentLiveSession.showResult = showResult || 'نعم';
+    currentLiveSession.answersForCurrentQuestion = {};
+    currentLiveSession.allSessionAnswers = {}; // Clear old session answers memory
+    broadcastLiveState();
+    res.json({ success: true, state: currentLiveSession });
+  });
+
+  // Teacher changes or regenerates PIN
+  app.post("/api/live/update-pin", (req, res) => {
+    const { pin } = req.body;
+    currentLiveSession.sessionPin = pin && String(pin).trim() ? String(pin).trim() : generatePinCode();
+    broadcastLiveState();
+    res.json({ success: true, pin: currentLiveSession.sessionPin, state: currentLiveSession });
+  });
+
+  // Student joins room with PIN check
+  app.post("/api/live/join", (req, res) => {
+    const { username, sheetNumber, pin } = req.body;
+    if (!username) {
+      return res.status(400).json({ success: false, error: 'اسم الطالب مطلوب' });
+    }
+
+    const enteredPin = String(pin || '').trim();
+    const activePin = String(currentLiveSession.sessionPin || '').trim();
+
+    // Check PIN if session requires it
+    if (activePin && enteredPin !== activePin) {
+      return res.status(401).json({ 
+        success: false, 
+        error: 'رقم تسجيل حضور الحصة غير صحيح! تأكد من الرقم المعروض على شاشة العرض.' 
+      });
+    }
+
+    const cleanUser = String(username).trim();
+    const cleanSheet = String(sheetNumber || '').trim();
+
+    // Check if student already in list
+    const existingIdx = currentLiveSession.connectedStudents.findIndex(
+      s => s.username === cleanUser && s.sheetNumber === cleanSheet
+    );
+
+    const now = Date.now();
+    if (existingIdx >= 0) {
+      currentLiveSession.connectedStudents[existingIdx].lastPing = now;
+      currentLiveSession.connectedStudents[existingIdx].pinVerified = true;
+    } else {
+      currentLiveSession.connectedStudents.push({
+        username: cleanUser,
+        sheetNumber: cleanSheet,
+        joinedAt: now,
+        lastPing: now,
+        pinVerified: true,
+      });
+    }
+
+    broadcastLiveState();
+    res.json({ success: true, state: currentLiveSession });
+  });
+
+  // Student heartbeat ping
+  app.post("/api/live/ping", (req, res) => {
+    const { username, sheetNumber } = req.body;
+    if (username) {
+      const cleanUser = String(username).trim();
+      const cleanSheet = String(sheetNumber || '').trim();
+      const existing = currentLiveSession.connectedStudents.find(
+        s => s.username === cleanUser && s.sheetNumber === cleanSheet
+      );
+      if (existing) {
+        existing.lastPing = Date.now();
+      }
+    }
+    res.json({ success: true });
+  });
+
+  // Student leaves or closes room
+  app.post("/api/live/leave", (req, res) => {
+    const { username, sheetNumber } = req.body;
+    if (username) {
+      const cleanUser = String(username).trim();
+      const cleanSheet = String(sheetNumber || '').trim();
+      const studentKey = `${cleanUser}_${cleanSheet}`;
+
+      const initialLen = currentLiveSession.connectedStudents.length;
+      currentLiveSession.connectedStudents = currentLiveSession.connectedStudents.filter(
+        s => !(s.username === cleanUser && s.sheetNumber === cleanSheet)
+      );
+
+      // Clean up in-memory answers for leaving student
+      delete currentLiveSession.answersForCurrentQuestion[studentKey];
+      delete currentLiveSession.allSessionAnswers[studentKey];
+
+      if (currentLiveSession.connectedStudents.length !== initialLen) {
+        broadcastLiveState();
+      }
+    }
+    res.json({ success: true, state: currentLiveSession });
+  });
+
+  // Regular cleanup of disconnected / closed student sessions (if no ping for 45s)
+  setInterval(() => {
+    const now = Date.now();
+    const activeThreshold = 45000; // 45 seconds threshold gives plenty of time for tab switching
+    const initialLen = currentLiveSession.connectedStudents.length;
+    currentLiveSession.connectedStudents = currentLiveSession.connectedStudents.filter(s => {
+      return (now - (s.lastPing || 0)) < activeThreshold;
+    });
+    if (currentLiveSession.connectedStudents.length !== initialLen) {
+      broadcastLiveState();
+    }
+  }, 5000);
+
+  // Teacher / Video triggers a question!
+  app.post("/api/live/trigger-question", (req, res) => {
+    const { questionIndex, question, timeLimit, showResult } = req.body;
+    currentLiveSession.status = 'question_active';
+    currentLiveSession.currentQuestionIndex = questionIndex;
+    currentLiveSession.currentQuestion = question;
+    currentLiveSession.questionTriggeredAt = Date.now();
+    if (timeLimit) currentLiveSession.timeLimit = Number(timeLimit);
+    if (showResult) currentLiveSession.showResult = showResult;
+    currentLiveSession.answersForCurrentQuestion = {}; // Reset answers for this new question
+
+    broadcastLiveState();
+    res.json({ success: true, state: currentLiveSession });
+  });
+
+  // Student submits an answer
+  app.post("/api/live/submit-answer", (req, res) => {
+    const { username, sheetNumber, answer, questionIndex, isCorrect } = req.body;
+    if (!username || answer === undefined) {
+      return res.status(400).json({ success: false, error: 'بيانات غير مكتملة' });
+    }
+
+    const cleanUser = String(username).trim();
+    const cleanSheet = String(sheetNumber || '').trim();
+    const studentKey = `${cleanUser}_${cleanSheet}`;
+
+    currentLiveSession.answersForCurrentQuestion[studentKey] = {
+      username: cleanUser,
+      sheetNumber: cleanSheet,
+      answer: String(answer),
+      isCorrect: isCorrect,
+      submittedAt: Date.now(),
+    };
+
+    // Also store in allSessionAnswers
+    const qIdx = questionIndex !== undefined ? Number(questionIndex) : (currentLiveSession.currentQuestionIndex ?? 0);
+    if (!currentLiveSession.allSessionAnswers[studentKey]) {
+      currentLiveSession.allSessionAnswers[studentKey] = {};
+    }
+    currentLiveSession.allSessionAnswers[studentKey][qIdx] = String(answer);
+
+    broadcastLiveState();
+    res.json({ success: true, state: currentLiveSession });
+  });
+
+  // Teacher reveals correct answer
+  app.post("/api/live/reveal-answer", (req, res) => {
+    currentLiveSession.status = 'revealed';
+    broadcastLiveState();
+    res.json({ success: true, state: currentLiveSession });
+  });
+
+  // Teacher resumes video
+  app.post("/api/live/resume", (req, res) => {
+    currentLiveSession.status = 'playing';
+    currentLiveSession.currentQuestion = null;
+    currentLiveSession.currentQuestionIndex = null;
+    currentLiveSession.questionTriggeredAt = null;
+    broadcastLiveState();
+    res.json({ success: true, state: currentLiveSession });
+  });
+
+  // Teacher finishes session
+  app.post("/api/live/finish", (req, res) => {
+    currentLiveSession.status = 'finished';
+    currentLiveSession.currentQuestion = null;
+    currentLiveSession.currentQuestionIndex = null;
+    currentLiveSession.questionTriggeredAt = null;
+    currentLiveSession.answersForCurrentQuestion = {};
+    currentLiveSession.allSessionAnswers = {}; // Clear so old answers are never carried into the next session
+    broadcastLiveState();
+    res.json({ success: true, state: currentLiveSession });
+  });
+
+  // Reset session
+  app.post("/api/live/reset", (req, res) => {
+    currentLiveSession = {
+      sessionId: 'live-' + Date.now(),
+      sessionPin: generatePinCode(),
+      lessonTitle: '',
+      videoUrl: '',
+      status: 'idle',
+      currentQuestionIndex: null,
+      currentQuestion: null,
+      questionTriggeredAt: null,
+      timeLimit: 30,
+      showResult: 'نعم',
+      connectedStudents: [],
+      answersForCurrentQuestion: {},
+      allSessionAnswers: {},
+    };
+    broadcastLiveState();
+    res.json({ success: true, state: currentLiveSession });
+  });
+
   // Google Drive Streaming Proxy Route with Auto Virus Warning Bypass
   app.get("/api/proxy-drive", async (req, res) => {
     const driveId = req.query.id as string;

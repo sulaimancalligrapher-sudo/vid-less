@@ -7,11 +7,12 @@ import {
   Trash2, ChevronDown, ChevronUp, Link as LinkIcon, Settings as SettingsIcon,
   HelpCircle, MessageSquare, Calendar, Clock, Eye, EyeOff,
   UserCheck, Users, UserPlus, User, ChevronLeft, Edit3, Sparkles, Globe, Send, Bot,
-  FileSpreadsheet
+  FileSpreadsheet, Tv
 } from 'lucide-react';
-import { AdminQuestionRow, AdminAnswerRow, AdminQuestionItem } from '../types';
+import { AdminQuestionRow, AdminAnswerRow, AdminQuestionItem, LiveLessonRow } from '../types';
 import TranslationEditor from './TranslationEditor';
 import TelegramManager from './TelegramManager';
+import LiveClassManager from './LiveClassManager';
 import { 
   fetchAdminQuestions, saveAdminQuestion, deleteAdminQuestion, fetchAdminAnswers, 
   updateAdminAnswer, saveBatchAdminQuestions,
@@ -23,10 +24,11 @@ import {
 
 interface AdminPanelProps {
   onClose: () => void;
+  onStartTeacherTheater?: (lesson: LiveLessonRow) => void;
 }
 
-export default function AdminPanel({ onClose }: AdminPanelProps) {
-  const [activeTab, setActiveTab] = useState<'questions' | 'answers' | 'translations' | 'telegram'>('questions');
+export default function AdminPanel({ onClose, onStartTeacherTheater }: AdminPanelProps) {
+  const [activeTab, setActiveTab] = useState<'questions' | 'answers' | 'translations' | 'telegram' | 'live'>('questions');
 
   // Questions state
   const [questions, setQuestions] = useState<AdminQuestionRow[]>([]);
@@ -809,6 +811,18 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
             <Send className="w-4 h-4 text-sky-400" />
             <span>ربط التلغرام والإشعارات ✈️</span>
           </button>
+
+          <button
+            onClick={() => setActiveTab('live')}
+            className={`px-5 py-3 rounded-t-2xl font-bold text-xs sm:text-sm flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
+              activeTab === 'live'
+                ? 'bg-slate-900 text-amber-400 border-amber-500 shadow-sm'
+                : 'text-slate-400 hover:text-slate-200 border-transparent'
+            }`}
+          >
+            <Tv className="w-4 h-4 text-amber-400" />
+            <span>الحصص التفاعلية المباشرة 🎯 (Questions-T)</span>
+          </button>
         </div>
 
         {/* Tab Content Body */}
@@ -1093,6 +1107,19 @@ export default function AdminPanel({ onClose }: AdminPanelProps) {
               <TelegramManager 
                 answers={answers} 
                 onNotify={(text, type) => setNotice({ text, type })} 
+              />
+            </div>
+          )}
+
+          {/* TAB 5: LIVE CLASSROOM (Questions-T & Answers-T) */}
+          {activeTab === 'live' && (
+            <div className="py-2">
+              <LiveClassManager 
+                onStartTeacherTheater={(lesson) => {
+                  if (onStartTeacherTheater) {
+                    onStartTeacherTheater(lesson);
+                  }
+                }}
               />
             </div>
           )}
