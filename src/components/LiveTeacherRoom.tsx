@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Play, Pause, Volume2, VolumeX, Maximize2, Minimize2, 
-  QrCode, Users, CheckCircle2, AlertCircle, Sparkles, 
+  QrCode, Users, CheckCircle2, AlertCircle, AlertTriangle, Sparkles, 
   ChevronRight, ChevronLeft, ArrowLeft, RefreshCw, FileSpreadsheet, 
   Eye, FastForward, Clock, ShieldAlert, Check, X, Award, ExternalLink, Copy,
   KeyRound, ShieldCheck, Tv
@@ -78,6 +78,14 @@ export default function LiveTeacherRoom({
   const [isFinishingLesson, setIsFinishingLesson] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedPin, setCopiedPin] = useState(false);
+
+  // Unsaved Answers Safety Prompt States
+  const [showUnsavedPrompt, setShowUnsavedPrompt] = useState(false);
+  const [pendingAction, setPendingAction] = useState<
+    | { type: 'switch_lesson'; lesson: LiveLessonRow }
+    | { type: 'exit' }
+    | null
+  >(null);
 
   // Triggered questions history in this playback session
   const triggeredQuestionsRef = useRef<Set<number>>(new Set());
@@ -344,8 +352,8 @@ export default function LiveTeacherRoom({
   };
 
   // Finish Lesson: Saves answers with current date & time to Answers-T, finishes session, and returns to awaiting new lesson
-  const handleFinishLesson = async () => {
-    if (!sessionState || !selectedLesson) return;
+  const handleFinishLesson = async (): Promise<boolean> => {
+    if (!sessionState || !selectedLesson) return false;
     setIsFinishingLesson(true);
 
     try {
@@ -357,6 +365,7 @@ export default function LiveTeacherRoom({
           setShowSaveSuccess(true);
         } else {
           alert('تعذر حفظ الإجابات في ورقة Answers-T:\n' + (res?.message || 'تحقق من رابط Google Apps Script وصلاحيات النشر (Who has access: Anyone)'));
+          return false;
         }
       } else {
         alert('تنبيه: لم يتم العثور على أي إجابات مرسلة من الطلاب لهذا الدرس لحفظها في Answers-T.');
@@ -381,11 +390,69 @@ export default function LiveTeacherRoom({
 
       // 5. Exit video and return to awaiting next video or lesson selection
       setSelectedLesson(null);
+      return true;
     } catch (err: any) {
       console.error('Error finishing lesson and saving to Answers-T:', err);
       alert('حدث خطأ أثناء إنهاء الدرس: ' + (err?.message || 'خطأ غير معروف'));
+      return false;
     } finally {
       setIsFinishingLesson(false);
+    }
+  };
+
+  // Helper to check if there are any student answers submitted for the current lesson
+  const hasUnsavedAnswers = (): boolean => {
+    if (!selectedLesson || !sessionState) return false;
+    const records = buildCurrentAnswerRecords(false);
+    return records.length > 0;
+  };
+
+  // Safe handler when requesting to switch lesson
+  const handleRequestSwitchLesson = (newLesson: LiveLessonRow) => {
+    if (selectedLesson && selectedLesson.title !== newLesson.title && hasUnsavedAnswers()) {
+      setPendingAction({ type: 'switch_lesson', lesson: newLesson });
+      setShowUnsavedPrompt(true);
+    } else {
+      setSelectedLesson(newLesson);
+    }
+  };
+
+  // Safe handler when requesting to exit room
+  const handleRequestExit = () => {
+    if (selectedLesson && hasUnsavedAnswers()) {
+      setPendingAction({ type: 'exit' });
+      setShowUnsavedPrompt(true);
+    } else {
+      onBack();
+    }
+  };
+
+  // Safety modal actions: Save & Proceed
+  const handleSaveAndProceed = async () => {
+    const success = await handleFinishLesson();
+    if (success) {
+      setShowUnsavedPrompt(false);
+      if (pendingAction) {
+        if (pendingAction.type === 'switch_lesson') {
+          setSelectedLesson(pendingAction.lesson);
+        } else if (pendingAction.type === 'exit') {
+          onBack();
+        }
+        setPendingAction(null);
+      }
+    }
+  };
+
+  // Safety modal actions: Discard & Proceed
+  const handleDiscardAndProceed = () => {
+    setShowUnsavedPrompt(false);
+    if (pendingAction) {
+      if (pendingAction.type === 'switch_lesson') {
+        setSelectedLesson(pendingAction.lesson);
+      } else if (pendingAction.type === 'exit') {
+        onBack();
+      }
+      setPendingAction(null);
     }
   };
 
@@ -440,7 +507,7 @@ export default function LiveTeacherRoom({
       <header className="bg-slate-950/80 backdrop-blur-md border-b border-slate-800/80 px-4 py-3 flex items-center justify-between z-30">
         <div className="flex items-center gap-3">
           <button
-            onClick={onBack}
+            onClick={handleRequestExit}
             className="p-2 bg-slate-900 hover:bg-slate-800 text-slate-300 rounded-xl transition-all flex items-center gap-1.5 text-xs font-bold cursor-pointer"
           >
             <ArrowLeft className="w-4 h-4" />
@@ -461,7 +528,7 @@ export default function LiveTeacherRoom({
                 value={selectedLesson?.title || ''}
                 onChange={(e) => {
                   const found = allLessons.find(l => l.title === e.target.value);
-                  if (found) setSelectedLesson(found);
+                  if (found) handleRequestSwitchLesson(found);
                 }}
                 className="bg-slate-900 border border-slate-800 text-slate-200 text-xs font-bold rounded-xl px-3 py-1.5 outline-none cursor-pointer"
               >
@@ -1047,6 +1114,82 @@ export default function LiveTeacherRoom({
             <CheckCircle2 className="w-5 h-5" />
             <span>تم إنهاء الدرس وحفظ كافة النتائج والتاريخ في ورقة Answers-T بنجاح! 💾</span>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Unsaved Student Answers Safety Prompt Modal */}
+      <AnimatePresence>
+        {showUnsavedPrompt && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="w-full max-w-lg bg-slate-900 border border-amber-500/50 rounded-3xl p-6 sm:p-7 shadow-2xl relative space-y-5 text-right"
+              dir="rtl"
+            >
+              {/* Header with warning icon */}
+              <div className="flex items-center gap-3.5">
+                <div className="w-12 h-12 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center shrink-0 shadow-inner">
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-slate-100">تنبيه: إجابات الطلاب لم تُحفظ بعد!</h3>
+                  <p className="text-xs text-amber-400/90 font-medium">لم يتم النقر على زر «إنهاء الدرس» لحفظ الإجابات في Answers-T</p>
+                </div>
+              </div>
+
+              {/* Informative Explanation */}
+              <div className="text-xs sm:text-sm text-slate-300 leading-relaxed bg-slate-950/80 border border-slate-800 p-4 rounded-2xl space-y-2.5">
+                <p>
+                  أنت بصدد {pendingAction?.type === 'switch_lesson' ? `الانتقال إلى فيديو/درس جديد (${pendingAction.lesson.title})` : 'الخروج من شاشة العرض'}، بينما توجد إجابات مسجلة للطلاب في هذا الدرس (<b>{selectedLesson?.title}</b>).
+                </p>
+                <div className="bg-amber-500/10 border border-amber-500/20 p-2.5 rounded-xl text-xs text-amber-300 font-medium flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>💡 لحفظ درجات وتفاعل الطلاب في ورقة Answers-T مع التاريخ والوقت تلقائياً، اختر «نعم، احفظ وأنهِ الدرس أولاً».</span>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex flex-col-reverse sm:flex-row items-center justify-end gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowUnsavedPrompt(false);
+                    setPendingAction(null);
+                  }}
+                  className="w-full sm:w-auto px-4 py-2.5 rounded-xl text-xs font-bold text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-all cursor-pointer"
+                >
+                  إلغاء والعودة للدرس ↩️
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDiscardAndProceed}
+                  className="w-full sm:w-auto px-4 py-2.5 rounded-xl text-xs font-bold text-rose-400 hover:bg-rose-500/10 border border-rose-500/30 transition-all cursor-pointer"
+                >
+                  تخطي دون حفظ ⚠️
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveAndProceed}
+                  disabled={isFinishingLesson}
+                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl text-xs font-black bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white shadow-lg shadow-emerald-900/40 transition-all cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {isFinishingLesson ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                      <span>جارٍ الحفظ والإنهاء...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-4 h-4 text-emerald-200" />
+                      <span>نعم، احفظ وأنهِ الدرس أولاً 💾</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </div>

@@ -283,10 +283,56 @@ export default function LiveClassManager({
     setShowEndConfirmModal(false);
     setIsTogglingProgram(true);
     try {
+      // Auto-save any unsaved student answers before terminating
+      if (sessionState?.allSessionAnswers && Object.keys(sessionState.allSessionAnswers).length > 0) {
+        try {
+          const timestamp = new Date().toLocaleString('ar-SA');
+          const lessonTitle = sessionState.lessonTitle || (lessons[0]?.title || 'درس تفاعلي مباشر');
+          const records: LiveAnswerRecord[] = [];
+          const students = sessionState.connectedStudents || [];
+          const studentMap = new Map<string, { username: string; sheetNumber: string }>();
+
+          students.forEach(s => {
+            const u = String(s.username || '').trim();
+            const num = String(s.sheetNumber || '').trim();
+            if (u) {
+              studentMap.set(u.toLowerCase(), { username: u, sheetNumber: num });
+            }
+          });
+
+          Object.entries(sessionState.allSessionAnswers).forEach(([rawKey, answers]) => {
+            let u = rawKey.includes('_') ? rawKey.split('_')[0] : rawKey;
+            let num = rawKey.includes('_') ? rawKey.split('_').slice(1).join('_') : '';
+            const existing = studentMap.get(u.toLowerCase());
+            const finalUser = existing ? existing.username : u;
+            const finalNum = existing?.sheetNumber || num || '';
+
+            const formattedAns: Record<number, string> = {};
+            Object.entries(answers).forEach(([qIdx, ans]) => {
+              formattedAns[Number(qIdx)] = String(ans);
+            });
+
+            records.push({
+              timestamp,
+              sheetNumber: finalNum,
+              username: finalUser,
+              lessonTitle,
+              answers: formattedAns
+            });
+          });
+
+          if (records.length > 0) {
+            await recordLiveAnswersBatchT(records);
+          }
+        } catch (saveErr) {
+          console.warn('Auto-saving before ending program encountered an issue:', saveErr);
+        }
+      }
+
       const res = await endLiveProgram();
       if (res.success && res.state) {
         setSessionState(res.state);
-        setProgramToast('تم إنهاء البرنامج وإخراج جميع الطلاب بنجاح 🛑');
+        setProgramToast('تم حفظ إجابات الطلاب وإنهاء البرنامج بنجاح 🛑');
       }
       setTimeout(() => setProgramToast(null), 4000);
     } catch (e: any) {
@@ -1535,9 +1581,21 @@ export default function LiveClassManager({
                 </div>
               </div>
 
-              <div className="text-sm text-slate-300 leading-relaxed bg-slate-950/70 border border-slate-800 p-4 rounded-2xl space-y-2">
+              <div className="text-sm text-slate-300 leading-relaxed bg-slate-950/70 border border-slate-800 p-4 rounded-2xl space-y-2.5">
                 <p>هل أنت متأكد من رغبتك في <b>إنهاء البرنامج المباشر</b>؟</p>
                 <p className="text-xs text-rose-400 font-medium">⚠️ سيتم إخراج جميع الطلاب المشتركين حالياً من الفصل التفاعلي، وإغلاق الرمز المعروض على الشاشة.</p>
+                {(() => {
+                  const unsavedCount = Object.keys(sessionState?.allSessionAnswers || {}).length;
+                  if (unsavedCount > 0) {
+                    return (
+                      <div className="bg-amber-950/40 border border-amber-500/30 p-2.5 rounded-xl text-xs text-amber-300 font-medium flex items-center gap-2 mt-2">
+                        <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span>💡 توجد إجابات مسجلة لـ <b>{unsavedCount}</b> طالب. سيقوم النظام بحفظها تلقائياً في ورقة Answers-T قبل إنهاء الحصة.</span>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
               </div>
 
               <div className="flex items-center justify-end gap-3 pt-2">
