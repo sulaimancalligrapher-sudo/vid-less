@@ -20,6 +20,7 @@ export const defaultLiveSessionState: LiveSessionState = {
   sessionId: 'live-main',
   sessionPin: '1234',
   isProgramActive: false,
+  showLessonsListInRoom: false,
   lessonTitle: '',
   videoUrl: '',
   status: 'idle',
@@ -59,6 +60,7 @@ export function subscribeToLiveSession(
           sessionId: data.sessionId || 'live-main',
           sessionPin: data.sessionPin || '1234',
           isProgramActive: Boolean(data.isProgramActive),
+          showLessonsListInRoom: Boolean(data.showLessonsListInRoom),
           lessonTitle: data.lessonTitle || '',
           videoUrl: data.videoUrl || '',
           status: data.status || 'idle',
@@ -103,6 +105,7 @@ export async function getLiveSessionState(): Promise<LiveSessionState | null> {
         sessionId: data.sessionId || 'live-main',
         sessionPin: data.sessionPin || '1234',
         isProgramActive: Boolean(data.isProgramActive),
+        showLessonsListInRoom: Boolean(data.showLessonsListInRoom),
         lessonTitle: data.lessonTitle || '',
         videoUrl: data.videoUrl || '',
         status: data.status || 'idle',
@@ -584,5 +587,20 @@ export async function restoreLiveBackup(backupSession: any): Promise<{ success: 
   } catch (error: any) {
     console.error('Failed to restore backup:', error);
     throw error;
+  }
+}
+
+// Toggle showing lessons list selector in projector display screen
+export async function toggleShowLessonsListInRoom(show: boolean): Promise<{ success: boolean; state?: LiveSessionState }> {
+  try {
+    await updateDoc(LIVE_DOC_REF, {
+      showLessonsListInRoom: show,
+      updatedAt: serverTimestamp(),
+    });
+    cachedState = { ...cachedState, showLessonsListInRoom: show };
+    return { success: true, state: cachedState };
+  } catch (error: any) {
+    console.error('Failed to toggle showLessonsListInRoom in Firebase:', error);
+    return { success: false };
   }
 }

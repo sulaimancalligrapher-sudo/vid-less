@@ -81,6 +81,8 @@ export default function LiveTeacherRoom({
 
   // Unsaved Answers Safety Prompt States
   const [showUnsavedPrompt, setShowUnsavedPrompt] = useState(false);
+  const [showFinishConfirmModal, setShowFinishConfirmModal] = useState(false);
+  const [finishErrorMsg, setFinishErrorMsg] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<
     | { type: 'switch_lesson'; lesson: LiveLessonRow }
     | { type: 'exit' }
@@ -134,6 +136,18 @@ export default function LiveTeacherRoom({
       unsubscribe();
     };
   }, []);
+
+  // Synchronize selected lesson when switched from Admin panel
+  useEffect(() => {
+    if (sessionState?.lessonTitle && allLessons.length > 0) {
+      if (!selectedLesson || selectedLesson.title !== sessionState.lessonTitle) {
+        const match = allLessons.find(l => l.title === sessionState.lessonTitle);
+        if (match) {
+          setSelectedLesson(match);
+        }
+      }
+    }
+  }, [sessionState?.lessonTitle, allLessons]);
 
   // Time tracking and smart auto-pause for questions
   const handleTimeUpdate = () => {
@@ -377,6 +391,7 @@ export default function LiveTeacherRoom({
   const handleFinishLesson = async (): Promise<boolean> => {
     if (!sessionState || !selectedLesson) return false;
     setIsFinishingLesson(true);
+    setFinishErrorMsg(null);
 
     try {
       // 1. Record student answers to Google Sheets Answers-T with final timestamp
@@ -386,11 +401,9 @@ export default function LiveTeacherRoom({
         if (res && res.success) {
           setShowSaveSuccess(true);
         } else {
-          alert('تعذر حفظ الإجابات في ورقة Answers-T:\n' + (res?.message || 'تحقق من رابط Google Apps Script وصلاحيات النشر (Who has access: Anyone)'));
+          setFinishErrorMsg('تعذر حفظ الإجابات في ورقة Answers-T:\n' + (res?.message || 'تحقق من رابط Google Apps Script وصلاحيات النشر (Who has access: Anyone)'));
           return false;
         }
-      } else {
-        alert('تنبيه: لم يتم العثور على أي إجابات مرسلة من الطلاب لهذا الدرس لحفظها في Answers-T.');
       }
       // Clear localStorage emergency backup since successfully saved to Sheets
       try {
@@ -410,12 +423,15 @@ export default function LiveTeacherRoom({
       setShowSaveSuccess(true);
       setTimeout(() => setShowSaveSuccess(false), 4000);
 
+      // Close confirm modal
+      setShowFinishConfirmModal(false);
+
       // 5. Exit video and return to awaiting next video or lesson selection
       setSelectedLesson(null);
       return true;
     } catch (err: any) {
       console.error('Error finishing lesson and saving to Answers-T:', err);
-      alert('حدث خطأ أثناء إنهاء الدرس: ' + (err?.message || 'خطأ غير معروف'));
+      setFinishErrorMsg('حدث خطأ أثناء إنهاء الدرس: ' + (err?.message || 'خطأ غير معروف'));
       return false;
     } finally {
       setIsFinishingLesson(false);
@@ -439,14 +455,31 @@ export default function LiveTeacherRoom({
     }
   };
 
-  // Safe handler when requesting to exit room
-  const handleRequestExit = () => {
+  // Safe handler when requesting to close page
+  const handleRequestClosePage = () => {
     if (selectedLesson && hasUnsavedAnswers()) {
       setPendingAction({ type: 'exit' });
       setShowUnsavedPrompt(true);
     } else {
-      onBack();
+      executeClose();
     }
+  };
+
+  const executeClose = () => {
+    try {
+      window.close();
+    } catch (e) {
+      console.error(e);
+    }
+    setTimeout(() => {
+      if (!window.closed) {
+        try {
+          window.location.href = 'about:blank';
+        } catch {
+          window.location.replace('about:blank');
+        }
+      }
+    }, 100);
   };
 
   // Safety modal actions: Save & Proceed
@@ -458,7 +491,7 @@ export default function LiveTeacherRoom({
         if (pendingAction.type === 'switch_lesson') {
           setSelectedLesson(pendingAction.lesson);
         } else if (pendingAction.type === 'exit') {
-          onBack();
+          executeClose();
         }
         setPendingAction(null);
       }
@@ -472,7 +505,7 @@ export default function LiveTeacherRoom({
       if (pendingAction.type === 'switch_lesson') {
         setSelectedLesson(pendingAction.lesson);
       } else if (pendingAction.type === 'exit') {
-        onBack();
+        executeClose();
       }
       setPendingAction(null);
     }
@@ -528,12 +561,14 @@ export default function LiveTeacherRoom({
       {/* Top Theater Header */}
       <header className="bg-slate-950/80 backdrop-blur-md border-b border-slate-800/80 px-4 py-3 flex items-center justify-between z-30">
         <div className="flex items-center gap-3">
+          {/* Close Page Button (Icon only) */}
           <button
-            onClick={handleRequestExit}
-            className="p-2 bg-slate-900 hover:bg-slate-800 text-slate-300 rounded-xl transition-all flex items-center gap-1.5 text-xs font-bold cursor-pointer"
+            onClick={handleRequestClosePage}
+            title="إغلاق الصفحة"
+            aria-label="إغلاق الصفحة"
+            className="p-2 bg-slate-900/90 hover:bg-rose-950/80 border border-slate-800 hover:border-rose-500/50 text-slate-400 hover:text-rose-300 rounded-xl transition-all flex items-center justify-center cursor-pointer shadow-sm active:scale-95"
           >
-            <ArrowLeft className="w-4 h-4" />
-            <span>خروج</span>
+            <X className="w-5 h-5" />
           </button>
 
           <div className="h-5 w-px bg-slate-800" />
@@ -542,22 +577,26 @@ export default function LiveTeacherRoom({
           <div className="flex items-center gap-2">
             <span className="text-[11px] font-black uppercase tracking-wider text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/20 flex items-center gap-1">
               <Sparkles className="w-3.5 h-3.5" />
-              <span>شاشة البروجكتر التفاعلية</span>
+              <span>شاشة العرض</span>
             </span>
 
-            {allLessons.length > 1 ? (
-              <select
-                value={selectedLesson?.title || ''}
-                onChange={(e) => {
-                  const found = allLessons.find(l => l.title === e.target.value);
-                  if (found) handleRequestSwitchLesson(found);
-                }}
-                className="bg-slate-900 border border-slate-800 text-slate-200 text-xs font-bold rounded-xl px-3 py-1.5 outline-none cursor-pointer"
-              >
-                {allLessons.map((l, i) => (
-                  <option key={i} value={l.title}>{l.title}</option>
-                ))}
-              </select>
+            {/* Lessons List Selector (Controlled via Admin - Hidden by default) */}
+            {sessionState?.showLessonsListInRoom && allLessons.length > 0 ? (
+              <div className="flex items-center gap-2 animate-in fade-in duration-200">
+                <select
+                  value={selectedLesson?.title || ''}
+                  onChange={(e) => {
+                    const found = allLessons.find(l => l.title === e.target.value);
+                    if (found) handleRequestSwitchLesson(found);
+                  }}
+                  className="bg-slate-900 border border-amber-500/50 text-amber-300 text-xs font-bold rounded-xl px-3 py-1.5 outline-none cursor-pointer focus:border-amber-400 shadow-sm"
+                  title="عرض قائمة الدروس وتبديل الدرس المعروض"
+                >
+                  {allLessons.map((l, i) => (
+                    <option key={i} value={l.title}>{l.title}</option>
+                  ))}
+                </select>
+              </div>
             ) : (
               <h1 className="text-sm sm:text-base font-black text-slate-100">
                 {selectedLesson?.title || 'درس تفاعلي مباشر'}
@@ -593,7 +632,10 @@ export default function LiveTeacherRoom({
 
           {/* Finish Lesson Button */}
           <button
-            onClick={handleFinishLesson}
+            onClick={() => {
+              setFinishErrorMsg(null);
+              setShowFinishConfirmModal(true);
+            }}
             disabled={isFinishingLesson}
             title="إنهاء الدرس الحالي وتسجيل تاريخ ونتائج إجابات الطلاب في ورقة Answers-T والعودة لاختيار درس جديد"
             className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white rounded-xl text-xs font-black flex items-center gap-2 shadow-lg shadow-emerald-600/20 transition-all cursor-pointer active:scale-95 disabled:opacity-50"
@@ -1008,31 +1050,6 @@ export default function LiveTeacherRoom({
               />
             </div>
           </div>
-
-          {/* Quick Questions Navigation Bar */}
-          <div className="flex items-center gap-1.5 overflow-x-auto max-w-md py-1">
-            {selectedLesson?.questions?.map((q, idx) => {
-              const isTriggered = triggeredQuestionsRef.current.has(idx);
-              const isActive = sessionState?.currentQuestionIndex === idx;
-
-              return (
-                <button
-                  key={idx}
-                  onClick={() => handleManualTrigger(q, idx)}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold font-mono transition-all flex items-center gap-1 shrink-0 cursor-pointer ${
-                    isActive 
-                      ? 'bg-amber-500 text-slate-950 ring-2 ring-white font-black' 
-                      : isTriggered 
-                        ? 'bg-emerald-950 border border-emerald-500/40 text-emerald-300' 
-                        : 'bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-400'
-                  }`}
-                >
-                  <span>س{idx + 1}</span>
-                  <span className="text-[10px] opacity-70">({formatSecondsToTime(q.time)})</span>
-                </button>
-              );
-            })}
-          </div>
         </div>
       </footer>
 
@@ -1169,7 +1186,7 @@ export default function LiveTeacherRoom({
               {/* Informative Explanation */}
               <div className="text-xs sm:text-sm text-slate-300 leading-relaxed bg-slate-950/80 border border-slate-800 p-4 rounded-2xl space-y-2.5">
                 <p>
-                  أنت بصدد {pendingAction?.type === 'switch_lesson' ? `الانتقال إلى فيديو/درس جديد (${pendingAction.lesson.title})` : 'الخروج من شاشة العرض'}، بينما توجد إجابات مسجلة للطلاب في هذا الدرس (<b>{selectedLesson?.title}</b>).
+                  أنت بصدد {pendingAction?.type === 'switch_lesson' ? `الانتقال إلى فيديو/درس جديد (${pendingAction.lesson.title})` : 'إغلاق شاشة العرض'}، بينما توجد إجابات مسجلة للطلاب في هذا الدرس (<b>{selectedLesson?.title}</b>).
                 </p>
                 <div className="bg-amber-500/10 border border-amber-500/20 p-2.5 rounded-xl text-xs text-amber-300 font-medium flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
@@ -1194,7 +1211,7 @@ export default function LiveTeacherRoom({
                   onClick={handleDiscardAndProceed}
                   className="w-full sm:w-auto px-4 py-2.5 rounded-xl text-xs font-bold text-rose-400 hover:bg-rose-500/10 border border-rose-500/30 transition-all cursor-pointer"
                 >
-                  تخطي دون حفظ ⚠️
+                  إغلاق الصفحة دون حفظ ⚠️
                 </button>
                 <button
                   type="button"
@@ -1211,6 +1228,102 @@ export default function LiveTeacherRoom({
                     <>
                       <CheckCircle2 className="w-4 h-4 text-emerald-200" />
                       <span>نعم، احفظ وأنهِ الدرس أولاً 💾</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Finish Lesson Confirmation In-App Modal */}
+      <AnimatePresence>
+        {showFinishConfirmModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="w-full max-w-lg bg-slate-900 border border-emerald-500/40 rounded-3xl p-6 sm:p-7 shadow-2xl relative space-y-5 text-right"
+              dir="rtl"
+            >
+              <div className="flex items-center gap-3.5">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center shrink-0 shadow-inner">
+                  <CheckCircle2 className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-slate-100">تأكيد إنهاء الدرس وحفظ النتائج</h3>
+                  <p className="text-xs text-emerald-400 font-medium">حفظ درجات الطلاب في ورقة Answers-T</p>
+                </div>
+              </div>
+
+              <div className="text-xs sm:text-sm text-slate-300 leading-relaxed bg-slate-950/80 border border-slate-800 p-4 rounded-2xl space-y-3">
+                <p>
+                  هل ترغب في <b>إنهاء الدرس الحالي ({selectedLesson?.title})</b>؟
+                </p>
+                <div className="bg-emerald-500/10 border border-emerald-500/20 p-3 rounded-xl text-xs text-emerald-300 font-medium space-y-1.5">
+                  <div className="flex items-center gap-2 font-bold text-emerald-200">
+                    <Sparkles className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>ماذا سيحدث عند التأكيد؟</span>
+                  </div>
+                  <ul className="list-disc list-inside space-y-1 text-slate-300 text-[11px] pr-2">
+                    <li>حفظ جميع إجابات ودرجات الطلاب في ورقة <b>Answers-T</b> مع الوقت والتاريخ تلقائياً.</li>
+                    <li>إيقاف عرض الفيديو الحالي وإتاحة اختيار درس جديد لعرضه على الطلاب.</li>
+                  </ul>
+                </div>
+
+                {(() => {
+                  const unsavedCount = buildCurrentAnswerRecords(false).length;
+                  if (unsavedCount > 0) {
+                    return (
+                      <div className="bg-amber-500/10 border border-amber-500/20 p-2.5 rounded-xl text-xs text-amber-300 font-medium flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span>سيتم توثيق إجابات <b>{unsavedCount}</b> طالب متفاعل في هذا الدرس.</span>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="text-[11px] text-slate-400 italic">
+                      ملاحظة: لم يقم أي طالب بإرسال إجابات في هذا الدرس بعد.
+                    </div>
+                  );
+                })()}
+
+                {finishErrorMsg && (
+                  <div className="bg-rose-500/10 border border-rose-500/30 p-3 rounded-xl text-xs text-rose-300">
+                    {finishErrorMsg}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowFinishConfirmModal(false);
+                    setFinishErrorMsg(null);
+                  }}
+                  disabled={isFinishingLesson}
+                  className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-all cursor-pointer"
+                >
+                  إلغاء وتراجع
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleFinishLesson()}
+                  disabled={isFinishingLesson}
+                  className="px-5 py-2.5 rounded-xl text-xs font-black bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white shadow-lg shadow-emerald-900/40 transition-all cursor-pointer flex items-center gap-2 disabled:opacity-50"
+                >
+                  {isFinishingLesson ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                      <span>جارٍ الحفظ والإنهاء...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-4 h-4 text-emerald-200" />
+                      <span>تأكيد الإنهاء والحفظ 💾</span>
                     </>
                   )}
                 </button>

@@ -237,6 +237,7 @@ export interface LiveSessionState {
   sessionId: string;
   sessionPin?: string;
   isProgramActive?: boolean;
+  showLessonsListInRoom?: boolean; // Controls whether lessons list dropdown/button appears on projector display screen
   lessonTitle: string;
   videoUrl: string;
   status: 'idle' | 'waiting' | 'playing' | 'question_active' | 'revealed' | 'finished' | 'program_ended';

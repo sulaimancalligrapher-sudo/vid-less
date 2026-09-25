@@ -1901,6 +1901,7 @@ export {
   resetLiveSession,
   startLiveProgram,
   endLiveProgram,
+  toggleShowLessonsListInRoom,
   getLiveBackup,
   restoreLiveBackup,
 } from './lib/firebaseLiveService';

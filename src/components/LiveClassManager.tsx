@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Tv, Plus, Play, Edit3, Trash2, Save, FileSpreadsheet, 
   Users, CheckCircle2, Clock, HelpCircle, Image, ExternalLink, 
   RefreshCw, Search, QrCode, Copy, Check, Sparkles, ChevronDown, 
   ChevronUp, ArrowLeft, AlertCircle, X, KeyRound, ShieldCheck, UserX,
-  Power, ShieldAlert, DownloadCloud, History
+  Power, ShieldAlert, DownloadCloud, History, ListVideo, Eye, EyeOff
 } from 'lucide-react';
 import { 
   LiveLessonRow, LiveQuestionItem, LiveAnswerRecord, LiveSessionState, evaluateLiveAnswer, normalizeArabicText 
@@ -15,7 +15,7 @@ import {
   getLiveSessionState, updateLivePin, leaveLiveSession, resetLiveSession,
   startLiveProgram, endLiveProgram, getLiveBackup, restoreLiveBackup, recordLiveAnswersBatchT,
   formatSecondsToTime, parseTimeToSeconds, formatDriveImageUrl,
-  subscribeToLiveSession
+  subscribeToLiveSession, toggleShowLessonsListInRoom, initLiveSession, triggerLiveQuestion
 } from '../api';
 
 interface LiveClassManagerProps {
@@ -78,6 +78,8 @@ export default function LiveClassManager({
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [showEndConfirmModal, setShowEndConfirmModal] = useState(false);
+  const [showResetConfirmModal, setShowResetConfirmModal] = useState(false);
+  const [isUpdatingLessonsVisibility, setIsUpdatingLessonsVisibility] = useState(false);
 
   // Link copy state
   const [copiedLink, setCopiedLink] = useState(false);
@@ -140,8 +142,8 @@ export default function LiveClassManager({
     }
   };
 
-  const handleResetSession = async () => {
-    if (!window.confirm('هل أنت متأكد من تصفير ومسح ذاكرة الجلسة الحالية وإعادة تعيين رمز PIN وقائمة الإجابات؟')) return;
+  const handleConfirmResetSession = async () => {
+    setShowResetConfirmModal(false);
     setIsResettingSession(true);
     try {
       const res = await resetLiveSession();
@@ -154,6 +156,60 @@ export default function LiveClassManager({
       console.error('Failed to reset live session:', e);
     } finally {
       setIsResettingSession(false);
+    }
+  };
+
+  const handleToggleLessonsList = async (show: boolean) => {
+    setIsUpdatingLessonsVisibility(true);
+    try {
+      const res = await toggleShowLessonsListInRoom(show);
+      if (res.success && res.state) {
+        setSessionState(res.state);
+      }
+    } catch (e) {
+      console.error('Failed to toggle lessons list visibility in room:', e);
+    } finally {
+      setIsUpdatingLessonsVisibility(false);
+    }
+  };
+
+  // Determine currently active lesson from sessionState or fallback to first lesson
+  const activeLesson = useMemo(() => {
+    if (sessionState?.lessonTitle) {
+      const match = lessons.find(l => l.title === sessionState.lessonTitle);
+      if (match) return match;
+    }
+    return lessons.length > 0 ? lessons[0] : null;
+  }, [sessionState?.lessonTitle, lessons]);
+
+  // Switch active lesson from admin panel and broadcast to projector screen
+  const handleSelectLesson = async (lessonTitle: string) => {
+    const target = lessons.find(l => l.title === lessonTitle);
+    if (!target) return;
+    try {
+      await initLiveSession({
+        lessonTitle: target.title,
+        videoUrl: target.videoUrl,
+        timeLimit: target.settingTimeLimit || 30,
+        showResult: target.settingShowResult || 'نعم',
+      });
+    } catch (e) {
+      console.error('Failed to switch active lesson from admin:', e);
+    }
+  };
+
+  // Trigger question directly from Admin panel (transferred from display screen)
+  const handleTriggerQuestionFromAdmin = async (q: LiveQuestionItem, idx: number) => {
+    if (!activeLesson) return;
+    try {
+      await triggerLiveQuestion({
+        questionIndex: idx,
+        question: q,
+        timeLimit: activeLesson.settingTimeLimit || 30,
+        showResult: activeLesson.settingShowResult || 'نعم',
+      });
+    } catch (e) {
+      console.error('Failed to trigger question from admin:', e);
     }
   };
 
@@ -494,45 +550,10 @@ export default function LiveClassManager({
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
-            {/* START / END PROGRAM LIFECYCLE BUTTON */}
-            <button
-              onClick={handleToggleProgram}
-              disabled={isTogglingProgram}
-              title={isProgramRunning ? 'إنهاء البرنامج وإخراج جميع المشتركين' : 'بدء البرنامج وتوليد رمز الحضور'}
-              className={`px-4 py-2.5 rounded-xl text-xs font-black flex items-center gap-2 shadow-lg transition-all cursor-pointer active:scale-95 disabled:opacity-50 ${
-                isProgramRunning
-                  ? 'bg-gradient-to-r from-rose-600 to-red-700 hover:from-rose-500 hover:to-red-600 text-white shadow-rose-900/30'
-                  : 'bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white shadow-emerald-900/30'
-              }`}
-            >
-              <Power className={`w-4 h-4 ${isTogglingProgram ? 'animate-spin' : ''}`} />
-              <span>
-                {isTogglingProgram
-                  ? 'جارٍ التنفيذ...'
-                  : isProgramRunning
-                  ? 'إنهاء البرنامج وإخراج الطلاب 🛑'
-                  : 'بداية البرنامج وتوليد الرمز 🚀'}
-              </span>
-            </button>
-
-            {/* Active PIN Indicator */}
-            {sessionState?.sessionPin && (
-              <div 
-                onClick={handleCopyPin}
-                title="رمز الحضور الحالي - انقر للنسخ"
-                className="px-3 py-2 bg-slate-950 border border-amber-500/40 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer hover:border-amber-400"
-              >
-                <KeyRound className="w-3.5 h-3.5 text-amber-400" />
-                <span className="text-[11px] text-amber-400/80 font-normal">الرمز:</span>
-                <span className="font-mono font-black text-amber-300 tracking-wider">{sessionState.sessionPin}</span>
-                {copiedPin ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3 h-3 text-slate-500" />}
-              </div>
-            )}
-
             {onBackToAdmin && (
               <button
                 onClick={onBackToAdmin}
-                className="px-4 py-2.5 bg-slate-800/80 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs transition-all flex items-center gap-2 cursor-pointer"
+                className="px-4 py-2.5 bg-slate-800/80 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs transition-all flex items-center gap-2 cursor-pointer shadow-md"
               >
                 <ArrowLeft className="w-4 h-4" />
                 <span>العودة للوحة الإدارة</span>
@@ -936,7 +957,7 @@ export default function LiveClassManager({
 
                 {/* Reset Session Memory Button */}
                 <button
-                  onClick={handleResetSession}
+                  onClick={() => setShowResetConfirmModal(true)}
                   disabled={isResettingSession}
                   title="تصفير ومسح ذاكرة الجلسة والبدء من جديد"
                   className="px-3.5 py-2.5 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-400 hover:text-rose-300 font-bold rounded-2xl text-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
@@ -969,7 +990,108 @@ export default function LiveClassManager({
                     </button>
                   </div>
                 )}
+
+                {/* Single Button to Toggle Lessons List on Projector Screen */}
+                <button
+                  type="button"
+                  onClick={() => handleToggleLessonsList(!sessionState?.showLessonsListInRoom)}
+                  disabled={isUpdatingLessonsVisibility}
+                  title={sessionState?.showLessonsListInRoom ? 'قائمة الدروس معروضة بشاشة العرض - انقر للإخفاء' : 'قائمة الدروس مخفية بشاشة العرض - انقر للإظهار'}
+                  className={`px-3.5 py-2.5 rounded-2xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer border shadow-sm ${
+                    sessionState?.showLessonsListInRoom
+                      ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25'
+                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                  }`}
+                >
+                  {sessionState?.showLessonsListInRoom ? (
+                    <>
+                      <Eye className="w-4 h-4 text-emerald-400" />
+                      <span>قائمة الدروس بشاشة العرض: إخفاء</span>
+                    </>
+                  ) : (
+                    <>
+                      <EyeOff className="w-4 h-4 text-slate-500" />
+                      <span>قائمة الدروس بشاشة العرض: إظهار</span>
+                    </>
+                  )}
+                </button>
               </div>
+            </div>
+
+            {/* Current Lesson Selector & Question Timings Card (Transferred from Display Screen) */}
+            <div className="p-3.5 sm:p-4 bg-slate-950/70 border border-slate-800/90 rounded-2xl space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <div className="flex items-center gap-1.5 text-xs font-black text-amber-400">
+                    <ListVideo className="w-4 h-4 text-amber-400" />
+                    <span>قائمة الدروس (الدرس الحالي):</span>
+                  </div>
+                  <select
+                    value={activeLesson?.title || ''}
+                    onChange={(e) => handleSelectLesson(e.target.value)}
+                    className="bg-slate-900 border border-slate-700 hover:border-amber-500/50 text-slate-100 text-xs font-bold rounded-xl px-3 py-2 outline-none cursor-pointer focus:border-amber-400 transition-colors shadow-sm min-w-[220px]"
+                    title="اختيار الدرس المعروض حالياً على شاشة العرض وللطلاب"
+                  >
+                    {lessons.length === 0 ? (
+                      <option value="">لا توجد دروس محملة</option>
+                    ) : (
+                      lessons.map((l, i) => (
+                        <option key={i} value={l.title}>
+                          {l.title} ({l.questions?.length || 0} أسئلة)
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+
+                {activeLesson && (
+                  <div className="flex items-center gap-2 text-xs text-slate-400">
+                    <span>إجمالي أسئلة الدرس:</span>
+                    <span className="font-mono font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-lg border border-amber-500/20">
+                      {activeLesson.questions?.length || 0} أسئلة
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Question Timings (توقيت الأسئلة المنقول من شاشة العرض) */}
+              {activeLesson && activeLesson.questions && activeLesson.questions.length > 0 ? (
+                <div className="pt-2.5 border-t border-slate-800/80 flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-1.5 text-xs text-slate-300 font-bold ml-1">
+                    <Clock className="w-3.5 h-3.5 text-amber-400" />
+                    <span>توقيت الأسئلة:</span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5 overflow-x-auto py-0.5">
+                    {activeLesson.questions.map((q, idx) => {
+                      const isActive = sessionState?.currentQuestionIndex === idx && sessionState?.status === 'question_active';
+                      const isRevealed = sessionState?.currentQuestionIndex === idx && sessionState?.status === 'revealed';
+
+                      return (
+                        <button
+                          key={idx}
+                          onClick={() => handleTriggerQuestionFromAdmin(q, idx)}
+                          title={`سؤال ${idx + 1}: ${formatSecondsToTime(q.time)} - ${q.question} (انقر لطرح السؤال فورياً)`}
+                          className={`px-2.5 py-1.5 rounded-xl text-xs font-bold font-mono transition-all flex items-center gap-1.5 cursor-pointer border ${
+                            isActive
+                              ? 'bg-amber-500 border-amber-400 text-slate-950 font-black shadow-lg shadow-amber-500/20 ring-2 ring-amber-300 animate-pulse'
+                              : isRevealed
+                              ? 'bg-emerald-950/80 border-emerald-500/50 text-emerald-300'
+                              : 'bg-slate-900 hover:bg-slate-850 border-slate-800 text-slate-300 hover:border-slate-700'
+                          }`}
+                        >
+                          <span>س{idx + 1}</span>
+                          <span className="text-[11px] opacity-80">({formatSecondsToTime(q.time)})</span>
+                          {isActive && <span className="w-1.5 h-1.5 rounded-full bg-slate-950 animate-ping" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : activeLesson ? (
+                <div className="pt-2 border-t border-slate-800/80 text-[11px] text-slate-500 italic">
+                  لا توجد أسئلة محددة التوقيت لهذا الدرس.
+                </div>
+              ) : null}
             </div>
 
             {resetSuccess && (
@@ -1651,6 +1773,63 @@ export default function LiveClassManager({
                 >
                   <Power className="w-4 h-4" />
                   <span>تأكيد إنهاء الحصة والإخراج 🛑</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Confirmation Modal to Reset Session Memory (100% works in iframes and mobile) */}
+      <AnimatePresence>
+        {showResetConfirmModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-slate-900 border border-rose-500/30 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4 text-right"
+              dir="rtl"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-rose-500/15 border border-rose-500/30 text-rose-400 flex items-center justify-center shrink-0">
+                  <RefreshCw className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-slate-100">تأكيد تصفير ومسح الذاكرة</h3>
+                  <p className="text-xs text-rose-400 font-medium">إعادة تعيين الجلسة المباشرة من الصفر</p>
+                </div>
+              </div>
+
+              <div className="text-sm text-slate-300 leading-relaxed bg-slate-950/70 border border-slate-800 p-4 rounded-2xl space-y-2.5">
+                <p>هل أنت متأكد من رغبتك في <b>تصفير ذاكرة الجلسة السحابية</b>؟</p>
+                <div className="bg-rose-500/10 border border-rose-500/20 p-3 rounded-xl text-xs text-rose-300 space-y-1">
+                  <p className="font-bold text-rose-200">⚠️ تنبيه بشأن الإجراء:</p>
+                  <ul className="list-disc list-inside space-y-1 text-slate-300 text-[11px] pr-1">
+                    <li>سيتم مسح مؤقت الإجابات والنتائج المعلقة في الجلسة.</li>
+                    <li>إعادة تعيين رمز الحضور (PIN) وإفراغ قائمة الطلاب المتصلين.</li>
+                    <li>إعادة الجلسة إلى حالة البداية النظيفة للبدء مجدداً.</li>
+                  </ul>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowResetConfirmModal(false)}
+                  disabled={isResettingSession}
+                  className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-all cursor-pointer"
+                >
+                  إلغاء وتراجع
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmResetSession}
+                  disabled={isResettingSession}
+                  className="px-5 py-2.5 rounded-xl text-xs font-black bg-gradient-to-r from-rose-600 to-red-700 hover:from-rose-500 hover:to-red-600 text-white shadow-lg shadow-rose-900/40 transition-all cursor-pointer flex items-center gap-2 disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isResettingSession ? 'animate-spin' : ''}`} />
+                  <span>تأكيد تصفير الذاكرة 🔄</span>
                 </button>
               </div>
             </motion.div>
