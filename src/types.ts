@@ -238,6 +238,9 @@ export interface LiveSessionState {
   sessionPin?: string;
   isProgramActive?: boolean;
   showLessonsListInRoom?: boolean; // Controls whether lessons list dropdown/button appears on projector display screen
+  showPinInRoom?: boolean; // Controls whether attendance PIN badge appears on projector display screen
+  showQrInRoom?: boolean; // Controls whether join QR code appears on projector display screen
+  showFinishLessonInRoom?: boolean; // Controls whether finish lesson button appears on projector display screen
   lessonTitle: string;
   videoUrl: string;
   status: 'idle' | 'waiting' | 'playing' | 'question_active' | 'revealed' | 'finished' | 'program_ended';

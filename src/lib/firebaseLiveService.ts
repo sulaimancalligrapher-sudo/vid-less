@@ -21,6 +21,9 @@ export const defaultLiveSessionState: LiveSessionState = {
   sessionPin: '1234',
   isProgramActive: false,
   showLessonsListInRoom: false,
+  showPinInRoom: false,
+  showQrInRoom: false,
+  showFinishLessonInRoom: false,
   lessonTitle: '',
   videoUrl: '',
   status: 'idle',
@@ -61,6 +64,9 @@ export function subscribeToLiveSession(
           sessionPin: data.sessionPin || '1234',
           isProgramActive: Boolean(data.isProgramActive),
           showLessonsListInRoom: Boolean(data.showLessonsListInRoom),
+          showPinInRoom: Boolean(data.showPinInRoom),
+          showQrInRoom: Boolean(data.showQrInRoom),
+          showFinishLessonInRoom: Boolean(data.showFinishLessonInRoom),
           lessonTitle: data.lessonTitle || '',
           videoUrl: data.videoUrl || '',
           status: data.status || 'idle',
@@ -106,6 +112,9 @@ export async function getLiveSessionState(): Promise<LiveSessionState | null> {
         sessionPin: data.sessionPin || '1234',
         isProgramActive: Boolean(data.isProgramActive),
         showLessonsListInRoom: Boolean(data.showLessonsListInRoom),
+        showPinInRoom: Boolean(data.showPinInRoom),
+        showQrInRoom: Boolean(data.showQrInRoom),
+        showFinishLessonInRoom: Boolean(data.showFinishLessonInRoom),
         lessonTitle: data.lessonTitle || '',
         videoUrl: data.videoUrl || '',
         status: data.status || 'idle',
@@ -604,3 +613,49 @@ export async function toggleShowLessonsListInRoom(show: boolean): Promise<{ succ
     return { success: false };
   }
 }
+
+// Toggle showing attendance PIN badge in projector display screen
+export async function toggleShowPinInRoom(show: boolean): Promise<{ success: boolean; state?: LiveSessionState }> {
+  try {
+    await updateDoc(LIVE_DOC_REF, {
+      showPinInRoom: show,
+      updatedAt: serverTimestamp(),
+    });
+    cachedState = { ...cachedState, showPinInRoom: show };
+    return { success: true, state: cachedState };
+  } catch (error: any) {
+    console.error('Failed to toggle showPinInRoom in Firebase:', error);
+    return { success: false };
+  }
+}
+
+// Toggle showing join QR code in projector display screen
+export async function toggleShowQrInRoom(show: boolean): Promise<{ success: boolean; state?: LiveSessionState }> {
+  try {
+    await updateDoc(LIVE_DOC_REF, {
+      showQrInRoom: show,
+      updatedAt: serverTimestamp(),
+    });
+    cachedState = { ...cachedState, showQrInRoom: show };
+    return { success: true, state: cachedState };
+  } catch (error: any) {
+    console.error('Failed to toggle showQrInRoom in Firebase:', error);
+    return { success: false };
+  }
+}
+
+// Toggle showing finish lesson button in projector display screen
+export async function toggleShowFinishLessonInRoom(show: boolean): Promise<{ success: boolean; state?: LiveSessionState }> {
+  try {
+    await updateDoc(LIVE_DOC_REF, {
+      showFinishLessonInRoom: show,
+      updatedAt: serverTimestamp(),
+    });
+    cachedState = { ...cachedState, showFinishLessonInRoom: show };
+    return { success: true, state: cachedState };
+  } catch (error: any) {
+    console.error('Failed to toggle showFinishLessonInRoom in Firebase:', error);
+    return { success: false };
+  }
+}
+

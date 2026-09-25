@@ -1902,6 +1902,9 @@ export {
   startLiveProgram,
   endLiveProgram,
   toggleShowLessonsListInRoom,
+  toggleShowPinInRoom,
+  toggleShowQrInRoom,
+  toggleShowFinishLessonInRoom,
   getLiveBackup,
   restoreLiveBackup,
 } from './lib/firebaseLiveService';

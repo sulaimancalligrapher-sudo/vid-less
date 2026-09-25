@@ -15,7 +15,9 @@ import {
   getLiveSessionState, updateLivePin, leaveLiveSession, resetLiveSession,
   startLiveProgram, endLiveProgram, getLiveBackup, restoreLiveBackup, recordLiveAnswersBatchT,
   formatSecondsToTime, parseTimeToSeconds, formatDriveImageUrl,
-  subscribeToLiveSession, toggleShowLessonsListInRoom, initLiveSession, triggerLiveQuestion
+  subscribeToLiveSession, toggleShowLessonsListInRoom, toggleShowPinInRoom, toggleShowQrInRoom,
+  toggleShowFinishLessonInRoom, finishLiveSession,
+  initLiveSession, triggerLiveQuestion
 } from '../api';
 
 interface LiveClassManagerProps {
@@ -80,6 +82,10 @@ export default function LiveClassManager({
   const [showEndConfirmModal, setShowEndConfirmModal] = useState(false);
   const [showResetConfirmModal, setShowResetConfirmModal] = useState(false);
   const [isUpdatingLessonsVisibility, setIsUpdatingLessonsVisibility] = useState(false);
+  const [isUpdatingPinVisibility, setIsUpdatingPinVisibility] = useState(false);
+  const [isUpdatingQrVisibility, setIsUpdatingQrVisibility] = useState(false);
+  const [isUpdatingFinishLessonVisibility, setIsUpdatingFinishLessonVisibility] = useState(false);
+  const [isFinishingLesson, setIsFinishingLesson] = useState(false);
 
   // Link copy state
   const [copiedLink, setCopiedLink] = useState(false);
@@ -170,6 +176,63 @@ export default function LiveClassManager({
       console.error('Failed to toggle lessons list visibility in room:', e);
     } finally {
       setIsUpdatingLessonsVisibility(false);
+    }
+  };
+
+  const handleTogglePinVisibility = async (show: boolean) => {
+    setIsUpdatingPinVisibility(true);
+    try {
+      const res = await toggleShowPinInRoom(show);
+      if (res.success && res.state) {
+        setSessionState(res.state);
+      }
+    } catch (e) {
+      console.error('Failed to toggle PIN visibility in room:', e);
+    } finally {
+      setIsUpdatingPinVisibility(false);
+    }
+  };
+
+  const handleToggleQrVisibility = async (show: boolean) => {
+    setIsUpdatingQrVisibility(true);
+    try {
+      const res = await toggleShowQrInRoom(show);
+      if (res.success && res.state) {
+        setSessionState(res.state);
+      }
+    } catch (e) {
+      console.error('Failed to toggle QR visibility in room:', e);
+    } finally {
+      setIsUpdatingQrVisibility(false);
+    }
+  };
+
+  const handleToggleFinishLessonVisibility = async (show: boolean) => {
+    setIsUpdatingFinishLessonVisibility(true);
+    try {
+      const res = await toggleShowFinishLessonInRoom(show);
+      if (res.success && res.state) {
+        setSessionState(res.state);
+      }
+    } catch (e) {
+      console.error('Failed to toggle finish lesson visibility in room:', e);
+    } finally {
+      setIsUpdatingFinishLessonVisibility(false);
+    }
+  };
+
+  const handleFinishLessonFromAdmin = async () => {
+    if (!confirm('هل أنت متأكد من إنهاء الدرس الحالي؟ سيتم تسجيل النتائج وإتاحة اختيار درس جديد.')) return;
+    setIsFinishingLesson(true);
+    try {
+      await finishLiveSession();
+      setSaveMessage('تم إنهاء الدرس بنجاح.');
+      setTimeout(() => setSaveMessage(null), 3000);
+    } catch (e: any) {
+      console.error('Failed to finish lesson from admin:', e);
+      alert('حدث خطأ أثناء إنهاء الدرس: ' + (e?.message || 'خطأ غير معروف'));
+    } finally {
+      setIsFinishingLesson(false);
     }
   };
 
@@ -988,73 +1051,103 @@ export default function LiveClassManager({
                     >
                       <RefreshCw className={`w-4 h-4 ${isRegeneratingPin ? 'animate-spin' : ''}`} />
                     </button>
+                    {/* Toggle PIN display in room screen (icon only, no text) */}
+                    <button
+                      type="button"
+                      onClick={() => handleTogglePinVisibility(!sessionState?.showPinInRoom)}
+                      disabled={isUpdatingPinVisibility}
+                      title={sessionState?.showPinInRoom ? 'إخفاء الرمز من شاشة العرض' : 'إظهار الرمز في شاشة العرض'}
+                      className={`p-1.5 rounded-xl transition-all cursor-pointer border ${
+                        sessionState?.showPinInRoom
+                          ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
+                          : 'bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border-slate-800'
+                      }`}
+                    >
+                      {sessionState?.showPinInRoom ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                    </button>
                   </div>
                 )}
-
-                {/* Single Button to Toggle Lessons List on Projector Screen */}
-                <button
-                  type="button"
-                  onClick={() => handleToggleLessonsList(!sessionState?.showLessonsListInRoom)}
-                  disabled={isUpdatingLessonsVisibility}
-                  title={sessionState?.showLessonsListInRoom ? 'قائمة الدروس معروضة بشاشة العرض - انقر للإخفاء' : 'قائمة الدروس مخفية بشاشة العرض - انقر للإظهار'}
-                  className={`px-3.5 py-2.5 rounded-2xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer border shadow-sm ${
-                    sessionState?.showLessonsListInRoom
-                      ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25'
-                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-                  }`}
-                >
-                  {sessionState?.showLessonsListInRoom ? (
-                    <>
-                      <Eye className="w-4 h-4 text-emerald-400" />
-                      <span>قائمة الدروس بشاشة العرض: إخفاء</span>
-                    </>
-                  ) : (
-                    <>
-                      <EyeOff className="w-4 h-4 text-slate-500" />
-                      <span>قائمة الدروس بشاشة العرض: إظهار</span>
-                    </>
-                  )}
-                </button>
               </div>
             </div>
 
-            {/* Current Lesson Selector & Question Timings Card (Transferred from Display Screen) */}
+            {/* Current Lesson Selector, Controls & Question Timings Card */}
             <div className="p-3.5 sm:p-4 bg-slate-950/70 border border-slate-800/90 rounded-2xl space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex flex-wrap items-center gap-2.5">
-                  <div className="flex items-center gap-1.5 text-xs font-black text-amber-400">
-                    <ListVideo className="w-4 h-4 text-amber-400" />
-                    <span>قائمة الدروس (الدرس الحالي):</span>
+                {/* 1. قائمة الدروس (أيقونة فقط + قائمة منسدلة + زر العين لإظهار/إخفاء في شاشة العرض) */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 p-1.5 rounded-xl shadow-sm">
+                    <div title="قائمة الدروس" className="p-1 text-amber-400">
+                      <ListVideo className="w-4 h-4 text-amber-400" />
+                    </div>
+                    <select
+                      value={activeLesson?.title || ''}
+                      onChange={(e) => handleSelectLesson(e.target.value)}
+                      className="bg-slate-950 border border-slate-750 hover:border-amber-500/50 text-slate-100 text-xs font-bold rounded-lg px-2.5 py-1.5 outline-none cursor-pointer focus:border-amber-400 transition-colors shadow-sm min-w-[200px]"
+                      title="اختيار الدرس المعروض حالياً على شاشة العرض وللطلاب"
+                    >
+                      {lessons.length === 0 ? (
+                        <option value="">لا توجد دروس محملة</option>
+                      ) : (
+                        lessons.map((l, i) => (
+                          <option key={i} value={l.title}>
+                            {l.title}
+                          </option>
+                        ))
+                      )}
+                    </select>
+
+                    {/* زر إظهار وإخفاء قائمة الدروس بشاشة العرض (أيقونة العين فقط بدون نص) */}
+                    <button
+                      type="button"
+                      onClick={() => handleToggleLessonsList(!sessionState?.showLessonsListInRoom)}
+                      disabled={isUpdatingLessonsVisibility}
+                      title={sessionState?.showLessonsListInRoom ? 'إخفاء قائمة الدروس من شاشة العرض' : 'إظهار قائمة الدروس في شاشة العرض'}
+                      className={`p-1.5 rounded-lg transition-all cursor-pointer border ${
+                        sessionState?.showLessonsListInRoom
+                          ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
+                          : 'bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border-slate-800'
+                      }`}
+                    >
+                      {sessionState?.showLessonsListInRoom ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                    </button>
                   </div>
-                  <select
-                    value={activeLesson?.title || ''}
-                    onChange={(e) => handleSelectLesson(e.target.value)}
-                    className="bg-slate-900 border border-slate-700 hover:border-amber-500/50 text-slate-100 text-xs font-bold rounded-xl px-3 py-2 outline-none cursor-pointer focus:border-amber-400 transition-colors shadow-sm min-w-[220px]"
-                    title="اختيار الدرس المعروض حالياً على شاشة العرض وللطلاب"
-                  >
-                    {lessons.length === 0 ? (
-                      <option value="">لا توجد دروس محملة</option>
-                    ) : (
-                      lessons.map((l, i) => (
-                        <option key={i} value={l.title}>
-                          {l.title} ({l.questions?.length || 0} أسئلة)
-                        </option>
-                      ))
-                    )}
-                  </select>
                 </div>
 
-                {activeLesson && (
-                  <div className="flex items-center gap-2 text-xs text-slate-400">
-                    <span>إجمالي أسئلة الدرس:</span>
-                    <span className="font-mono font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-lg border border-amber-500/20">
-                      {activeLesson.questions?.length || 0} أسئلة
-                    </span>
-                  </div>
-                )}
+                {/* 2. زر إنهاء الدرس مع زر إظهار وإخفاء في شاشة العرض (أيقونة العين فقط بدون نص) */}
+                <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 p-1.5 rounded-xl shadow-sm">
+                  <button
+                    type="button"
+                    onClick={handleFinishLessonFromAdmin}
+                    disabled={isFinishingLesson}
+                    title="إنهاء الدرس الحالي والعودة لاختيار درس جديد"
+                    className="px-3.5 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white rounded-lg text-xs font-black flex items-center gap-1.5 shadow-sm transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+                  >
+                    {isFinishingLesson ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-200" />
+                    )}
+                    <span>{isFinishingLesson ? 'جارٍ الإنهاء...' : 'إنهاء الدرس'}</span>
+                  </button>
+
+                  {/* زر إظهار وإخفاء زر إنهاء الدرس في شاشة العرض (أيقونة العين فقط بدون نص) */}
+                  <button
+                    type="button"
+                    onClick={() => handleToggleFinishLessonVisibility(!sessionState?.showFinishLessonInRoom)}
+                    disabled={isUpdatingFinishLessonVisibility}
+                    title={sessionState?.showFinishLessonInRoom ? 'إخفاء زر إنهاء الدرس من شاشة العرض' : 'إظهار زر إنهاء الدرس في شاشة العرض'}
+                    className={`p-1.5 rounded-lg transition-all cursor-pointer border ${
+                      sessionState?.showFinishLessonInRoom
+                        ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
+                        : 'bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border-slate-800'
+                    }`}
+                  >
+                    {sessionState?.showFinishLessonInRoom ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
 
-              {/* Question Timings (توقيت الأسئلة المنقول من شاشة العرض) */}
+              {/* 3. توقيت الأسئلة (المنقول من شاشة العرض) */}
               {activeLesson && activeLesson.questions && activeLesson.questions.length > 0 ? (
                 <div className="pt-2.5 border-t border-slate-800/80 flex flex-wrap items-center gap-2">
                   <div className="flex items-center gap-1.5 text-xs text-slate-300 font-bold ml-1">
@@ -1115,13 +1208,30 @@ export default function LiveClassManager({
               </div>
 
               <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setActiveTab('qrcode')}
-                  className="px-3.5 py-2 bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 font-bold rounded-xl text-xs transition-all flex items-center gap-1.5 cursor-pointer"
-                >
-                  <QrCode className="w-4 h-4 text-indigo-400" />
-                  <span>عرض رمز QR</span>
-                </button>
+                <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 p-1 rounded-2xl shadow-sm">
+                  <button
+                    onClick={() => setActiveTab('qrcode')}
+                    title="فتح تبويب رمز QR في الإدارة"
+                    className="px-3.5 py-2 bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 font-bold rounded-xl text-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <QrCode className="w-4 h-4 text-indigo-400" />
+                    <span>عرض رمز QR</span>
+                  </button>
+                  {/* Toggle QR display in room screen (icon only, no text) */}
+                  <button
+                    type="button"
+                    onClick={() => handleToggleQrVisibility(!sessionState?.showQrInRoom)}
+                    disabled={isUpdatingQrVisibility}
+                    title={sessionState?.showQrInRoom ? 'إخفاء رمز QR من شاشة العرض' : 'إظهار رمز QR في شاشة العرض'}
+                    className={`p-2 rounded-xl transition-all cursor-pointer border ${
+                      sessionState?.showQrInRoom
+                        ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
+                        : 'bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border-slate-800'
+                    }`}
+                  >
+                    {sessionState?.showQrInRoom ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
             </div>
           </div>

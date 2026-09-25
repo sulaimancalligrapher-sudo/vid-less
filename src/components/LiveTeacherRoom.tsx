@@ -15,7 +15,7 @@ import {
   finishLiveSession, resetLiveSession, getLiveSessionState, recordLiveAnswersBatchT,
   updateLivePin, leaveLiveSession,
   formatSecondsToTime, parseTimeToSeconds, formatDriveImageUrl,
-  subscribeToLiveSession
+  subscribeToLiveSession, toggleShowQrInRoom
 } from '../api';
 
 interface LiveTeacherRoomProps {
@@ -607,12 +607,12 @@ export default function LiveTeacherRoom({
 
         {/* Right Header Actions */}
         <div className="flex items-center gap-2.5">
-          {/* Live Session PIN Code Indicator */}
-          {sessionState?.sessionPin && (
+          {/* Live Session PIN Code Indicator (Controlled via Admin) */}
+          {sessionState?.showPinInRoom && sessionState?.sessionPin && (
             <div 
               onClick={handleCopyPin}
               title="رمز تأكيد الحضور للطلاب - انقر للنسخ"
-              className="px-3 py-1.5 bg-gradient-to-r from-amber-500/15 to-amber-600/25 border border-amber-500/40 hover:border-amber-400 text-amber-300 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95"
+              className="px-3 py-1.5 bg-gradient-to-r from-amber-500/15 to-amber-600/25 border border-amber-500/40 hover:border-amber-400 text-amber-300 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95 animate-in fade-in"
             >
               <KeyRound className="w-3.5 h-3.5 text-amber-400" />
               <span className="text-[11px] text-amber-400/80 font-normal hidden md:inline">رمز الحضور:</span>
@@ -621,34 +621,38 @@ export default function LiveTeacherRoom({
             </div>
           )}
 
-          {/* QR Code Button for Classroom */}
-          <button
-            onClick={() => setShowQrModal(true)}
-            className="px-3 py-1.5 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-indigo-600/20 transition-all cursor-pointer"
-          >
-            <QrCode className="w-4 h-4" />
-            <span>رمز الدخول والحضور (PIN)</span>
-          </button>
+          {/* QR Code Button for Classroom (Controlled via Admin) */}
+          {sessionState?.showQrInRoom && (
+            <button
+              onClick={() => setShowQrModal(true)}
+              className="px-3 py-1.5 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-indigo-600/20 transition-all cursor-pointer animate-in fade-in"
+            >
+              <QrCode className="w-4 h-4" />
+              <span>رمز الدخول والحضور (PIN)</span>
+            </button>
+          )}
 
-          {/* Finish Lesson Button */}
-          <button
-            onClick={() => {
-              setFinishErrorMsg(null);
-              setShowFinishConfirmModal(true);
-            }}
-            disabled={isFinishingLesson}
-            title="إنهاء الدرس الحالي وتسجيل تاريخ ونتائج إجابات الطلاب في ورقة Answers-T والعودة لاختيار درس جديد"
-            className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white rounded-xl text-xs font-black flex items-center gap-2 shadow-lg shadow-emerald-600/20 transition-all cursor-pointer active:scale-95 disabled:opacity-50"
-          >
-            {isFinishingLesson ? (
-              <RefreshCw className="w-4 h-4 animate-spin text-white" />
-            ) : (
-              <CheckCircle2 className="w-4 h-4 text-emerald-200" />
-            )}
-            <span>
-              {isFinishingLesson ? 'جارٍ الحفظ والإنهاء...' : 'إنهاء الدرس'}
-            </span>
-          </button>
+          {/* Finish Lesson Button (Controlled via Admin) */}
+          {sessionState?.showFinishLessonInRoom && (
+            <button
+              onClick={() => {
+                setFinishErrorMsg(null);
+                setShowFinishConfirmModal(true);
+              }}
+              disabled={isFinishingLesson}
+              title="إنهاء الدرس الحالي وتسجيل تاريخ ونتائج إجابات الطلاب في ورقة Answers-T والعودة لاختيار درس جديد"
+              className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white rounded-xl text-xs font-black flex items-center gap-2 shadow-lg shadow-emerald-600/20 transition-all cursor-pointer active:scale-95 disabled:opacity-50 animate-in fade-in"
+            >
+              {isFinishingLesson ? (
+                <RefreshCw className="w-4 h-4 animate-spin text-white" />
+              ) : (
+                <CheckCircle2 className="w-4 h-4 text-emerald-200" />
+              )}
+              <span>
+                {isFinishingLesson ? 'جارٍ الحفظ والإنهاء...' : 'إنهاء الدرس'}
+              </span>
+            </button>
+          )}
 
           {/* Fullscreen Button */}
           <button
@@ -1057,7 +1061,7 @@ export default function LiveTeacherRoom({
       {/* QR CODE MODAL FOR STUDENTS IN CLASSROOM */}
       {/* ========================================================================= */}
       <AnimatePresence>
-        {showQrModal && (
+        {(showQrModal || Boolean(sessionState?.showQrInRoom)) && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
@@ -1066,7 +1070,10 @@ export default function LiveTeacherRoom({
               className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl relative text-center space-y-5"
             >
               <button
-                onClick={() => setShowQrModal(false)}
+                onClick={() => {
+                  setShowQrModal(false);
+                  toggleShowQrInRoom(false);
+                }}
                 className="absolute top-4 left-4 p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-100 rounded-full transition-all cursor-pointer"
               >
                 <X className="w-5 h-5" />
