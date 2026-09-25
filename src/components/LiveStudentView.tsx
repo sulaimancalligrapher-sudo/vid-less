@@ -69,18 +69,20 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
   const [timeLeft, setTimeLeft] = useState<number>(30);
   const [joinError, setJoinError] = useState<string | null>(null);
 
-  // Auto-join only if credentials are known and valid
+  // Auto-join only if valid credentials AND pin are present in URL
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
     const urlUser = p.get('username') || p.get('name');
-    if (urlUser && urlUser.trim()) {
-      handleJoin(urlUser.trim(), sheetNumber.trim(), studentPin.trim());
+    const urlPin = p.get('pin');
+    const effectivePin = urlPin ? urlPin.trim() : studentPin.trim();
+    if (urlUser && urlUser.trim() && effectivePin) {
+      handleJoin(urlUser.trim(), sheetNumber.trim(), effectivePin);
     }
   }, []);
 
   // Firebase real-time subscription for live updates
   useEffect(() => {
-    if (!isJoined) return;
+    if (!isJoined || !isPinVerified) return;
 
     setConnected(true);
     const unsubscribe = subscribeToLiveSession(
@@ -93,8 +95,33 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
           setJoinError('تم إنهاء البرنامج والحصة التفاعلية بنجاح 🎓 شكراً لتفاعلكم!');
           sessionStorage.removeItem('liveStudentUsername');
           sessionStorage.removeItem('liveStudentSheet');
+          sessionStorage.removeItem('liveStudentPin');
+          localStorage.removeItem('liveStudentPin');
           return;
         }
+
+        // Check if teacher regenerated or changed the PIN
+        if (state.sessionPin && studentPin.trim() && state.sessionPin.trim() !== studentPin.trim()) {
+          setIsJoined(false);
+          setIsPinVerified(false);
+          setJoinError('قام المعلم بتحديث رمز الحضور في الفصل. يرجى إدخال الرمز الجديد المعروض على الشاشة.');
+          sessionStorage.removeItem('liveStudentPin');
+          localStorage.removeItem('liveStudentPin');
+          return;
+        }
+
+        // Check if student is still enrolled in connected students
+        const currentCleanUser = username.trim().toLowerCase();
+        const isStillEnrolled = (state.connectedStudents || []).some(
+          s => String(s.username || '').trim().toLowerCase() === currentCleanUser && s.pinVerified
+        );
+        if (!isStillEnrolled && state.status !== 'idle' && state.isProgramActive) {
+          setIsJoined(false);
+          setIsPinVerified(false);
+          setJoinError('يرجى إعادة تسجيل الدخول برمز الحضور الصحيح.');
+          return;
+        }
+
         setSessionState(state);
       },
       (err) => {
@@ -118,7 +145,7 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
       clearInterval(pingTimer);
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, [isJoined, username, sheetNumber]);
+  }, [isJoined, isPinVerified, username, sheetNumber, studentPin]);
 
   // Handle active question change & timer
   useEffect(() => {
@@ -134,20 +161,17 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
       setTextAnswer('');
       setSubmittedAnswer(null);
 
-      // Check if student already submitted for this question (restore state if reloaded)
-      const u = username.trim();
+      // Check if student already submitted for this specific active question (restore state if page reloaded)
+      const u = username.trim().toLowerCase();
       const s = sheetNumber.trim();
-      const studentKey = s ? `${u}_${s}` : u;
-      const qIdx = sessionState.currentQuestionIndex ?? -1;
+      const studentKey = s ? `${username.trim()}_${s}` : username.trim();
 
-      const prevSub = sessionState.answersForCurrentQuestion?.[u] ||
-                      sessionState.answersForCurrentQuestion?.[studentKey] ||
-                      (sessionState.allSessionAnswers?.[u]?.[qIdx] !== undefined 
-                        ? { answer: sessionState.allSessionAnswers[u][qIdx] } 
-                        : null) ||
-                      (sessionState.allSessionAnswers?.[studentKey]?.[qIdx] !== undefined 
-                        ? { answer: sessionState.allSessionAnswers[studentKey][qIdx] } 
-                        : null);
+      const prevSub = 
+        Object.values(sessionState.answersForCurrentQuestion || {}).find(
+          sub => String(sub.username || '').trim().toLowerCase() === u
+        ) ||
+        sessionState.answersForCurrentQuestion?.[studentKey] ||
+        sessionState.answersForCurrentQuestion?.[username.trim()];
 
       if (prevSub) {
         const prev = typeof prevSub === 'object' ? prevSub.answer : String(prevSub);
@@ -183,36 +207,51 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
       setJoinError('يرجى إدخال اسم الطالب');
       return;
     }
+    const cleanUser = nameToJoin.trim();
+    const cleanSheet = sheetToJoin.trim();
+    const cleanPin = (pinToJoin || '').trim();
+
     setJoinError(null);
     try {
-      const cleanUser = nameToJoin.trim();
-      const cleanSheet = sheetToJoin.trim();
       setUsername(cleanUser);
       setSheetNumber(cleanSheet);
-      sessionStorage.setItem('liveStudentUsername', cleanUser);
-      sessionStorage.setItem('liveStudentSheet', cleanSheet);
-      localStorage.setItem('liveStudentUsername', cleanUser);
-      localStorage.setItem('liveStudentSheet', cleanSheet);
-      if (pinToJoin) {
-        sessionStorage.setItem('liveStudentPin', pinToJoin.trim());
-        localStorage.setItem('liveStudentPin', pinToJoin.trim());
-      }
-      localStorage.setItem('loggedInUsername', cleanUser);
-      localStorage.setItem('loggedInSheetNumber', cleanSheet);
+      setStudentPin(cleanPin);
 
-      const res = await joinLiveSession(cleanUser, cleanSheet, pinToJoin ? pinToJoin.trim() : undefined);
-      if (res.success && res.state) {
+      const res = await joinLiveSession(cleanUser, cleanSheet, cleanPin || undefined);
+      if (res.success && res.state && res.pinVerified) {
         setSessionState(res.state);
         setIsJoined(true);
+        setIsPinVerified(true);
         setConnected(true);
-        if (res.pinVerified) {
-          setIsPinVerified(true);
+        setJoinError(null);
+
+        // Store credentials only upon successful verified join!
+        sessionStorage.setItem('liveStudentUsername', cleanUser);
+        sessionStorage.setItem('liveStudentSheet', cleanSheet);
+        if (cleanPin) {
+          sessionStorage.setItem('liveStudentPin', cleanPin);
+          localStorage.setItem('liveStudentPin', cleanPin);
         }
+        localStorage.setItem('liveStudentUsername', cleanUser);
+        localStorage.setItem('liveStudentSheet', cleanSheet);
+        localStorage.setItem('loggedInUsername', cleanUser);
+        localStorage.setItem('loggedInSheetNumber', cleanSheet);
       } else {
-        setIsJoined(true);
+        // REJECT AND DO NOT ENTER!
+        setIsJoined(false);
+        setIsPinVerified(false);
+        setConnected(false);
+        setJoinError(res?.error || 'رمز الدخول غير صحيح! يرجى إدخال الرمز المعروض على شاشة الفصل.');
+        sessionStorage.removeItem('liveStudentPin');
+        localStorage.removeItem('liveStudentPin');
       }
     } catch (err: any) {
-      setJoinError(err.message || 'تعذر الاتصال بالجلسة');
+      setIsJoined(false);
+      setIsPinVerified(false);
+      setConnected(false);
+      setJoinError(err?.message || 'تعذر الاتصال بالجلسة');
+      sessionStorage.removeItem('liveStudentPin');
+      localStorage.removeItem('liveStudentPin');
     }
   };
 
@@ -245,8 +284,8 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
     }
   };
 
-  // 1. Join Screen (if not logged in)
-  if (!isJoined) {
+  // 1. Join Screen (if not logged in or PIN not verified)
+  if (!isJoined || !isPinVerified) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center p-4">
         <motion.div 
@@ -265,12 +304,12 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
               بوابة الطالب للحصة التفاعلية 📱
             </h2>
             <p className="text-xs text-slate-400 mt-2 leading-relaxed font-semibold">
-              سجل اسمك للانضمام إلى شاشة العرض والإجابة على الأسئلة من جوالك مباشرة!
+              سجل اسمك ورمز الحضور المعروض على الشاشة للإجابة على الأسئلة من جهازك مباشرة!
             </p>
           </div>
 
           {/* Accidental Exit Recovery Banner */}
-          {username.trim().length > 0 && (
+          {username.trim().length > 0 && studentPin.trim().length > 0 && (
             <motion.div 
               initial={{ opacity: 0, y: -5 }}
               animate={{ opacity: 1, y: 0 }}

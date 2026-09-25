@@ -8,7 +8,7 @@ import {
   KeyRound, ShieldCheck, Tv
 } from 'lucide-react';
 import { 
-  LiveLessonRow, LiveQuestionItem, LiveSessionState, LiveConnectedStudent, LiveAnswerRecord, LiveStudentAnswerSubmission, evaluateLiveAnswer 
+  LiveLessonRow, LiveQuestionItem, LiveSessionState, LiveConnectedStudent, LiveAnswerRecord, LiveStudentAnswerSubmission, evaluateLiveAnswer, normalizeArabicText 
 } from '../types';
 import { 
   initLiveSession, triggerLiveQuestion, revealLiveAnswer, resumeLiveVideo, 
@@ -103,6 +103,16 @@ export default function LiveTeacherRoom({
   useEffect(() => {
     if (selectedLesson) {
       triggeredQuestionsRef.current = new Set();
+      setCurrentTime(0);
+      setIsPlaying(false);
+      setDuration(0);
+      if (videoRef.current) {
+        try {
+          videoRef.current.pause();
+          videoRef.current.currentTime = 0;
+          videoRef.current.load();
+        } catch {}
+      }
       initLiveSession({
         lessonTitle: selectedLesson.title,
         videoUrl: selectedLesson.videoUrl,
@@ -112,7 +122,7 @@ export default function LiveTeacherRoom({
         if (res.state) setSessionState(res.state);
       });
     }
-  }, [selectedLesson]);
+  }, [selectedLesson?.title, selectedLesson?.videoUrl]);
 
   // Connect to Live Session via Firebase Real-time WebSockets
   useEffect(() => {
@@ -318,16 +328,28 @@ export default function LiveTeacherRoom({
       selectedLesson.questions.forEach((q, idx) => {
         const rawAns = studentAnswers[idx];
         if (rawAns !== undefined && rawAns !== null && String(rawAns).trim() !== '') {
-          const evalResult = evaluateLiveAnswer(q, String(rawAns));
-          if (evalResult.isCorrect === true) {
+          const strAns = String(rawAns).trim();
+          const normStr = normalizeArabicText(strAns);
+
+          if (normStr === 'صح' || normStr === 'صحيح' || normStr === '✓' || normStr === 'true') {
             formattedAnswers[idx] = 'صح';
             correctCount++;
             evaluatedCount++;
-          } else if (evalResult.isCorrect === false) {
+          } else if (normStr === 'خطا' || normStr === 'خاطي' || normStr === '✗' || normStr === 'false') {
             formattedAnswers[idx] = 'خطأ';
             evaluatedCount++;
           } else {
-            formattedAnswers[idx] = String(rawAns).trim();
+            const evalResult = evaluateLiveAnswer(q, strAns);
+            if (evalResult.isCorrect === true) {
+              formattedAnswers[idx] = 'صح';
+              correctCount++;
+              evaluatedCount++;
+            } else if (evalResult.isCorrect === false) {
+              formattedAnswers[idx] = 'خطأ';
+              evaluatedCount++;
+            } else {
+              formattedAnswers[idx] = strAns;
+            }
           }
         } else {
           formattedAnswers[idx] = '';
@@ -600,11 +622,16 @@ export default function LiveTeacherRoom({
       <main className="flex-1 relative flex items-center justify-center bg-black overflow-hidden">
         {selectedLesson && playableUrl ? (
           <video
+            key={playableUrl || selectedLesson.title}
             ref={videoRef}
             src={playableUrl}
             onTimeUpdate={handleTimeUpdate}
             onLoadedMetadata={() => {
-              if (videoRef.current) setDuration(videoRef.current.duration);
+              if (videoRef.current) {
+                setDuration(videoRef.current.duration);
+                videoRef.current.currentTime = 0;
+              }
+              setCurrentTime(0);
             }}
             onPlay={() => setIsPlaying(true)}
             onPause={() => setIsPlaying(false)}
@@ -637,7 +664,7 @@ export default function LiveTeacherRoom({
               {allLessons.map((lesson, idx) => (
                 <button
                   key={idx}
-                  onClick={() => setSelectedLesson(lesson)}
+                  onClick={() => handleRequestSwitchLesson(lesson)}
                   className="p-4 bg-slate-900/90 hover:bg-slate-850 border border-slate-800 hover:border-amber-500/50 rounded-2xl text-right transition-all flex items-center justify-between group cursor-pointer shadow-md active:scale-98"
                 >
                   <div className="flex items-center gap-3">

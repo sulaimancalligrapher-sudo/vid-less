@@ -171,6 +171,7 @@ export async function endLiveProgram(): Promise<{ success: boolean; state?: Live
       currentQuestion: null,
       currentQuestionIndex: null,
       answersForCurrentQuestion: {},
+      allSessionAnswers: {},
     };
 
     await setDoc(LIVE_DOC_REF, {
@@ -326,6 +327,7 @@ export async function initLiveSession(payload: {
       currentQuestion: null,
       questionTriggeredAt: null,
       answersForCurrentQuestion: {},
+      allSessionAnswers: {},
     };
 
     await updateDoc(LIVE_DOC_REF, {
@@ -379,7 +381,7 @@ export async function submitLiveAnswer(payload: {
   answer: string;
   questionIndex: number;
   isCorrect?: boolean | null;
-}): Promise<{ success: boolean; state?: LiveSessionState }> {
+}): Promise<{ success: boolean; state?: LiveSessionState; error?: string }> {
   try {
     const state = await getLiveSessionState() || cachedState;
     const currentAnswers = { ...(state.answersForCurrentQuestion || {}) };
@@ -387,6 +389,14 @@ export async function submitLiveAnswer(payload: {
 
     const cleanUser = String(payload.username || '').trim();
     let cleanSheet = String(payload.sheetNumber || '').trim();
+
+    // Verify student is actually connected with verified PIN
+    const isEnrolledAndVerified = (state.connectedStudents || []).some(
+      (s) => String(s.username || '').trim().toLowerCase() === cleanUser.toLowerCase() && s.pinVerified
+    );
+    if (!isEnrolledAndVerified && state.sessionPin) {
+      return { success: false, error: 'غير مصرح لك بإرسال الإجابة: يرجى الانضمام برمز الحضور الصحيح أولاً.' };
+    }
 
     // If student submitted without sheetNumber, recover from connectedStudents
     if (!cleanSheet) {
@@ -432,7 +442,15 @@ export async function submitLiveAnswer(payload: {
     if (!allAnswers[studentKey]) {
       allAnswers[studentKey] = {};
     }
-    allAnswers[studentKey][payload.questionIndex] = String(payload.answer ?? '').trim();
+    
+    // Format answer cleanly as 'صح' or 'خطأ' if evaluation is available, or preserve text
+    const formattedAnswer = payload.isCorrect === true
+      ? 'صح'
+      : payload.isCorrect === false
+        ? 'خطأ'
+        : String(payload.answer ?? '').trim();
+
+    allAnswers[studentKey][payload.questionIndex] = formattedAnswer;
 
     await updateDoc(LIVE_DOC_REF, {
       answersForCurrentQuestion: currentAnswers,
@@ -499,6 +517,7 @@ export async function finishLiveSession(): Promise<{ success: boolean; state?: L
       currentQuestion: null,
       currentQuestionIndex: null,
       answersForCurrentQuestion: {},
+      allSessionAnswers: {},
     };
 
     await updateDoc(LIVE_DOC_REF, {

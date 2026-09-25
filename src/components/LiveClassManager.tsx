@@ -8,7 +8,7 @@ import {
   Power, ShieldAlert, DownloadCloud, History
 } from 'lucide-react';
 import { 
-  LiveLessonRow, LiveQuestionItem, LiveAnswerRecord, LiveSessionState 
+  LiveLessonRow, LiveQuestionItem, LiveAnswerRecord, LiveSessionState, evaluateLiveAnswer, normalizeArabicText 
 } from '../types';
 import { 
   fetchLiveQuestionsT, saveLiveLessonT, fetchLiveAnswersT, 
@@ -288,6 +288,7 @@ export default function LiveClassManager({
         try {
           const timestamp = new Date().toLocaleString('ar-SA');
           const lessonTitle = sessionState.lessonTitle || (lessons[0]?.title || 'درس تفاعلي مباشر');
+          const currentLesson = lessons.find(l => l.title === lessonTitle) || lessons[0];
           const records: LiveAnswerRecord[] = [];
           const students = sessionState.connectedStudents || [];
           const studentMap = new Map<string, { username: string; sheetNumber: string }>();
@@ -308,16 +309,52 @@ export default function LiveClassManager({
             const finalNum = existing?.sheetNumber || num || '';
 
             const formattedAns: Record<number, string> = {};
-            Object.entries(answers).forEach(([qIdx, ans]) => {
-              formattedAns[Number(qIdx)] = String(ans);
-            });
+            let correctCount = 0;
+            let evaluatedCount = 0;
+
+            if (currentLesson && currentLesson.questions && currentLesson.questions.length > 0) {
+              currentLesson.questions.forEach((q, idx) => {
+                const ans = answers[idx];
+                if (ans !== undefined && ans !== null && String(ans).trim() !== '') {
+                  const strAns = String(ans).trim();
+                  const norm = normalizeArabicText(strAns);
+                  if (norm === 'صح' || norm === 'صحيح' || norm === '✓' || norm === 'true') {
+                    formattedAns[idx] = 'صح';
+                    correctCount++;
+                    evaluatedCount++;
+                  } else if (norm === 'خطا' || norm === 'خاطي' || norm === '✗' || norm === 'false') {
+                    formattedAns[idx] = 'خطأ';
+                    evaluatedCount++;
+                  } else {
+                    const evalRes = evaluateLiveAnswer(q, strAns);
+                    if (evalRes.isCorrect === true) {
+                      formattedAns[idx] = 'صح';
+                      correctCount++;
+                      evaluatedCount++;
+                    } else if (evalRes.isCorrect === false) {
+                      formattedAns[idx] = 'خطأ';
+                      evaluatedCount++;
+                    } else {
+                      formattedAns[idx] = strAns;
+                    }
+                  }
+                } else {
+                  formattedAns[idx] = '';
+                }
+              });
+            } else {
+              Object.entries(answers).forEach(([qIdx, ans]) => {
+                formattedAns[Number(qIdx)] = String(ans);
+              });
+            }
 
             records.push({
               timestamp,
               sheetNumber: finalNum,
               username: finalUser,
               lessonTitle,
-              answers: formattedAns
+              answers: formattedAns,
+              totalScore: evaluatedCount > 0 ? `${correctCount}/${evaluatedCount}` : ''
             });
           });
 

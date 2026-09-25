@@ -261,8 +261,25 @@ export interface LiveAnswerRecord {
 }
 
 /**
+ * Normalizes Arabic strings and converts Arabic-Indic digits (٠-٩) to English (0-9)
+ * for completely robust answer matching regardless of font or diacritics.
+ */
+export function normalizeArabicText(str: string): string {
+  if (!str) return '';
+  return str
+    .replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString()) // convert Arabic numbers to English: ٠->0, ١->1 ...
+    .replace(/[\u064B-\u065F\u0670]/g, '') // remove Arabic Tashkeel / diacritics
+    .replace(/[إأآٱ]/g, 'ا') // normalize Alef
+    .replace(/ة/g, 'ه') // normalize Taa Marbuta
+    .replace(/ى/g, 'ي') // normalize Yaa
+    .replace(/[^\S\r\n]+/g, ' ') // normalize whitespace
+    .trim()
+    .toLowerCase();
+}
+
+/**
  * Evaluates a student's answer against the 3 cases in Column G:
- * Case 1: Option index (1, 2, 3...) when Column F contains options
+ * Case 1: Option index (1, 2, 3... or ١, ٢, ٣...) when Column F contains options
  * Case 2: Specific text match when Column F is 'نص' and Column G has text
  * Case 3: Free text answer when Column G is empty (isCorrect: null, not evaluated as right or wrong)
  */
@@ -270,33 +287,54 @@ export function evaluateLiveAnswer(
   question: LiveQuestionItem,
   answer: string
 ): { isCorrect: boolean | null; correctLabel?: string } {
-  const trimmedAnswer = (answer || '').trim();
-  const rawCorrect = (question.correctAnswer || '').trim();
+  const rawAnswer = String(answer || '').trim();
+  if (!rawAnswer) return { isCorrect: null };
+
+  const normAnswer = normalizeArabicText(rawAnswer);
+  const rawCorrect = String(question.correctAnswer || '').trim();
+  const normCorrect = normalizeArabicText(rawCorrect);
   const validOptions = (question.options || []).map(o => String(o || '').trim()).filter(Boolean);
   const isMultipleChoice = validOptions.length > 0 && !question.isTextAnswer;
 
   if (isMultipleChoice) {
-    // Case 1: G contains a number (1, 2, 3...) pointing to 1-based index in options
-    const numAnswer = parseInt(rawCorrect, 10);
+    // Case 1: G contains a number (1, 2, 3... or ١, ٢, ٣...) pointing to 1-based index in options
+    const numAnswer = parseInt(normCorrect, 10);
     let correctOptionText = '';
     if (!isNaN(numAnswer) && numAnswer >= 1 && numAnswer <= validOptions.length) {
       correctOptionText = validOptions[numAnswer - 1];
     } else if (rawCorrect) {
-      correctOptionText = rawCorrect;
+      // Direct text match against options
+      const matchedOpt = validOptions.find(o => normalizeArabicText(o) === normCorrect);
+      correctOptionText = matchedOpt || rawCorrect;
     }
 
     if (correctOptionText) {
-      const isCorrect = trimmedAnswer === correctOptionText;
+      const normCorrectOpt = normalizeArabicText(correctOptionText);
+
+      // Check if student answer matches correct option
+      let isCorrect = (normAnswer === normCorrectOpt);
+
+      // Also handle when options are ["صح", "خطأ"] or binary options
+      if (!isCorrect) {
+        if ((normAnswer === 'صح' || normAnswer === 'صحيح' || normAnswer === '✓' || normAnswer === 'true') && 
+            (normCorrectOpt === 'صح' || normCorrectOpt === 'صحيح' || normCorrect === '1')) {
+          isCorrect = true;
+        } else if ((normAnswer === 'خطا' || normAnswer === 'خاطي' || normAnswer === '✗' || normAnswer === 'false') && 
+                   (normCorrectOpt === 'خطا' || normCorrectOpt === 'خاطي' || normCorrect === '2')) {
+          isCorrect = true;
+        }
+      }
+
       return { isCorrect, correctLabel: correctOptionText };
     } else {
-      // Ungraded multiple choice
+      // Ungraded multiple choice (Column G left empty)
       return { isCorrect: null };
     }
   } else {
     // Text question (Column F is 'نص' or no options)
     if (rawCorrect) {
       // Case 2: Specific model answer required
-      const isCorrect = trimmedAnswer.toLowerCase() === rawCorrect.toLowerCase();
+      const isCorrect = normAnswer === normCorrect;
       return { isCorrect, correctLabel: rawCorrect };
     } else {
       // Case 3: Free text answer, not graded as right or wrong
