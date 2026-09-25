@@ -925,8 +925,14 @@ export default function LiveClassManager({
           {(() => {
             const currentQ = sessionState?.currentQuestion;
             const answersMap = sessionState?.answersForCurrentQuestion || {};
+            // Deduplicate unique students who answered so count is always exact
+            const uniqueAnsweredUsers = new Set(
+              Object.values(answersMap)
+                .map(sub => String(sub.username || '').trim().toLowerCase())
+                .filter(Boolean)
+            );
             const totalStudentsCount = sessionState?.connectedStudents?.length || 0;
-            const answeredCount = Object.keys(answersMap).length;
+            const answeredCount = uniqueAnsweredUsers.size;
             const answerPercentage = totalStudentsCount > 0 
               ? Math.min(100, Math.round((answeredCount / totalStudentsCount) * 100)) 
               : 0;
@@ -1026,8 +1032,11 @@ export default function LiveClassManager({
             return (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {list.map((student, idx) => {
-                  const studentKey = `${student.username}_${student.sheetNumber || ''}`;
-                  const ansObj = answersMap[studentKey];
+                  const studentKey = student.sheetNumber ? `${student.username}_${student.sheetNumber}` : student.username;
+                  const ansObj = answersMap[studentKey] || 
+                                 answersMap[student.username] || 
+                                 answersMap[`${student.username}_${student.sheetNumber || ''}`] ||
+                                 Object.values(answersMap).find(s => String(s.username || '').trim().toLowerCase() === student.username.trim().toLowerCase());
                   const hasAnswered = Boolean(ansObj);
 
                   return (

@@ -408,19 +408,31 @@ export async function submitLiveAnswer(payload: {
       submittedAt: Date.now(),
     };
 
-    currentAnswers[cleanUser] = submission;
+    // Deduplicate: Clean up any old or alternate keys for this same student so they never appear twice
+    Object.keys(currentAnswers).forEach((k) => {
+      const existingSub = currentAnswers[k];
+      const existingUser = existingSub?.username ? String(existingSub.username).trim() : (k.includes('_') ? k.split('_')[0] : k);
+      if (existingUser.toLowerCase() === cleanUser.toLowerCase()) {
+        delete currentAnswers[k];
+      }
+    });
+
+    // Store EXACTLY ONE entry per student in currentAnswers
     currentAnswers[studentKey] = submission;
+
+    // Deduplicate allSessionAnswers: merge and clean up any alternate keys
+    Object.keys(allAnswers).forEach((k) => {
+      const existingUser = k.includes('_') ? k.split('_')[0] : k;
+      if (existingUser.toLowerCase() === cleanUser.toLowerCase() && k !== studentKey) {
+        allAnswers[studentKey] = { ...(allAnswers[k] || {}), ...(allAnswers[studentKey] || {}) };
+        delete allAnswers[k];
+      }
+    });
 
     if (!allAnswers[studentKey]) {
       allAnswers[studentKey] = {};
     }
     allAnswers[studentKey][payload.questionIndex] = String(payload.answer ?? '').trim();
-
-    // If an un-numbered entry existed for this student, merge into studentKey and delete un-numbered key
-    if (cleanSheet && allAnswers[cleanUser] && cleanUser !== studentKey) {
-      allAnswers[studentKey] = { ...allAnswers[cleanUser], ...allAnswers[studentKey] };
-      delete allAnswers[cleanUser];
-    }
 
     await updateDoc(LIVE_DOC_REF, {
       answersForCurrentQuestion: currentAnswers,

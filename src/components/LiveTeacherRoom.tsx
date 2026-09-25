@@ -8,7 +8,7 @@ import {
   KeyRound, ShieldCheck, Tv
 } from 'lucide-react';
 import { 
-  LiveLessonRow, LiveQuestionItem, LiveSessionState, LiveConnectedStudent, LiveAnswerRecord, evaluateLiveAnswer 
+  LiveLessonRow, LiveQuestionItem, LiveSessionState, LiveConnectedStudent, LiveAnswerRecord, LiveStudentAnswerSubmission, evaluateLiveAnswer 
 } from '../types';
 import { 
   initLiveSession, triggerLiveQuestion, revealLiveAnswer, resumeLiveVideo, 
@@ -394,9 +394,23 @@ export default function LiveTeacherRoom({
   const isQuestionActive = sessionState?.status === 'question_active' && currentQ;
   const isRevealed = sessionState?.status === 'revealed' && currentQ;
 
-  // Calculate live answers statistics for active question
-  const answersMap = sessionState?.answersForCurrentQuestion || {};
-  const answeredCount = Object.keys(answersMap).length;
+  // Deduplicate answersMap so each student is represented exactly once
+  const answersList = React.useMemo(() => {
+    const raw = sessionState?.answersForCurrentQuestion || {};
+    const map = new Map<string, LiveStudentAnswerSubmission>();
+    Object.values(raw).forEach((sub) => {
+      const u = String(sub.username || '').trim();
+      if (!u) return;
+      const key = u.toLowerCase();
+      const existing = map.get(key);
+      if (!existing || (!existing.sheetNumber && sub.sheetNumber)) {
+        map.set(key, sub);
+      }
+    });
+    return Array.from(map.values());
+  }, [sessionState?.answersForCurrentQuestion]);
+
+  const answeredCount = answersList.length;
   const totalStudentsCount = Math.max(connectedStudents.length, answeredCount);
   const answerPercentage = totalStudentsCount > 0 ? Math.round((answeredCount / totalStudentsCount) * 100) : 0;
 
@@ -406,7 +420,7 @@ export default function LiveTeacherRoom({
     currentQ.options.forEach(opt => {
       optionStats[opt] = 0;
     });
-    Object.values(answersMap).forEach(sub => {
+    answersList.forEach(sub => {
       if (optionStats[sub.answer] !== undefined) {
         optionStats[sub.answer]++;
       } else {
@@ -726,12 +740,12 @@ export default function LiveTeacherRoom({
                       {/* Live stream list of text submissions */}
                       <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-3 max-h-56 overflow-y-auto space-y-2">
                         <div className="text-[11px] font-bold text-slate-400 mb-1 px-1">
-                          إجابات الطلاب المستلمة فورياً ({Object.keys(sessionState.answersForCurrentQuestion || {}).length}):
+                          إجابات الطلاب المستلمة فورياً ({answersList.length}):
                         </div>
-                        {Object.keys(sessionState.answersForCurrentQuestion || {}).length === 0 ? (
+                        {answersList.length === 0 ? (
                           <p className="text-xs text-slate-500 py-4 text-center">في انتظار إجابات الطلاب من هواتفهم...</p>
                         ) : (
-                          Object.entries(sessionState.answersForCurrentQuestion || {}).map(([key, sub], sIdx) => {
+                          answersList.map((sub, sIdx) => {
                             const evalSub = isRevealed ? evaluateLiveAnswer(currentQ, sub.answer) : null;
                             return (
                               <div 

@@ -20,7 +20,7 @@ export function getWebAppUrl(): string {
   }
 
   // 3. Default fallback hardcoded URL
-  const fallbackUrl: string = 'https://script.google.com/macros/s/AKfycbxFKm-Is3TLJcFFthHdEFgU60qhrvYwT3jUqHd_oBUhlcfaWZiOuETelDCe40zEHk4OsQ/exec';
+  const fallbackUrl: string = 'https://script.google.com/macros/s/AKfycbw9_hBJAwQV3rHfdpUyXZm1qhODuljKaogF_UPcHEZ0XT4P0dlKyhPrMkco9gWsrSrLrw/exec';
   if (fallbackUrl && fallbackUrl.trim().length > 0) {
     return fallbackUrl.trim();
   }
