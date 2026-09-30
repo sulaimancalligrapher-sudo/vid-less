@@ -106,8 +106,9 @@ export default function LiveClassManager({
   // Link copy state
   const [copiedLink, setCopiedLink] = useState(false);
 
+  const effectivePin = sessionState?.sessionPin ? sessionState.sessionPin.trim() : '';
   const studentJoinUrl = typeof window !== 'undefined' 
-    ? `${window.location.origin}/?page=live-student`
+    ? `${window.location.origin}/?page=live-student${effectivePin ? `&pin=${encodeURIComponent(effectivePin)}` : ''}`
     : '';
 
   const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(studentJoinUrl)}`;
@@ -355,13 +356,13 @@ export default function LiveClassManager({
     }
   };
 
-  // Determine currently active lesson from sessionState or fallback to first lesson
+  // Determine currently active lesson from sessionState
   const activeLesson = useMemo(() => {
     if (sessionState?.lessonTitle) {
       const match = lessons.find(l => l.title === sessionState.lessonTitle);
       if (match) return match;
     }
-    return lessons.length > 0 ? lessons[0] : null;
+    return null;
   }, [sessionState?.lessonTitle, lessons]);
 
   // Trigger question directly from Admin panel (transferred from display screen)
@@ -1390,19 +1391,20 @@ export default function LiveClassManager({
                     </div>
                     <select
                       value={activeLesson?.title || ''}
-                      onChange={(e) => handleSelectLesson(e.target.value)}
+                      onChange={(e) => {
+                        if (e.target.value) {
+                          handleSelectLesson(e.target.value);
+                        }
+                      }}
                       className="bg-slate-950 border border-slate-750 hover:border-amber-500/50 text-slate-100 text-xs font-bold rounded-lg px-2.5 py-1.5 outline-none cursor-pointer focus:border-amber-400 transition-colors shadow-sm min-w-[200px]"
                       title="اختيار الدرس المعروض حالياً على شاشة العرض وللطلاب"
                     >
-                      {lessons.length === 0 ? (
-                        <option value="">لا توجد دروس محملة</option>
-                      ) : (
-                        lessons.map((l, i) => (
-                          <option key={i} value={l.title}>
-                            {l.title}
-                          </option>
-                        ))
-                      )}
+                      <option value="">-- اختر الدرس للبدء --</option>
+                      {lessons.map((l, i) => (
+                        <option key={i} value={l.title}>
+                          {l.title}
+                        </option>
+                      ))}
                     </select>
 
                     {/* زر إظهار وإخفاء قائمة الدروس بشاشة العرض (أيقونة العين فقط بدون نص) */}

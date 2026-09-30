@@ -4,8 +4,9 @@ import {
   Tv, Sparkles, CheckCircle2, XCircle, Clock, Send, 
   User, Hash, LogOut, ArrowRight, Volume2, HelpCircle, 
   Award, ShieldAlert, Wifi, WifiOff, Loader2,
-  KeyRound, ShieldCheck
+  KeyRound, ShieldCheck, Camera, QrCode, X
 } from 'lucide-react';
+import { Html5Qrcode } from 'html5-qrcode';
 import { 
   LiveSessionState, LiveQuestionItem, evaluateLiveAnswer 
 } from '../types';
@@ -201,6 +202,204 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
     return () => clearInterval(timer);
   }, [sessionState?.status, timeLeft]);
 
+  // Camera QR Scanner State
+  const [isScanning, setIsScanning] = useState(false);
+  const [scannerError, setScannerError] = useState<string | null>(null);
+  const [scanSuccessMsg, setScanSuccessMsg] = useState<string | null>(null);
+  const html5QrcodeRef = useRef<Html5Qrcode | null>(null);
+
+  // Stop & cleanup QR scanner
+  const stopScanner = async () => {
+    if (html5QrcodeRef.current) {
+      try {
+        if (html5QrcodeRef.current.isScanning) {
+          await html5QrcodeRef.current.stop();
+        }
+        html5QrcodeRef.current.clear();
+      } catch (err) {
+        console.warn('Scanner cleanup notice:', err);
+      }
+      html5QrcodeRef.current = null;
+    }
+    setIsScanning(false);
+  };
+
+  useEffect(() => {
+    return () => {
+      stopScanner();
+    };
+  }, []);
+
+  // Smart parser for both Classroom QR (with PIN) and Student Identity Badges (Name & Sheet)
+  const parseStudentQrData = (decodedText: string): { username?: string; sheetNumber?: string; pin?: string } | null => {
+    if (!decodedText) return null;
+    const text = decodedText.trim();
+    const result: { username?: string; sheetNumber?: string; pin?: string } = {};
+
+    // 1. JSON Format e.g. {"username": "سليمان", "sheetNumber": "12", "pin": "5821"}
+    if ((text.startsWith('{') && text.endsWith('}')) || (text.startsWith('%7B') && text.endsWith('%7D'))) {
+      try {
+        const decodedStr = text.startsWith('%7B') ? decodeURIComponent(text) : text;
+        const obj = JSON.parse(decodedStr);
+        const user = obj.username || obj.name || obj.user || obj.student || obj.student_name || obj.u || '';
+        const sheet = obj.sheet_number || obj.sheetNumber || obj.number || obj.sheet || obj.num || obj.id || obj.s || '';
+        const p = obj.pin || obj.code || obj.pass || '';
+        if (user) result.username = String(user).trim();
+        if (sheet) result.sheetNumber = String(sheet).trim();
+        if (p) result.pin = String(p).trim();
+        if (result.username || result.sheetNumber || result.pin) return result;
+      } catch (e) {}
+    }
+
+    // 2. URL Format e.g. https://.../?page=live-student&pin=5821&username=سليمان&sheetNumber=12
+    if (text.includes('http://') || text.includes('https://') || text.includes('?')) {
+      try {
+        const urlStr = text.startsWith('http') ? text : `https://dummy.com/${text}`;
+        const urlObj = new URL(urlStr);
+        const p = urlObj.searchParams;
+        const user = p.get('username') || p.get('name') || p.get('user') || p.get('student') || p.get('student_name');
+        const sheet = p.get('sheet_number') || p.get('sheetNumber') || p.get('number') || p.get('sheet') || p.get('num') || p.get('id');
+        const pinVal = p.get('pin') || p.get('code') || p.get('p');
+        if (user) result.username = user.trim();
+        if (sheet) result.sheetNumber = sheet.trim();
+        if (pinVal) result.pin = pinVal.trim();
+        if (result.username || result.sheetNumber || result.pin) return result;
+      } catch (e) {}
+    }
+
+    // 3. Raw Numeric PIN (4 to 6 digits, e.g. "5821")
+    if (/^\d{4,6}$/.test(text)) {
+      return { pin: text };
+    }
+
+    // 4. Formatted labels e.g. "الاسم: سليمان | الرقم: 12"
+    if (text.includes('الاسم') || text.includes('اسم') || text.includes('رقم') || text.includes('pin') || text.includes('رمز')) {
+      const pinMatch = text.match(/(?:pin|رمز|كود)[:=\s]+(\d{4,6})/i);
+      const nameMatch = text.match(/(?:الاسم|اسم|الطالب|المشترك)[:=\s]+([^\n,|;]+)/i);
+      const sheetMatch = text.match(/(?:الرقم|رقم|شيت|الشيت)[:=\s]+([^\n,|;]+)/i);
+      if (pinMatch) result.pin = pinMatch[1].trim();
+      if (nameMatch) result.username = nameMatch[1].trim();
+      if (sheetMatch) result.sheetNumber = sheetMatch[1].trim();
+      if (result.username || result.sheetNumber || result.pin) return result;
+    }
+
+    // 5. Delimiters e.g. "سليمان, 12" or "سليمان - 12" or "12 - سليمان"
+    const delimiters = [',', '|', ':', '\n', ';', '-'];
+    for (const delim of delimiters) {
+      if (text.includes(delim)) {
+        const parts = text.split(delim).map(s => s.trim()).filter(Boolean);
+        if (parts.length >= 2) {
+          let user = parts[0];
+          let sheet = parts[1];
+          if (!isNaN(Number(parts[0])) && isNaN(Number(parts[1]))) {
+            sheet = parts[0];
+            user = parts[1];
+          }
+          return { username: user, sheetNumber: sheet };
+        }
+      }
+    }
+
+    // 6. Plain text fallback: assume username
+    return { username: text };
+  };
+
+  const handleScanSuccess = async (decodedText: string) => {
+    const parsed = parseStudentQrData(decodedText);
+    await stopScanner();
+
+    if (!parsed || (!parsed.username && !parsed.sheetNumber && !parsed.pin)) {
+      setScannerError('رمز QR لا يحتوي على بيانات طالب أو رمز حضور صالح.');
+      return;
+    }
+
+    let updatedUser = username;
+    let updatedSheet = sheetNumber;
+    let updatedPin = studentPin;
+
+    const msgs: string[] = [];
+
+    if (parsed.username) {
+      updatedUser = parsed.username;
+      setUsername(parsed.username);
+      msgs.push(`الاسم: ${parsed.username}`);
+    }
+    if (parsed.sheetNumber) {
+      updatedSheet = parsed.sheetNumber;
+      setSheetNumber(parsed.sheetNumber);
+      msgs.push(`رقم المشترك: ${parsed.sheetNumber}`);
+    }
+    if (parsed.pin) {
+      updatedPin = parsed.pin;
+      setStudentPin(parsed.pin);
+      msgs.push(`رمز الحضور (PIN): ${parsed.pin}`);
+    }
+
+    setScanSuccessMsg(`✅ تم مسح الكود بنجاح: ${msgs.join(' • ')}`);
+    setJoinError(null);
+
+    // Audio beep confirmation
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) {
+        const ctx = new AudioCtx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, ctx.currentTime);
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.18);
+      }
+    } catch {}
+
+    // Auto-join if both username and pin are now filled
+    if (updatedUser.trim() && updatedPin.trim()) {
+      setTimeout(() => {
+        handleJoin(updatedUser.trim(), updatedSheet.trim(), updatedPin.trim());
+      }, 700);
+    }
+  };
+
+  const startScanner = () => {
+    setScannerError(null);
+    setScanSuccessMsg(null);
+    setJoinError(null);
+    setIsScanning(true);
+
+    setTimeout(async () => {
+      const elem = document.getElementById('live-student-qr-reader');
+      if (!elem) return;
+
+      try {
+        const html5QrCode = new Html5Qrcode('live-student-qr-reader');
+        html5QrcodeRef.current = html5QrCode;
+        const config = { fps: 10, qrbox: { width: 220, height: 220 } };
+
+        try {
+          await html5QrCode.start(
+            { facingMode: 'environment' },
+            config,
+            (decodedText) => handleScanSuccess(decodedText),
+            () => {}
+          );
+        } catch (e) {
+          await html5QrCode.start(
+            { facingMode: 'user' },
+            config,
+            (decodedText) => handleScanSuccess(decodedText),
+            () => {}
+          );
+        }
+      } catch (err: any) {
+        console.error('Camera QR start error:', err);
+        setScannerError('تعذر فتح الكاميرا. يرجى التأكد من السماح بالوصول للكاميرا.');
+      }
+    }, 250);
+  };
+
   // Join Classroom
   const handleJoin = async (nameToJoin: string, sheetToJoin: string, pinToJoin?: string) => {
     if (!nameToJoin.trim()) {
@@ -333,6 +532,24 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
             </motion.div>
           )}
 
+          {/* زر مسح رمز QR بالكاميرا */}
+          <button
+            type="button"
+            onClick={startScanner}
+            className="w-full py-3.5 px-4 bg-gradient-to-r from-indigo-900/60 via-purple-900/50 to-indigo-900/60 hover:from-indigo-850 hover:to-purple-850 border border-indigo-500/40 hover:border-indigo-400 text-indigo-200 font-bold rounded-2xl text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-indigo-950/40 mb-4 active:scale-98"
+          >
+            <Camera className="w-4 h-4 text-indigo-400" />
+            <span>مسح رمز QR بالكاميرا (بيانات الطالب أو رمز الحضور) 📷</span>
+          </button>
+
+          {/* رسالة نجاح مسح الكود */}
+          {scanSuccessMsg && (
+            <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 rounded-2xl text-xs font-bold flex items-center gap-2 mb-4 animate-in fade-in">
+              <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+              <span className="leading-relaxed">{scanSuccessMsg}</span>
+            </div>
+          )}
+
           <form onSubmit={(e) => { e.preventDefault(); handleJoin(username, sheetNumber, studentPin); }} className="space-y-4">
             <div>
               <label className="block text-xs font-bold text-slate-300 mb-1.5">
@@ -416,6 +633,56 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
             </button>
           )}
         </motion.div>
+
+        {/* QR Scanner Camera Modal */}
+        <AnimatePresence>
+          {isScanning && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex flex-col items-center justify-center p-4"
+            >
+              <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-2xl relative space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                  <div className="flex items-center gap-2 text-indigo-400 font-bold text-sm">
+                    <Camera className="w-4 h-4" />
+                    <span>مسح رمز QR بالكاميرا</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={stopScanner}
+                    className="p-1.5 text-slate-400 hover:text-white rounded-xl bg-slate-800 hover:bg-slate-700 transition-all cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="relative rounded-2xl overflow-hidden bg-black aspect-square flex items-center justify-center border border-slate-800">
+                  <div id="live-student-qr-reader" className="w-full h-full" />
+                </div>
+
+                <p className="text-center text-xs text-slate-400 font-semibold leading-relaxed">
+                  وجه الكاميرا نحو <b>رمز QR المعروض على الشاشة</b> لقراءة رمز الدخول (PIN)، أو نحو <b>بطاقة المشترك</b> لقراءة الاسم ورقم المشترك.
+                </p>
+
+                {scannerError && (
+                  <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 rounded-xl text-xs font-bold text-center">
+                    {scannerError}
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={stopScanner}
+                  className="w-full py-2.5 bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold text-xs rounded-xl transition-all cursor-pointer"
+                >
+                  إلغاء وإدخال يدوي
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     );
   }
