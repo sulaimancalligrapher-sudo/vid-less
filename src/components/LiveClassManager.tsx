@@ -67,6 +67,7 @@ export default function LiveClassManager({
   const [loadingAnswers, setLoadingAnswers] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [studentSearch, setStudentSearch] = useState('');
+  const [filterUnansweredOnly, setFilterUnansweredOnly] = useState(false);
   const [copiedPin, setCopiedPin] = useState(false);
   const [isRegeneratingPin, setIsRegeneratingPin] = useState(false);
   const [isResettingSession, setIsResettingSession] = useState(false);
@@ -1683,16 +1684,51 @@ export default function LiveClassManager({
             )}
 
             {/* Filter Search Bar & QR button */}
-            <div className="flex items-center justify-between gap-3 pt-3 border-t border-slate-800/80">
-              <div className="relative flex-1 max-w-md">
-                <Search className="w-4 h-4 text-slate-500 absolute right-3.5 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  value={studentSearch}
-                  onChange={(e) => setStudentSearch(e.target.value)}
-                  placeholder="بحث باسم الطالب أو رقم الشيت..."
-                  className="w-full pr-10 pl-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 placeholder-slate-500 outline-none focus:border-amber-500"
-                />
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-800/80">
+              <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[280px] max-w-xl">
+                <div className="relative flex-1 min-w-[180px]">
+                  <Search className="w-4 h-4 text-slate-500 absolute right-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={studentSearch}
+                    onChange={(e) => setStudentSearch(e.target.value)}
+                    placeholder="بحث باسم الطالب أو رقم المشترك..."
+                    className="w-full pr-10 pl-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 placeholder-slate-500 outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                {/* زر إظهار الذين لم يجيبوا */}
+                {(() => {
+                  const answersMap = sessionState?.answersForCurrentQuestion || {};
+                  const answeredUsers = new Set(
+                    Object.values(answersMap)
+                      .map(sub => String(sub.username || '').trim().toLowerCase())
+                      .filter(Boolean)
+                  );
+                  const totalCount = sessionState?.connectedStudents?.length || 0;
+                  const unansweredCount = Math.max(0, totalCount - answeredUsers.size);
+
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => setFilterUnansweredOnly(prev => !prev)}
+                      className={`px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border shrink-0 ${
+                        filterUnansweredOnly
+                          ? 'bg-amber-500 text-slate-950 border-amber-400 font-black shadow-lg shadow-amber-500/20 ring-2 ring-amber-300'
+                          : 'bg-slate-950 hover:bg-slate-850 text-slate-300 hover:text-white border-slate-800'
+                      }`}
+                      title={filterUnansweredOnly ? 'إلغاء الفلتر وعرض جميع الطلاب' : 'إظهار المشتركين الذين لم يجيبوا فقط'}
+                    >
+                      <Clock className={`w-3.5 h-3.5 ${filterUnansweredOnly ? 'text-slate-950' : 'text-amber-400'}`} />
+                      <span>{filterUnansweredOnly ? 'عرض الجميع' : 'الذين لم يجيبوا'}</span>
+                      <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono font-black ${
+                        filterUnansweredOnly ? 'bg-slate-950 text-amber-400' : 'bg-slate-800 text-slate-300'
+                      }`}>
+                        {unansweredCount}
+                      </span>
+                    </button>
+                  );
+                })()}
               </div>
 
               <div className="flex flex-wrap items-center gap-2.5">
@@ -1808,6 +1844,17 @@ export default function LiveClassManager({
           {(() => {
             const answersMap = sessionState?.answersForCurrentQuestion || {};
             const list = (sessionState?.connectedStudents || []).filter(s => {
+              const studentKey = s.sheetNumber ? `${s.username}_${s.sheetNumber}` : s.username;
+              const ansObj = answersMap[studentKey] || 
+                             answersMap[s.username] || 
+                             answersMap[`${s.username}_${s.sheetNumber || ''}`] ||
+                             Object.values(answersMap).find(sub => String(sub.username || '').trim().toLowerCase() === s.username.trim().toLowerCase());
+              const hasAnswered = Boolean(ansObj);
+
+              if (filterUnansweredOnly && hasAnswered) {
+                return false;
+              }
+
               if (!studentSearch.trim()) return true;
               const q = studentSearch.toLowerCase();
               return s.username.toLowerCase().includes(q) || (s.sheetNumber && s.sheetNumber.includes(q));
@@ -1815,31 +1862,37 @@ export default function LiveClassManager({
 
             if (list.length === 0) {
               return (
-                <div className="bg-slate-900 border border-slate-800 rounded-3xl p-12 text-center space-y-4">
-                  <div className="w-16 h-16 rounded-3xl bg-slate-800/60 text-slate-600 mx-auto flex items-center justify-center">
-                    <Users className="w-8 h-8" />
+                <div className="bg-slate-900 border border-slate-800 rounded-3xl p-10 text-center space-y-3">
+                  <div className="w-14 h-14 rounded-2xl bg-slate-800/60 text-slate-500 mx-auto flex items-center justify-center">
+                    {filterUnansweredOnly ? <CheckCircle2 className="w-7 h-7 text-emerald-400" /> : <Users className="w-7 h-7" />}
                   </div>
                   <div>
-                    <h4 className="text-base font-bold text-slate-300">
-                      {studentSearch ? 'لم يتم العثور على طالب يطابق البحث' : 'لا يوجد طلاب متصلون حالياً بالحصة'}
+                    <h4 className="text-sm sm:text-base font-bold text-slate-200">
+                      {filterUnansweredOnly
+                        ? '🎉 جميع الطلاب المتصلين قاموا بالإجابة على السؤال الحالي!'
+                        : studentSearch
+                        ? 'لم يتم العثور على طالب يطابق البحث'
+                        : 'لا يوجد طلاب متصلون حالياً بالحصة'}
                     </h4>
-                    <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-                      يمكن للطلاب الانضمام فوراً بمسح رمز QR أو فتح رابط الانضمام على هواتفهم الذكية.
-                    </p>
+                    {filterUnansweredOnly ? (
+                      <button
+                        onClick={() => setFilterUnansweredOnly(false)}
+                        className="mt-3 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl transition-all inline-flex items-center gap-1.5 cursor-pointer"
+                      >
+                        عرض جميع الطلاب ({sessionState?.connectedStudents?.length || 0})
+                      </button>
+                    ) : (
+                      <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+                        يمكن للطلاب الانضمام فوراً بمسح رمز QR أو فتح رابط الانضمام على هواتفهم الذكية.
+                      </p>
+                    )}
                   </div>
-                  <button
-                    onClick={() => setActiveTab('qrcode')}
-                    className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs transition-all inline-flex items-center gap-2 cursor-pointer shadow-lg shadow-indigo-600/20"
-                  >
-                    <QrCode className="w-4 h-4" />
-                    <span>عرض رمز ورابط دخول الطلاب</span>
-                  </button>
                 </div>
               );
             }
 
             return (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl divide-y divide-slate-800/70">
                 {list.map((student, idx) => {
                   const studentKey = student.sheetNumber ? `${student.username}_${student.sheetNumber}` : student.username;
                   const ansObj = answersMap[studentKey] || 
@@ -1851,67 +1904,52 @@ export default function LiveClassManager({
                   return (
                     <div
                       key={idx}
-                      className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between gap-3 shadow-md hover:border-slate-700 transition-all group"
+                      className="px-4 py-3 sm:py-3.5 flex items-center justify-between gap-3 hover:bg-slate-850/60 transition-colors"
                     >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold text-sm">
-                            {idx + 1}
-                          </div>
-                          <div>
-                            <h4 className="text-sm font-bold text-slate-100 flex items-center gap-1.5">
-                              <span>{student.username}</span>
-                            </h4>
-                            <span className="text-[11px] text-slate-500 font-mono">
-                              رقم الشيت: {student.sheetNumber || 'غير محدد'}
-                            </span>
-                          </div>
-                        </div>
-
-                        <button
-                          onClick={() => handleRemoveStudent(student.username, student.sheetNumber)}
-                          title="إزالة / فصل الطالب من الحصة"
-                          className="p-1.5 text-slate-600 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition-all cursor-pointer opacity-80 group-hover:opacity-100"
-                        >
-                          <UserX className="w-4 h-4" />
-                        </button>
+                      {/* 1. رقم + 2. الاسم مباشرة + 3. رقم المشترك (الرقم فقط بدون نص) */}
+                      <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0 flex-1">
+                        <span className="w-7 h-7 rounded-lg bg-slate-800 text-slate-300 flex items-center justify-center font-bold text-xs font-mono shrink-0">
+                          {idx + 1}
+                        </span>
+                        <span className="font-bold text-sm text-slate-100 truncate">
+                          {student.username}
+                        </span>
+                        <span className="font-mono font-bold text-xs text-slate-300 bg-slate-950 px-2 py-0.5 rounded-md border border-slate-800 shrink-0">
+                          {student.sheetNumber || '-'}
+                        </span>
                       </div>
 
-                      {/* Question Answer Status */}
-                      <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800/80 text-xs">
-                        <div className="flex items-center justify-between">
-                          <span className="text-slate-400 text-[11px]">حالة السؤال الحالي:</span>
-                          {hasAnswered ? (
-                            <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold flex items-center gap-1">
-                              <CheckCircle2 className="w-3 h-3" />
-                              <span>تمت الإجابة: <b className="font-mono text-white">{ansObj.answer}</b></span>
-                            </span>
-                          ) : (
-                            <span className="px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-400 border border-amber-500/30 text-[10px] font-bold flex items-center gap-1">
-                              <Clock className="w-3 h-3" />
-                              <span>في انتظار الإجابة...</span>
-                            </span>
-                          )}
+                      {/* 4. أيقونة خضراء متصل (بدون نص) + 5. في انتظار الإجابة + 6. أيقونة حذف المشترك */}
+                      <div className="flex items-center gap-2.5 sm:gap-3.5 shrink-0">
+                        {/* أيقونة خضراء متصل بدون نص */}
+                        <div className="flex items-center justify-center p-1" title="متصل الآن">
+                          <span className="relative flex h-2.5 w-2.5">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                          </span>
                         </div>
-                      </div>
 
-                      <div className="flex items-center justify-between pt-2 border-t border-slate-800/80 text-xs">
-                        {student.pinVerified ? (
-                          <span className="px-2 py-0.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold flex items-center gap-1">
-                            <ShieldCheck className="w-3 h-3" />
-                            <span>حاضر ومؤكد بـ PIN</span>
+                        {/* حالة الإجابة: في انتظار الإجابة أو تمت الإجابة */}
+                        {hasAnswered ? (
+                          <span className="px-2.5 py-1 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-bold flex items-center gap-1.5">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>تمت الإجابة: <b className="font-mono text-white mr-1">{ansObj.answer}</b></span>
                           </span>
                         ) : (
-                          <span className="px-2 py-0.5 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-400 text-[10px] font-bold flex items-center gap-1">
-                            <AlertCircle className="w-3 h-3" />
-                            <span>متصل (لم يدخل PIN)</span>
+                          <span className="px-2.5 py-1 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-bold flex items-center gap-1.5">
+                            <Clock className="w-3.5 h-3.5" />
+                            <span>في انتظار الإجابة</span>
                           </span>
                         )}
 
-                        <span className="flex items-center gap-1.5 text-[11px] text-emerald-400 font-medium">
-                          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                          <span>متصل الآن</span>
-                        </span>
+                        {/* أيقونة حذف المشترك */}
+                        <button
+                          onClick={() => handleRemoveStudent(student.username, student.sheetNumber)}
+                          title="حذف المشترك من الحصة"
+                          className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-all cursor-pointer"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       </div>
                     </div>
                   );
