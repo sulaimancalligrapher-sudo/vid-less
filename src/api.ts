@@ -1792,8 +1792,20 @@ export async function fetchLiveQuestionsT(): Promise<LiveLessonRow[]> {
   try {
     const res = await fetchGas({ action: 'getLiveQuestionsT' }, 'GET');
     if (res && res.success && Array.isArray(res.data)) {
-      localStorage.setItem(LOCAL_STORAGE_LIVE_QUESTIONS, JSON.stringify(res.data));
-      return res.data;
+      const sanitized = res.data.map((lesson: any) => ({
+        ...lesson,
+        questions: (lesson.questions || []).map((q: any, qIdx: number) => {
+          const sec = parseTimeToSeconds(q.time !== undefined && q.time !== null ? q.time : q.timeFormatted);
+          return {
+            ...q,
+            index: qIdx,
+            time: sec,
+            timeFormatted: formatSecondsToTime(sec),
+          };
+        }),
+      }));
+      localStorage.setItem(LOCAL_STORAGE_LIVE_QUESTIONS, JSON.stringify(sanitized));
+      return sanitized;
     }
   } catch (err) {
     console.warn('Could not fetch Questions-T from Google Sheets, checking local cache:', err);

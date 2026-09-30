@@ -386,6 +386,7 @@ export async function triggerLiveQuestion(payload: {
   try {
     const update: Partial<LiveSessionState> = {
       status: 'question_active',
+      videoPlaying: false,
       currentQuestionIndex: payload.questionIndex,
       currentQuestion: payload.question,
       questionTriggeredAt: Date.now(),
@@ -508,9 +509,10 @@ export async function revealLiveAnswer(): Promise<{ success: boolean; state?: Li
   try {
     await updateDoc(LIVE_DOC_REF, {
       status: 'revealed',
+      videoPlaying: false,
       updatedAt: serverTimestamp(),
     });
-    cachedState = { ...cachedState, status: 'revealed' };
+    cachedState = { ...cachedState, status: 'revealed', videoPlaying: false };
     return { success: true, state: cachedState };
   } catch (error: any) {
     console.error('Failed to reveal answer in Firebase:', error);
@@ -523,6 +525,7 @@ export async function resumeLiveVideo(): Promise<{ success: boolean; state?: Liv
   try {
     const update: Partial<LiveSessionState> = {
       status: 'playing',
+      videoPlaying: true,
       currentQuestion: null,
       currentQuestionIndex: null,
       questionTriggeredAt: null,

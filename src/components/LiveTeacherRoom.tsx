@@ -155,8 +155,8 @@ export default function LiveTeacherRoom({
     const time = videoRef.current.currentTime;
     setCurrentTime(time);
 
-    // If a question is already active, make sure video remains paused
-    if (sessionState?.status === 'question_active') {
+    // If a question is currently active OR answer is revealed, ensure video remains paused and do not trigger subsequent questions!
+    if (sessionState?.status === 'question_active' || sessionState?.status === 'revealed') {
       if (!videoRef.current.paused) {
         videoRef.current.pause();
       }
@@ -167,8 +167,8 @@ export default function LiveTeacherRoom({
     if (selectedLesson.questions && selectedLesson.questions.length > 0) {
       selectedLesson.questions.forEach((q, idx) => {
         const qTime = q.time;
-        // Trigger if within 1.0 second and not yet triggered
-        if (Math.abs(time - qTime) < 1.0 && !triggeredQuestionsRef.current.has(idx)) {
+        // Trigger only when reaching or passing timestamp by a tiny threshold, and not yet triggered in this playback
+        if (time >= qTime && (time - qTime) < 1.2 && !triggeredQuestionsRef.current.has(idx)) {
           triggeredQuestionsRef.current.add(idx);
           videoRef.current?.pause();
           setIsPlaying(false);
@@ -190,19 +190,33 @@ export default function LiveTeacherRoom({
   // Synchronize play/pause state from Admin
   useEffect(() => {
     if (sessionState?.videoPlaying !== undefined && videoRef.current) {
-      if (sessionState.videoPlaying && videoRef.current.paused && sessionState.status !== 'question_active') {
+      const isQuestionScreen = sessionState.status === 'question_active' || sessionState.status === 'revealed';
+      const shouldPlay = sessionState.videoPlaying && !isQuestionScreen;
+
+      if (shouldPlay && videoRef.current.paused) {
         videoRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
-      } else if (!sessionState.videoPlaying && !videoRef.current.paused) {
+      } else if (!shouldPlay && !videoRef.current.paused) {
         videoRef.current.pause();
         setIsPlaying(false);
       }
     }
   }, [sessionState?.videoPlaying, sessionState?.status]);
 
+  // When teacher resumes video after answering a question (from Admin or Remote)
+  useEffect(() => {
+    if (sessionState?.status === 'playing' && videoRef.current) {
+      if (videoRef.current.paused) {
+        // Advance slightly by 0.3s to smoothly clear the paused question point
+        videoRef.current.currentTime = Math.min(videoRef.current.duration || 9999, videoRef.current.currentTime + 0.3);
+        videoRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
+      }
+    }
+  }, [sessionState?.status]);
+
   // Play / Pause Toggle
   const togglePlay = () => {
     if (!videoRef.current) return;
-    if (sessionState?.status === 'question_active') return;
+    if (sessionState?.status === 'question_active' || sessionState?.status === 'revealed') return;
 
     if (videoRef.current.paused) {
       videoRef.current.play();
@@ -235,17 +249,24 @@ export default function LiveTeacherRoom({
 
   // Reveal Correct Answer
   const handleRevealAnswer = async () => {
+    if (videoRef.current) {
+      videoRef.current.pause();
+      setIsPlaying(false);
+    }
     const res = await revealLiveAnswer();
     if (res.state) setSessionState(res.state);
   };
 
   // Resume Video Playback
   const handleResumeVideo = async () => {
+    if (videoRef.current) {
+      // Step past question trigger window by 0.3s
+      videoRef.current.currentTime = Math.min(videoRef.current.duration || 9999, videoRef.current.currentTime + 0.3);
+    }
     const res = await resumeLiveVideo();
     if (res.state) setSessionState(res.state);
     if (videoRef.current) {
-      videoRef.current.play();
-      setIsPlaying(true);
+      videoRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
     }
   };
 
