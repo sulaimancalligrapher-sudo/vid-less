@@ -626,9 +626,10 @@ export default function LiveTeacherRoom({
             <button
               onClick={() => setShowQrModal(true)}
               className="px-3 py-1.5 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-indigo-600/20 transition-all cursor-pointer animate-in fade-in"
+              title="عرض رمز QR للدخول"
             >
               <QrCode className="w-4 h-4" />
-              <span>رمز الدخول والحضور (PIN)</span>
+              <span>عرض رمز QR</span>
             </button>
           )}
 
@@ -1061,7 +1062,7 @@ export default function LiveTeacherRoom({
       {/* QR CODE MODAL FOR STUDENTS IN CLASSROOM */}
       {/* ========================================================================= */}
       <AnimatePresence>
-        {(showQrModal || Boolean(sessionState?.showQrInRoom)) && (
+        {showQrModal && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
@@ -1070,10 +1071,7 @@ export default function LiveTeacherRoom({
               className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl relative text-center space-y-5"
             >
               <button
-                onClick={() => {
-                  setShowQrModal(false);
-                  toggleShowQrInRoom(false);
-                }}
+                onClick={() => setShowQrModal(false)}
                 className="absolute top-4 left-4 p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-100 rounded-full transition-all cursor-pointer"
               >
                 <X className="w-5 h-5" />

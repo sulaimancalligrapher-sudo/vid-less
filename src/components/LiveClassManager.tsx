@@ -977,15 +977,9 @@ export default function LiveClassManager({
                   <Users className="w-6 h-6" />
                 </div>
                 <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-base sm:text-lg font-black text-slate-100">
-                      الطلاب المتصلون حالياً بالحصة المباشرة
-                    </h3>
-                    <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-black font-mono flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                      <span>{sessionState?.connectedStudents?.length || 0} متصل</span>
-                    </span>
-                  </div>
+                  <h3 className="text-base sm:text-lg font-black text-slate-100">
+                    الطلاب المتصلون حالياً بالحصة المباشرة
+                  </h3>
                   <p className="text-xs text-slate-400 mt-0.5">
                     {sessionState?.lessonTitle ? (
                       <span>الحصة الحالية: <b className="text-amber-400">{sessionState.lessonTitle}</b></span>
@@ -1001,7 +995,7 @@ export default function LiveClassManager({
                 <button
                   onClick={handleToggleProgram}
                   disabled={isTogglingProgram}
-                  title={isProgramRunning ? 'إنهاء البرنامج وإخراج جميع المشتركين' : 'بدء البرنامج وتوليد رمز الحضور'}
+                  title={isProgramRunning ? 'إنهاء البرنامج وإخراج جميع المشتركين' : 'بدء البرنامج'}
                   className={`px-4 py-2.5 rounded-2xl text-xs font-black flex items-center gap-2 shadow-lg transition-all cursor-pointer active:scale-95 disabled:opacity-50 ${
                     isProgramRunning
                       ? 'bg-gradient-to-r from-rose-600 to-red-700 hover:from-rose-500 hover:to-red-600 text-white shadow-rose-900/30'
@@ -1014,7 +1008,7 @@ export default function LiveClassManager({
                       ? 'جارٍ التنفيذ...'
                       : isProgramRunning
                       ? 'إنهاء البرنامج وإخراج المشتركين 🛑'
-                      : 'بداية البرنامج وتوليد الرمز 🚀'}
+                      : 'بداية البرنامج 🚀'}
                   </span>
                 </button>
 
@@ -1207,7 +1201,13 @@ export default function LiveClassManager({
                 />
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2.5">
+                {/* عدد المتصلين المنقول هنا في نفس الصف */}
+                <div className="px-3 py-2 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-black font-mono flex items-center gap-2 shadow-sm">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  <span>{sessionState?.connectedStudents?.length || 0} متصل</span>
+                </div>
+
                 <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 p-1 rounded-2xl shadow-sm">
                   <button
                     onClick={() => setActiveTab('qrcode')}
@@ -1222,7 +1222,7 @@ export default function LiveClassManager({
                     type="button"
                     onClick={() => handleToggleQrVisibility(!sessionState?.showQrInRoom)}
                     disabled={isUpdatingQrVisibility}
-                    title={sessionState?.showQrInRoom ? 'إخفاء رمز QR من شاشة العرض' : 'إظهار رمز QR في شاشة العرض'}
+                    title={sessionState?.showQrInRoom ? 'إخفاء زر رمز QR من شاشة العرض' : 'إظهار زر رمز QR في شاشة العرض'}
                     className={`p-2 rounded-xl transition-all cursor-pointer border ${
                       sessionState?.showQrInRoom
                         ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
