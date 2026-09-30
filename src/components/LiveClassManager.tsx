@@ -221,21 +221,6 @@ export default function LiveClassManager({
     }
   };
 
-  const handleFinishLessonFromAdmin = async () => {
-    if (!confirm('هل أنت متأكد من إنهاء الدرس الحالي؟ سيتم تسجيل النتائج وإتاحة اختيار درس جديد.')) return;
-    setIsFinishingLesson(true);
-    try {
-      await finishLiveSession();
-      setSaveMessage('تم إنهاء الدرس بنجاح.');
-      setTimeout(() => setSaveMessage(null), 3000);
-    } catch (e: any) {
-      console.error('Failed to finish lesson from admin:', e);
-      alert('حدث خطأ أثناء إنهاء الدرس: ' + (e?.message || 'خطأ غير معروف'));
-    } finally {
-      setIsFinishingLesson(false);
-    }
-  };
-
   // Determine currently active lesson from sessionState or fallback to first lesson
   const activeLesson = useMemo(() => {
     if (sessionState?.lessonTitle) {
@@ -244,22 +229,6 @@ export default function LiveClassManager({
     }
     return lessons.length > 0 ? lessons[0] : null;
   }, [sessionState?.lessonTitle, lessons]);
-
-  // Switch active lesson from admin panel and broadcast to projector screen
-  const handleSelectLesson = async (lessonTitle: string) => {
-    const target = lessons.find(l => l.title === lessonTitle);
-    if (!target) return;
-    try {
-      await initLiveSession({
-        lessonTitle: target.title,
-        videoUrl: target.videoUrl,
-        timeLimit: target.settingTimeLimit || 30,
-        showResult: target.settingShowResult || 'نعم',
-      });
-    } catch (e) {
-      console.error('Failed to switch active lesson from admin:', e);
-    }
-  };
 
   // Trigger question directly from Admin panel (transferred from display screen)
   const handleTriggerQuestionFromAdmin = async (q: LiveQuestionItem, idx: number) => {
@@ -299,6 +268,200 @@ export default function LiveClassManager({
       console.error('Error loading Answers-T:', err);
     } finally {
       setLoadingAnswers(false);
+    }
+  };
+
+  // Helper to save current lesson answers to Google Sheets Answers-T
+  const saveCurrentLessonAnswersToSheets = async (): Promise<{ success: boolean; count: number }> => {
+    const hasAllSession = sessionState?.allSessionAnswers && Object.keys(sessionState.allSessionAnswers).length > 0;
+    const hasCurrentQ = sessionState?.answersForCurrentQuestion && Object.keys(sessionState.answersForCurrentQuestion).length > 0;
+    if (!hasAllSession && !hasCurrentQ) {
+      return { success: true, count: 0 };
+    }
+
+    const lessonTitle = sessionState?.lessonTitle || activeLesson?.title || (lessons[0]?.title || 'درس تفاعلي مباشر');
+    const targetLesson = lessons.find(l => l.title === lessonTitle) || activeLesson;
+    const timestamp = new Date().toLocaleString('ar-SA');
+    const records: LiveAnswerRecord[] = [];
+    const students = sessionState?.connectedStudents || [];
+    const studentMap = new Map<string, { username: string; sheetNumber: string }>();
+
+    students.forEach(s => {
+      const u = String(s.username || '').trim();
+      const num = String(s.sheetNumber || '').trim();
+      if (u) {
+        studentMap.set(u.toLowerCase(), { username: u, sheetNumber: num });
+      }
+    });
+
+    // Also include students from allSessionAnswers keys
+    if (sessionState?.allSessionAnswers) {
+      Object.keys(sessionState.allSessionAnswers).forEach(rawKey => {
+        let u = rawKey.includes('_') ? rawKey.split('_')[0] : rawKey;
+        let num = rawKey.includes('_') ? rawKey.split('_').slice(1).join('_') : '';
+        if (u && !studentMap.has(u.toLowerCase())) {
+          studentMap.set(u.toLowerCase(), { username: u, sheetNumber: num });
+        }
+      });
+    }
+
+    // Merge all answers (allSessionAnswers + current active question answers if any)
+    const mergedAnswers: Record<string, Record<number, any>> = {};
+    if (sessionState?.allSessionAnswers) {
+      Object.entries(sessionState.allSessionAnswers).forEach(([k, ansObj]) => {
+        mergedAnswers[k] = { ...(ansObj || {}) };
+      });
+    }
+
+    if (sessionState?.answersForCurrentQuestion && sessionState.currentQuestionIndex !== null && sessionState.currentQuestionIndex !== undefined) {
+      const qIdx = sessionState.currentQuestionIndex;
+      Object.entries(sessionState.answersForCurrentQuestion).forEach(([studentKey, ansData]: [string, any]) => {
+        if (!mergedAnswers[studentKey]) {
+          mergedAnswers[studentKey] = {};
+        }
+        const val = typeof ansData === 'object' && ansData !== null && 'answer' in ansData ? ansData.answer : ansData;
+        if (mergedAnswers[studentKey][qIdx] === undefined) {
+          mergedAnswers[studentKey][qIdx] = val;
+        }
+        let u = studentKey.includes('_') ? studentKey.split('_')[0] : studentKey;
+        let num = studentKey.includes('_') ? studentKey.split('_').slice(1).join('_') : '';
+        if (u && !studentMap.has(u.toLowerCase())) {
+          studentMap.set(u.toLowerCase(), { username: u, sheetNumber: num });
+        }
+      });
+    }
+
+    Object.entries(mergedAnswers).forEach(([rawKey, answers]) => {
+      let u = rawKey.includes('_') ? rawKey.split('_')[0] : rawKey;
+      let num = rawKey.includes('_') ? rawKey.split('_').slice(1).join('_') : '';
+      const existing = studentMap.get(u.toLowerCase());
+      const finalUser = existing ? existing.username : u;
+      const finalNum = existing?.sheetNumber || num || '';
+
+      const formattedAns: Record<number, string> = {};
+      let correctCount = 0;
+      let evaluatedCount = 0;
+
+      if (targetLesson && targetLesson.questions && targetLesson.questions.length > 0) {
+        targetLesson.questions.forEach((q, idx) => {
+          const ans = answers[idx];
+          if (ans !== undefined && ans !== null && String(ans).trim() !== '') {
+            const strAns = String(ans).trim();
+            const norm = normalizeArabicText(strAns);
+            if (norm === 'صح' || norm === 'صحيح' || norm === '✓' || norm === 'true') {
+              formattedAns[idx] = 'صح';
+              correctCount++;
+              evaluatedCount++;
+            } else if (norm === 'خطا' || norm === 'خاطي' || norm === '✗' || norm === 'false') {
+              formattedAns[idx] = 'خطأ';
+              evaluatedCount++;
+            } else {
+              const evalRes = evaluateLiveAnswer(q, strAns);
+              if (evalRes.isCorrect === true) {
+                formattedAns[idx] = 'صح';
+                correctCount++;
+                evaluatedCount++;
+              } else if (evalRes.isCorrect === false) {
+                formattedAns[idx] = 'خطأ';
+                evaluatedCount++;
+              } else {
+                formattedAns[idx] = strAns;
+              }
+            }
+          } else {
+            formattedAns[idx] = '';
+          }
+        });
+      } else {
+        Object.entries(answers).forEach(([qIdx, ans]) => {
+          formattedAns[Number(qIdx)] = String(ans);
+        });
+      }
+
+      const hasAnyAnswer = Object.values(formattedAns).some(val => val !== '');
+      if (hasAnyAnswer) {
+        records.push({
+          timestamp,
+          sheetNumber: finalNum,
+          username: finalUser,
+          lessonTitle,
+          answers: formattedAns,
+          totalScore: evaluatedCount > 0 ? `${correctCount}/${evaluatedCount}` : ''
+        });
+      }
+    });
+
+    if (records.length > 0) {
+      try {
+        const res = await recordLiveAnswersBatchT(records);
+        if (res && res.success) {
+          loadAnswers().catch(() => {});
+          return { success: true, count: records.length };
+        } else {
+          console.warn('Google Sheets did not confirm success:', res?.message);
+          return { success: false, count: records.length };
+        }
+      } catch (err) {
+        console.error('Error saving answers batch to Google Sheets:', err);
+        return { success: false, count: records.length };
+      }
+    }
+    return { success: true, count: 0 };
+  };
+
+  // Finish Lesson from Admin: saves answers to Google Sheets Answers-T and finishes session
+  const handleFinishLessonFromAdmin = async () => {
+    if (!confirm('هل أنت متأكد من إنهاء الدرس الحالي؟ سيتم حفظ إجابات الطلاب في ورقة Answers-T وإتاحة اختيار درس جديد.')) return;
+    setIsFinishingLesson(true);
+    try {
+      // 1. Auto-save student answers to Google Sheets
+      const saveResult = await saveCurrentLessonAnswersToSheets();
+
+      // 2. Mark session finished in server
+      await finishLiveSession();
+
+      if (saveResult.count > 0) {
+        setSaveMessage(`تم حفظ إجابات ${saveResult.count} طالب في الشيت وإنهاء الدرس بنجاح.`);
+      } else {
+        setSaveMessage('تم إنهاء الدرس بنجاح.');
+      }
+      setTimeout(() => setSaveMessage(null), 4000);
+    } catch (e: any) {
+      console.error('Failed to finish lesson from admin:', e);
+      alert('حدث خطأ أثناء إنهاء الدرس: ' + (e?.message || 'خطأ غير معروف'));
+    } finally {
+      setIsFinishingLesson(false);
+    }
+  };
+
+  // Switch active lesson from admin panel and broadcast to projector screen
+  // Auto-saves answers for the outgoing lesson before starting the new one
+  const handleSelectLesson = async (lessonTitle: string) => {
+    const target = lessons.find(l => l.title === lessonTitle);
+    if (!target) return;
+
+    // If changing to a different lesson, auto-save any answers of the previous lesson first!
+    if (sessionState?.lessonTitle && sessionState.lessonTitle !== target.title) {
+      try {
+        const saveResult = await saveCurrentLessonAnswersToSheets();
+        if (saveResult.count > 0) {
+          setSaveMessage(`تم حفظ إجابات الدرس السابق (${sessionState.lessonTitle}) لـ ${saveResult.count} طالب في الشيت.`);
+          setTimeout(() => setSaveMessage(null), 4000);
+        }
+      } catch (err) {
+        console.warn('Auto-saving before changing lesson encountered an issue:', err);
+      }
+    }
+
+    try {
+      await initLiveSession({
+        lessonTitle: target.title,
+        videoUrl: target.videoUrl,
+        timeLimit: target.settingTimeLimit || 30,
+        showResult: target.settingShowResult || 'نعم',
+      });
+    } catch (e) {
+      console.error('Failed to switch active lesson from admin:', e);
     }
   };
 

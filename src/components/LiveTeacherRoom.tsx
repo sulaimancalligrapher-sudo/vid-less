@@ -980,29 +980,6 @@ export default function LiveTeacherRoom({
             }}
             className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
           />
-
-          {/* Question markers on the timeline */}
-          {selectedLesson?.questions?.map((q, idx) => {
-            if (!duration) return null;
-            const leftPct = (q.time / duration) * 100;
-            const isTriggered = triggeredQuestionsRef.current.has(idx);
-
-            return (
-              <button
-                key={idx}
-                onClick={() => handleManualTrigger(q, idx)}
-                title={`سؤال ${idx + 1}: ${formatSecondsToTime(q.time)} - ${q.question}`}
-                style={{ left: `${leftPct}%` }}
-                className={`absolute -top-1.5 -translate-x-1/2 w-4 h-4 rounded-full border-2 transition-transform hover:scale-125 cursor-pointer z-10 flex items-center justify-center text-[8px] font-black font-mono ${
-                  isTriggered 
-                    ? 'bg-emerald-500 border-white text-slate-950' 
-                    : 'bg-amber-500 border-slate-950 text-slate-950 shadow-md'
-                }`}
-              >
-                {idx + 1}
-              </button>
-            );
-          })}
         </div>
 
         {/* Controls row */}
