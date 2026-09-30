@@ -5,7 +5,7 @@ import {
   Users, CheckCircle2, Clock, HelpCircle, Image, ExternalLink, 
   RefreshCw, Search, QrCode, Copy, Check, Sparkles, ChevronDown, 
   ChevronUp, ArrowLeft, AlertCircle, X, KeyRound, ShieldCheck, UserX,
-  Power, ShieldAlert, DownloadCloud, History, ListVideo, Eye, EyeOff
+  Power, ShieldAlert, DownloadCloud, History, ListVideo, Eye, EyeOff, FastForward
 } from 'lucide-react';
 import { 
   LiveLessonRow, LiveQuestionItem, LiveAnswerRecord, LiveSessionState, evaluateLiveAnswer, normalizeArabicText 
@@ -16,7 +16,9 @@ import {
   startLiveProgram, endLiveProgram, getLiveBackup, restoreLiveBackup, recordLiveAnswersBatchT,
   formatSecondsToTime, parseTimeToSeconds, formatDriveImageUrl,
   subscribeToLiveSession, toggleShowLessonsListInRoom, toggleShowPinInRoom, toggleShowQrInRoom,
-  toggleShowFinishLessonInRoom, finishLiveSession,
+  toggleShowFinishLessonInRoom, toggleShowRevealInRoom, toggleShowSkipInRoom,
+  toggleShowOptionCountsInRoom, toggleShowStudentTextAnswersInRoom,
+  finishLiveSession, revealLiveAnswer, resumeLiveVideo,
   initLiveSession, triggerLiveQuestion
 } from '../api';
 
@@ -86,6 +88,14 @@ export default function LiveClassManager({
   const [isUpdatingQrVisibility, setIsUpdatingQrVisibility] = useState(false);
   const [isUpdatingFinishLessonVisibility, setIsUpdatingFinishLessonVisibility] = useState(false);
   const [isFinishingLesson, setIsFinishingLesson] = useState(false);
+  const [showFinishLessonConfirmModal, setShowFinishLessonConfirmModal] = useState(false);
+  const [pendingLessonSwitchTitle, setPendingLessonSwitchTitle] = useState<string | null>(null);
+  const [isUpdatingRevealVisibility, setIsUpdatingRevealVisibility] = useState(false);
+  const [isUpdatingSkipVisibility, setIsUpdatingSkipVisibility] = useState(false);
+  const [isUpdatingOptionCountsVisibility, setIsUpdatingOptionCountsVisibility] = useState(false);
+  const [isUpdatingStudentAnswersVisibility, setIsUpdatingStudentAnswersVisibility] = useState(false);
+  const [isRevealingAnswer, setIsRevealingAnswer] = useState(false);
+  const [isSkippingQuestion, setIsSkippingQuestion] = useState(false);
 
   // Link copy state
   const [copiedLink, setCopiedLink] = useState(false);
@@ -218,6 +228,76 @@ export default function LiveClassManager({
       console.error('Failed to toggle finish lesson visibility in room:', e);
     } finally {
       setIsUpdatingFinishLessonVisibility(false);
+    }
+  };
+
+  const handleToggleRevealVisibility = async (show: boolean) => {
+    setIsUpdatingRevealVisibility(true);
+    try {
+      const res = await toggleShowRevealInRoom(show);
+      if (res.success && res.state) setSessionState(res.state);
+    } catch (e) {
+      console.error('Failed to toggle reveal visibility in room:', e);
+    } finally {
+      setIsUpdatingRevealVisibility(false);
+    }
+  };
+
+  const handleToggleSkipVisibility = async (show: boolean) => {
+    setIsUpdatingSkipVisibility(true);
+    try {
+      const res = await toggleShowSkipInRoom(show);
+      if (res.success && res.state) setSessionState(res.state);
+    } catch (e) {
+      console.error('Failed to toggle skip visibility in room:', e);
+    } finally {
+      setIsUpdatingSkipVisibility(false);
+    }
+  };
+
+  const handleToggleOptionCountsVisibility = async (show: boolean) => {
+    setIsUpdatingOptionCountsVisibility(true);
+    try {
+      const res = await toggleShowOptionCountsInRoom(show);
+      if (res.success && res.state) setSessionState(res.state);
+    } catch (e) {
+      console.error('Failed to toggle option counts visibility:', e);
+    } finally {
+      setIsUpdatingOptionCountsVisibility(false);
+    }
+  };
+
+  const handleToggleStudentAnswersVisibility = async (show: boolean) => {
+    setIsUpdatingStudentAnswersVisibility(true);
+    try {
+      const res = await toggleShowStudentTextAnswersInRoom(show);
+      if (res.success && res.state) setSessionState(res.state);
+    } catch (e) {
+      console.error('Failed to toggle student answers visibility:', e);
+    } finally {
+      setIsUpdatingStudentAnswersVisibility(false);
+    }
+  };
+
+  const handleRevealAnswerFromAdmin = async () => {
+    setIsRevealingAnswer(true);
+    try {
+      await revealLiveAnswer();
+    } catch (e) {
+      console.error('Failed to reveal answer from admin:', e);
+    } finally {
+      setIsRevealingAnswer(false);
+    }
+  };
+
+  const handleSkipQuestionFromAdmin = async () => {
+    setIsSkippingQuestion(true);
+    try {
+      await resumeLiveVideo();
+    } catch (e) {
+      console.error('Failed to skip question from admin:', e);
+    } finally {
+      setIsSkippingQuestion(false);
     }
   };
 
@@ -409,9 +489,13 @@ export default function LiveClassManager({
     return { success: true, count: 0 };
   };
 
-  // Finish Lesson from Admin: saves answers to Google Sheets Answers-T and finishes session
-  const handleFinishLessonFromAdmin = async () => {
-    if (!confirm('هل أنت متأكد من إنهاء الدرس الحالي؟ سيتم حفظ إجابات الطلاب في ورقة Answers-T وإتاحة اختيار درس جديد.')) return;
+  // Finish Lesson from Admin: opens touch confirm modal
+  const handleFinishLessonFromAdmin = () => {
+    setShowFinishLessonConfirmModal(true);
+  };
+
+  const handleConfirmFinishLesson = async () => {
+    setShowFinishLessonConfirmModal(false);
     setIsFinishingLesson(true);
     try {
       // 1. Auto-save student answers to Google Sheets
@@ -434,18 +518,32 @@ export default function LiveClassManager({
     }
   };
 
-  // Switch active lesson from admin panel and broadcast to projector screen
-  // Auto-saves answers for the outgoing lesson before starting the new one
+  // Switch active lesson from admin panel:
+  // If there are answers in the outgoing lesson, ask via modal first
   const handleSelectLesson = async (lessonTitle: string) => {
     const target = lessons.find(l => l.title === lessonTitle);
     if (!target) return;
 
-    // If changing to a different lesson, auto-save any answers of the previous lesson first!
-    if (sessionState?.lessonTitle && sessionState.lessonTitle !== target.title) {
+    const hasAnswers = (sessionState?.allSessionAnswers && Object.keys(sessionState.allSessionAnswers).length > 0) ||
+      (sessionState?.answersForCurrentQuestion && Object.keys(sessionState.answersForCurrentQuestion).length > 0);
+
+    if (sessionState?.lessonTitle && sessionState.lessonTitle !== target.title && hasAnswers) {
+      setPendingLessonSwitchTitle(target.title);
+      return;
+    }
+
+    await executeLessonSwitch(target.title, false);
+  };
+
+  const executeLessonSwitch = async (lessonTitle: string, saveAnswersFirst: boolean = false) => {
+    const target = lessons.find(l => l.title === lessonTitle);
+    if (!target) return;
+
+    if (saveAnswersFirst) {
       try {
         const saveResult = await saveCurrentLessonAnswersToSheets();
         if (saveResult.count > 0) {
-          setSaveMessage(`تم حفظ إجابات الدرس السابق (${sessionState.lessonTitle}) لـ ${saveResult.count} طالب في الشيت.`);
+          setSaveMessage(`تم حفظ إجابات الدرس السابق (${sessionState?.lessonTitle}) لـ ${saveResult.count} طالب في الشيت.`);
           setTimeout(() => setSaveMessage(null), 4000);
         }
       } catch (err) {
@@ -1342,6 +1440,119 @@ export default function LiveClassManager({
                   لا توجد أسئلة محددة التوقيت لهذا الدرس.
                 </div>
               ) : null}
+
+              {/* 4. أزرار التحكم في السؤال وإظهار الإجابات في شاشة العرض */}
+              <div className="pt-2.5 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2.5">
+                {/* أزرار الإجابة وتخطي مع التحكم في إظهارها في شاشة العرض */}
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* زر الإجابة مع زر الإظهار/الإخفاء (أيقونة العين بدون نص) */}
+                  <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 p-1.5 rounded-xl shadow-sm">
+                    <button
+                      type="button"
+                      onClick={handleRevealAnswerFromAdmin}
+                      disabled={isRevealingAnswer || sessionState?.status === 'revealed' || !sessionState?.currentQuestion}
+                      title="كشف الإجابة الصحيحة للطلاب"
+                      className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 rounded-lg text-xs font-black flex items-center gap-1.5 shadow-sm transition-all cursor-pointer active:scale-95 disabled:opacity-40"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>{sessionState?.status === 'revealed' ? 'تم كشف الإجابة' : 'الإجابة'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleRevealVisibility(!sessionState?.showRevealInRoom)}
+                      disabled={isUpdatingRevealVisibility}
+                      title={sessionState?.showRevealInRoom ? 'إخفاء زر الإجابة من شاشة العرض' : 'إظهار زر الإجابة في شاشة العرض'}
+                      className={`p-1.5 rounded-lg transition-all cursor-pointer border ${
+                        sessionState?.showRevealInRoom
+                          ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
+                          : 'bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border-slate-800'
+                      }`}
+                    >
+                      {sessionState?.showRevealInRoom ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                    </button>
+                  </div>
+
+                  {/* زر تخطي مع زر الإظهار/الإخفاء (أيقونة العين بدون نص) */}
+                  <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 p-1.5 rounded-xl shadow-sm">
+                    <button
+                      type="button"
+                      onClick={handleSkipQuestionFromAdmin}
+                      disabled={isSkippingQuestion || !sessionState?.currentQuestion}
+                      title="تخطي السؤال الحالي ومتابعة الفيديو"
+                      className="px-3 py-1.5 bg-slate-950 hover:bg-slate-850 text-slate-200 border border-slate-750 hover:border-slate-600 rounded-lg text-xs font-black flex items-center gap-1.5 shadow-sm transition-all cursor-pointer active:scale-95 disabled:opacity-40"
+                    >
+                      <FastForward className="w-3.5 h-3.5 text-amber-400" />
+                      <span>تخطي</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleSkipVisibility(!sessionState?.showSkipInRoom)}
+                      disabled={isUpdatingSkipVisibility}
+                      title={sessionState?.showSkipInRoom ? 'إخفاء زر تخطي من شاشة العرض' : 'إظهار زر تخطي في شاشة العرض'}
+                      className={`p-1.5 rounded-lg transition-all cursor-pointer border ${
+                        sessionState?.showSkipInRoom
+                          ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
+                          : 'bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border-slate-800'
+                      }`}
+                    >
+                      {sessionState?.showSkipInRoom ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* أزرار التحكم في إظهار وإخفاء عناصر الإجابات في شاشة العرض */}
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* زر إظهار/إخفاء عدد الأشخاص الذين اختاروا في أحد الخيارات */}
+                  <button
+                    type="button"
+                    onClick={() => handleToggleOptionCountsVisibility(sessionState?.showOptionCountsInRoom === false ? true : false)}
+                    disabled={isUpdatingOptionCountsVisibility}
+                    title={sessionState?.showOptionCountsInRoom !== false ? 'عدد المصوتين بالخيارات ظاهر بشاشة العرض - انقر للإخفاء' : 'عدد المصوتين بالخيارات مخفي بشاشة العرض - انقر للإظهار'}
+                    className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border shadow-sm ${
+                      sessionState?.showOptionCountsInRoom !== false
+                        ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25'
+                        : 'bg-slate-900 border-slate-750 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {sessionState?.showOptionCountsInRoom !== false ? (
+                      <>
+                        <Eye className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>أعداد الخيارات: إظهار</span>
+                      </>
+                    ) : (
+                      <>
+                        <EyeOff className="w-3.5 h-3.5 text-slate-500" />
+                        <span>أعداد الخيارات: إخفاء</span>
+                      </>
+                    )}
+                  </button>
+
+                  {/* زر إظهار/إخفاء نصوص إجابات الطلاب (صح/خطأ وحرة) */}
+                  <button
+                    type="button"
+                    onClick={() => handleToggleStudentAnswersVisibility(sessionState?.showStudentTextAnswersInRoom === false ? true : false)}
+                    disabled={isUpdatingStudentAnswersVisibility}
+                    title={sessionState?.showStudentTextAnswersInRoom !== false ? 'نصوص وإجابات الطلاب معروضة بشاشة العرض - انقر للإخفاء' : 'نصوص وإجابات الطلاب مخفية بشاشة العرض - انقر للإظهار'}
+                    className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border shadow-sm ${
+                      sessionState?.showStudentTextAnswersInRoom !== false
+                        ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25'
+                        : 'bg-slate-900 border-slate-750 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {sessionState?.showStudentTextAnswersInRoom !== false ? (
+                      <>
+                        <Eye className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>إجابات الطلاب: إظهار</span>
+                      </>
+                    ) : (
+                      <>
+                        <EyeOff className="w-3.5 h-3.5 text-slate-500" />
+                        <span>إجابات الطلاب: إخفاء</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
             </div>
 
             {resetSuccess && (
@@ -2104,6 +2315,134 @@ export default function LiveClassManager({
                   <RefreshCw className={`w-4 h-4 ${isResettingSession ? 'animate-spin' : ''}`} />
                   <span>تأكيد تصفير الذاكرة 🔄</span>
                 </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Confirmation Modal to Finish Lesson & Save Answers (Tablet Friendly) */}
+      <AnimatePresence>
+        {showFinishLessonConfirmModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4 text-right"
+              dir="rtl"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center shrink-0">
+                  <CheckCircle2 className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-slate-100">تأكيد إنهاء الدرس وحفظ الإجابات</h3>
+                  <p className="text-xs text-emerald-400 font-medium">تسجيل وتوثيق النتائج في الشيت</p>
+                </div>
+              </div>
+
+              <div className="text-sm text-slate-300 leading-relaxed bg-slate-950/70 border border-slate-800 p-4 rounded-2xl space-y-2">
+                <p>
+                  هل ترغب في إنهاء الدرس الحالي{sessionState?.lessonTitle ? <> (<b>{sessionState.lessonTitle}</b>)</> : ''}؟
+                </p>
+                <p className="text-xs text-slate-400">
+                  سيتم تلقائياً حفظ وتوثيق إجابات جميع الطلاب في ورقة <b>Answers-T</b> والعودة لاختيار درس جديد.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowFinishLessonConfirmModal(false)}
+                  disabled={isFinishingLesson}
+                  className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-all cursor-pointer"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmFinishLesson}
+                  disabled={isFinishingLesson}
+                  className="px-5 py-2.5 rounded-xl text-xs font-black bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white shadow-lg shadow-emerald-900/40 transition-all cursor-pointer flex items-center gap-2 disabled:opacity-50"
+                >
+                  {isFinishingLesson ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Check className="w-4 h-4" />
+                  )}
+                  <span>{isFinishingLesson ? 'جارٍ الحفظ والإنهاء...' : 'حفظ الإجابات وإنهاء الدرس ✅'}</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Confirmation Modal when Switching Lesson with Unsaved Student Answers */}
+      <AnimatePresence>
+        {pendingLessonSwitchTitle && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4 text-right"
+              dir="rtl"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center shrink-0">
+                  <AlertCircle className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-slate-100">تأكيد الانتقال للدرس الجديد</h3>
+                  <p className="text-xs text-amber-400 font-medium">توجد إجابات مسجلة للطلاب في الدرس السابق</p>
+                </div>
+              </div>
+
+              <div className="text-sm text-slate-300 leading-relaxed bg-slate-950/70 border border-slate-800 p-4 rounded-2xl space-y-2">
+                <p>
+                  الدرس الحالي (<b>{sessionState?.lessonTitle}</b>) يحتوي على إجابات طلاب مسجلة.
+                </p>
+                <p className="text-xs text-slate-400">
+                  هل تود حفظ إجاباتهم في ورقة <b>Answers-T</b> قبل الانتقال للدرس الجديد (<b>{pendingLessonSwitchTitle}</b>)؟
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const next = pendingLessonSwitchTitle;
+                    setPendingLessonSwitchTitle(null);
+                    await executeLessonSwitch(next, true);
+                  }}
+                  className="w-full py-2.5 px-4 rounded-xl text-xs font-black bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white shadow-lg transition-all cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>حفظ إجابات الدرس السابق والانتقال ✅</span>
+                </button>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const next = pendingLessonSwitchTitle;
+                      setPendingLessonSwitchTitle(null);
+                      await executeLessonSwitch(next, false);
+                    }}
+                    className="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-750 text-rose-300 hover:text-rose-200 border border-rose-500/20 rounded-xl text-xs font-bold transition-all cursor-pointer text-center"
+                  >
+                    الانتقال بدون حفظ
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPendingLessonSwitchTitle(null)}
+                    className="py-2 px-4 bg-slate-800 hover:bg-slate-750 text-slate-400 hover:text-slate-200 rounded-xl text-xs font-bold transition-all cursor-pointer text-center"
+                  >
+                    إلغاء
+                  </button>
+                </div>
               </div>
             </motion.div>
           </div>

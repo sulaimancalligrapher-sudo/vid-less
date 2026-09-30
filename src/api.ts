@@ -1905,6 +1905,10 @@ export {
   toggleShowPinInRoom,
   toggleShowQrInRoom,
   toggleShowFinishLessonInRoom,
+  toggleShowRevealInRoom,
+  toggleShowSkipInRoom,
+  toggleShowOptionCountsInRoom,
+  toggleShowStudentTextAnswersInRoom,
   getLiveBackup,
   restoreLiveBackup,
 } from './lib/firebaseLiveService';

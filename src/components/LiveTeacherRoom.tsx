@@ -694,42 +694,17 @@ export default function LiveTeacherRoom({
           </div>
         ) : (
           /* Awaiting selection of new lesson/video */
-          <div className="max-w-2xl w-full mx-auto p-6 text-center space-y-6 animate-in fade-in zoom-in-95 duration-300">
+          <div className="max-w-md w-full mx-auto p-6 text-center space-y-4 animate-in fade-in zoom-in-95 duration-300">
             <div className="w-20 h-20 mx-auto rounded-3xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center shadow-xl">
-              <Tv className="w-10 h-10" />
+              <Tv className="w-10 h-10 animate-pulse" />
             </div>
             <div>
-              <h2 className="text-2xl font-black text-slate-100">
+              <h2 className="text-xl font-black text-slate-100">
                 في انتظار اختيار فيديو أو درس جديد 🎯
               </h2>
-              <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto leading-relaxed">
-                تم حفظ إجابات الدرس السابق وتسجيل تاريخ الحصة بنجاح في ورقة Answers-T. يمكنك الآن اختيار درس تفاعلي جديد من القائمة للبدء في عرضه:
+              <p className="text-xs text-slate-400 mt-2 leading-relaxed">
+                في انتظار قيام المعلم باختيار الدرس من قائمة الدروس في الإعدادات أو عبر القائمة المنسدلة في الشريط العلوي للبدء في عرضه أمام الطلاب.
               </p>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[48vh] overflow-y-auto p-1 custom-scrollbar">
-              {allLessons.map((lesson, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => handleRequestSwitchLesson(lesson)}
-                  className="p-4 bg-slate-900/90 hover:bg-slate-850 border border-slate-800 hover:border-amber-500/50 rounded-2xl text-right transition-all flex items-center justify-between group cursor-pointer shadow-md active:scale-98"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-amber-500/10 group-hover:bg-amber-500 text-amber-400 group-hover:text-slate-950 flex items-center justify-center font-bold text-xs transition-colors">
-                      <Play className="w-4 h-4 fill-current" />
-                    </div>
-                    <div>
-                      <div className="text-sm font-bold text-slate-100 group-hover:text-amber-400 transition-colors">
-                        {lesson.title}
-                      </div>
-                      <div className="text-[11px] text-slate-500 font-mono mt-0.5">
-                        {lesson.questions.length} سؤال تفاعلي
-                      </div>
-                    </div>
-                  </div>
-                  <ChevronLeft className="w-4 h-4 text-slate-600 group-hover:text-amber-400 transition-colors" />
-                </button>
-              ))}
             </div>
 
             {onBack && (
@@ -773,6 +748,18 @@ export default function LiveTeacherRoom({
                   <span className="px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-bold font-mono">
                     السؤال {(sessionState.currentQuestionIndex ?? 0) + 1} من {selectedLesson?.questions.length || 0}
                   </span>
+
+                  {/* وعند النقر على زر الإجابة: يضاف عدد الأشخاص الذين أجابوا صحيح والخطأ عدد فقط */}
+                  {isRevealed && (
+                    <div className="flex items-center gap-1.5 font-mono text-xs">
+                      <span className="px-2.5 py-1 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold">
+                        صحيح: {answersList.filter(sub => evaluateLiveAnswer(currentQ, sub.answer)?.isCorrect === true).length}
+                      </span>
+                      <span className="px-2.5 py-1 rounded-xl bg-rose-500/20 text-rose-400 border border-rose-500/30 font-bold">
+                        خطأ: {answersList.filter(sub => evaluateLiveAnswer(currentQ, sub.answer)?.isCorrect === false).length}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -835,10 +822,13 @@ export default function LiveTeacherRoom({
                                   <span>الإجابة الصحيحة</span>
                                 </span>
                               )}
-                              <div className="text-left font-mono">
-                                <span className="text-base font-black text-slate-100">{count}</span>
-                                <span className="text-xs text-slate-400 ml-1">({pct}%)</span>
-                              </div>
+                              {/* التحكم في ظهور / إخفاء عدد الأشخاص الذين اختاروا في أحد الخيارات */}
+                              {sessionState?.showOptionCountsInRoom !== false && (
+                                <div className="text-left font-mono">
+                                  <span className="text-base font-black text-slate-100">{count}</span>
+                                  <span className="text-xs text-slate-400 ml-1">({pct}%)</span>
+                                </div>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -878,47 +868,49 @@ export default function LiveTeacherRoom({
                         )}
                       </div>
 
-                      {/* Live stream list of text submissions */}
-                      <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-3 max-h-56 overflow-y-auto space-y-2">
-                        <div className="text-[11px] font-bold text-slate-400 mb-1 px-1">
-                          إجابات الطلاب المستلمة فورياً ({answersList.length}):
+                      {/* Live stream list of text submissions - controlled via Admin */}
+                      {sessionState?.showStudentTextAnswersInRoom !== false && (
+                        <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-3 max-h-56 overflow-y-auto space-y-2">
+                          <div className="text-[11px] font-bold text-slate-400 mb-1 px-1">
+                            إجابات الطلاب المستلمة فورياً ({answersList.length}):
+                          </div>
+                          {answersList.length === 0 ? (
+                            <p className="text-xs text-slate-500 py-4 text-center">في انتظار إجابات الطلاب من هواتفهم...</p>
+                          ) : (
+                            answersList.map((sub, sIdx) => {
+                              const evalSub = isRevealed ? evaluateLiveAnswer(currentQ, sub.answer) : null;
+                              return (
+                                <div 
+                                  key={sIdx} 
+                                  className={`p-2.5 rounded-xl border flex items-center justify-between text-xs transition-all ${
+                                    isRevealed && evalSub?.isCorrect === true
+                                      ? 'bg-emerald-950/50 border-emerald-500/40'
+                                      : isRevealed && evalSub?.isCorrect === false
+                                      ? 'bg-rose-950/30 border-rose-500/30'
+                                      : 'bg-slate-950/80 border-slate-800/80'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-bold text-slate-200">{sub.username}</span>
+                                    <span className="text-[10px] text-slate-500 font-mono">({sub.sheetNumber})</span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-bold text-amber-300 max-w-xs truncate" dir="auto">
+                                      {sub.answer}
+                                    </span>
+                                    {isRevealed && evalSub?.isCorrect === true && (
+                                      <span className="px-1.5 py-0.5 rounded bg-emerald-500 text-slate-950 font-black text-[10px]">صح</span>
+                                    )}
+                                    {isRevealed && evalSub?.isCorrect === false && (
+                                      <span className="px-1.5 py-0.5 rounded bg-rose-500 text-white font-black text-[10px]">خطأ</span>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
                         </div>
-                        {answersList.length === 0 ? (
-                          <p className="text-xs text-slate-500 py-4 text-center">في انتظار إجابات الطلاب من هواتفهم...</p>
-                        ) : (
-                          answersList.map((sub, sIdx) => {
-                            const evalSub = isRevealed ? evaluateLiveAnswer(currentQ, sub.answer) : null;
-                            return (
-                              <div 
-                                key={sIdx} 
-                                className={`p-2.5 rounded-xl border flex items-center justify-between text-xs transition-all ${
-                                  isRevealed && evalSub?.isCorrect === true
-                                    ? 'bg-emerald-950/50 border-emerald-500/40'
-                                    : isRevealed && evalSub?.isCorrect === false
-                                    ? 'bg-rose-950/30 border-rose-500/30'
-                                    : 'bg-slate-950/80 border-slate-800/80'
-                                }`}
-                              >
-                                <div className="flex items-center gap-2">
-                                  <span className="font-bold text-slate-200">{sub.username}</span>
-                                  <span className="text-[10px] text-slate-500 font-mono">({sub.sheetNumber})</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <span className="font-bold text-amber-300 max-w-xs truncate" dir="auto">
-                                    {sub.answer}
-                                  </span>
-                                  {isRevealed && evalSub?.isCorrect === true && (
-                                    <span className="px-1.5 py-0.5 rounded bg-emerald-500 text-slate-950 font-black text-[10px]">صح</span>
-                                  )}
-                                  {isRevealed && evalSub?.isCorrect === false && (
-                                    <span className="px-1.5 py-0.5 rounded bg-rose-500 text-white font-black text-[10px]">خطأ</span>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })
-                        )}
-                      </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -933,30 +925,34 @@ export default function LiveTeacherRoom({
 
                 <div className="flex items-center gap-3">
                   {!isRevealed ? (
-                    <button
-                      onClick={handleRevealAnswer}
-                      className="px-5 py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black rounded-xl text-sm flex items-center gap-2 shadow-lg shadow-amber-500/20 active:scale-98 transition-all cursor-pointer"
-                    >
-                      <Eye className="w-4.5 h-4.5" />
-                      <span>كشف الإجابة للطلاب 👁️</span>
-                    </button>
+                    sessionState?.showRevealInRoom && (
+                      <button
+                        onClick={handleRevealAnswer}
+                        className="px-5 py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black rounded-xl text-sm flex items-center gap-2 shadow-lg shadow-amber-500/20 active:scale-98 transition-all cursor-pointer animate-in fade-in"
+                      >
+                        <Eye className="w-4.5 h-4.5" />
+                        <span>الإجابة</span>
+                      </button>
+                    )
                   ) : (
                     <button
                       onClick={handleResumeVideo}
-                      className="px-6 py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-slate-950 font-black rounded-xl text-sm flex items-center gap-2 shadow-lg shadow-emerald-500/20 active:scale-98 transition-all cursor-pointer"
+                      className="px-6 py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-slate-950 font-black rounded-xl text-sm flex items-center gap-2 shadow-lg shadow-emerald-500/20 active:scale-98 transition-all cursor-pointer animate-in fade-in"
                     >
                       <Play className="w-4.5 h-4.5 fill-slate-950" />
                       <span>متابعة تشغيل الفيديو ▶️</span>
                     </button>
                   )}
 
-                  <button
-                    onClick={handleResumeVideo}
-                    className="px-4 py-3 bg-slate-900 hover:bg-slate-800 text-slate-300 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
-                  >
-                    <FastForward className="w-4 h-4" />
-                    <span>تخطي السؤال</span>
-                  </button>
+                  {sessionState?.showSkipInRoom && (
+                    <button
+                      onClick={handleResumeVideo}
+                      className="px-4 py-3 bg-slate-900 hover:bg-slate-800 text-slate-300 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer animate-in fade-in"
+                    >
+                      <FastForward className="w-4 h-4" />
+                      <span>تخطي</span>
+                    </button>
+                  )}
                 </div>
               </div>
             </motion.div>

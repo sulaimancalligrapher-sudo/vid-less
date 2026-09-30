@@ -24,6 +24,10 @@ export const defaultLiveSessionState: LiveSessionState = {
   showPinInRoom: false,
   showQrInRoom: false,
   showFinishLessonInRoom: false,
+  showRevealInRoom: false,
+  showSkipInRoom: false,
+  showOptionCountsInRoom: true,
+  showStudentTextAnswersInRoom: true,
   lessonTitle: '',
   videoUrl: '',
   status: 'idle',
@@ -658,4 +662,65 @@ export async function toggleShowFinishLessonInRoom(show: boolean): Promise<{ suc
     return { success: false };
   }
 }
+
+// Toggle showing "الإجابة" button in projector display screen
+export async function toggleShowRevealInRoom(show: boolean): Promise<{ success: boolean; state?: LiveSessionState }> {
+  try {
+    await updateDoc(LIVE_DOC_REF, {
+      showRevealInRoom: show,
+      updatedAt: serverTimestamp(),
+    });
+    cachedState = { ...cachedState, showRevealInRoom: show };
+    return { success: true, state: cachedState };
+  } catch (error: any) {
+    console.error('Failed to toggle showRevealInRoom in Firebase:', error);
+    return { success: false };
+  }
+}
+
+// Toggle showing "تخطي" button in projector display screen
+export async function toggleShowSkipInRoom(show: boolean): Promise<{ success: boolean; state?: LiveSessionState }> {
+  try {
+    await updateDoc(LIVE_DOC_REF, {
+      showSkipInRoom: show,
+      updatedAt: serverTimestamp(),
+    });
+    cachedState = { ...cachedState, showSkipInRoom: show };
+    return { success: true, state: cachedState };
+  } catch (error: any) {
+    console.error('Failed to toggle showSkipInRoom in Firebase:', error);
+    return { success: false };
+  }
+}
+
+// Toggle showing counts of students per option on projector display screen
+export async function toggleShowOptionCountsInRoom(show: boolean): Promise<{ success: boolean; state?: LiveSessionState }> {
+  try {
+    await updateDoc(LIVE_DOC_REF, {
+      showOptionCountsInRoom: show,
+      updatedAt: serverTimestamp(),
+    });
+    cachedState = { ...cachedState, showOptionCountsInRoom: show };
+    return { success: true, state: cachedState };
+  } catch (error: any) {
+    console.error('Failed to toggle showOptionCountsInRoom in Firebase:', error);
+    return { success: false };
+  }
+}
+
+// Toggle showing student submitted text answers on projector display screen
+export async function toggleShowStudentTextAnswersInRoom(show: boolean): Promise<{ success: boolean; state?: LiveSessionState }> {
+  try {
+    await updateDoc(LIVE_DOC_REF, {
+      showStudentTextAnswersInRoom: show,
+      updatedAt: serverTimestamp(),
+    });
+    cachedState = { ...cachedState, showStudentTextAnswersInRoom: show };
+    return { success: true, state: cachedState };
+  } catch (error: any) {
+    console.error('Failed to toggle showStudentTextAnswersInRoom in Firebase:', error);
+    return { success: false };
+  }
+}
+
 
