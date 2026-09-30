@@ -5,7 +5,7 @@ import {
   Users, CheckCircle2, Clock, HelpCircle, Image, ExternalLink, 
   RefreshCw, Search, QrCode, Copy, Check, Sparkles, ChevronDown, 
   ChevronUp, ArrowLeft, AlertCircle, X, KeyRound, ShieldCheck, UserX,
-  Power, ShieldAlert, DownloadCloud, History, ListVideo, Eye, EyeOff, FastForward
+  Power, ShieldAlert, DownloadCloud, History, ListVideo, Eye, EyeOff, FastForward, Pause
 } from 'lucide-react';
 import { 
   LiveLessonRow, LiveQuestionItem, LiveAnswerRecord, LiveSessionState, evaluateLiveAnswer, normalizeArabicText 
@@ -16,7 +16,8 @@ import {
   startLiveProgram, endLiveProgram, getLiveBackup, restoreLiveBackup, recordLiveAnswersBatchT,
   formatSecondsToTime, parseTimeToSeconds, formatDriveImageUrl,
   subscribeToLiveSession, toggleShowLessonsListInRoom, toggleShowPinInRoom, toggleShowQrInRoom,
-  toggleShowFinishLessonInRoom, toggleShowRevealInRoom, toggleShowSkipInRoom,
+  toggleShowFinishLessonInRoom, toggleShowRevealInRoom, toggleShowResumeInRoom, toggleShowSkipInRoom,
+  toggleShowPlayPauseInRoom, toggleLiveVideoPlay,
   toggleShowOptionCountsInRoom, toggleShowStudentTextAnswersInRoom,
   finishLiveSession, revealLiveAnswer, resumeLiveVideo,
   initLiveSession, triggerLiveQuestion
@@ -91,7 +92,11 @@ export default function LiveClassManager({
   const [showFinishLessonConfirmModal, setShowFinishLessonConfirmModal] = useState(false);
   const [pendingLessonSwitchTitle, setPendingLessonSwitchTitle] = useState<string | null>(null);
   const [isUpdatingRevealVisibility, setIsUpdatingRevealVisibility] = useState(false);
+  const [isUpdatingResumeVisibility, setIsUpdatingResumeVisibility] = useState(false);
   const [isUpdatingSkipVisibility, setIsUpdatingSkipVisibility] = useState(false);
+  const [isUpdatingPlayPauseVisibility, setIsUpdatingPlayPauseVisibility] = useState(false);
+  const [isTogglingVideoPlay, setIsTogglingVideoPlay] = useState(false);
+  const [isResumingVideo, setIsResumingVideo] = useState(false);
   const [isUpdatingOptionCountsVisibility, setIsUpdatingOptionCountsVisibility] = useState(false);
   const [isUpdatingStudentAnswersVisibility, setIsUpdatingStudentAnswersVisibility] = useState(false);
   const [isRevealingAnswer, setIsRevealingAnswer] = useState(false);
@@ -243,6 +248,18 @@ export default function LiveClassManager({
     }
   };
 
+  const handleToggleResumeVisibility = async (show: boolean) => {
+    setIsUpdatingResumeVisibility(true);
+    try {
+      const res = await toggleShowResumeInRoom(show);
+      if (res.success && res.state) setSessionState(res.state);
+    } catch (e) {
+      console.error('Failed to toggle resume visibility in room:', e);
+    } finally {
+      setIsUpdatingResumeVisibility(false);
+    }
+  };
+
   const handleToggleSkipVisibility = async (show: boolean) => {
     setIsUpdatingSkipVisibility(true);
     try {
@@ -252,6 +269,42 @@ export default function LiveClassManager({
       console.error('Failed to toggle skip visibility in room:', e);
     } finally {
       setIsUpdatingSkipVisibility(false);
+    }
+  };
+
+  const handleTogglePlayPauseVisibility = async (show: boolean) => {
+    setIsUpdatingPlayPauseVisibility(true);
+    try {
+      const res = await toggleShowPlayPauseInRoom(show);
+      if (res.success && res.state) setSessionState(res.state);
+    } catch (e) {
+      console.error('Failed to toggle play/pause visibility in room:', e);
+    } finally {
+      setIsUpdatingPlayPauseVisibility(false);
+    }
+  };
+
+  const handleToggleVideoPlayFromAdmin = async () => {
+    setIsTogglingVideoPlay(true);
+    try {
+      const nextState = !sessionState?.videoPlaying;
+      const res = await toggleLiveVideoPlay(nextState);
+      if (res.success && res.state) setSessionState(res.state);
+    } catch (e) {
+      console.error('Failed to toggle video play from admin:', e);
+    } finally {
+      setIsTogglingVideoPlay(false);
+    }
+  };
+
+  const handleResumeVideoFromAdmin = async () => {
+    setIsResumingVideo(true);
+    try {
+      await resumeLiveVideo();
+    } catch (e) {
+      console.error('Failed to resume video from admin:', e);
+    } finally {
+      setIsResumingVideo(false);
     }
   };
 
@@ -1472,6 +1525,33 @@ export default function LiveClassManager({
                     </button>
                   </div>
 
+                  {/* زر متابعة تشغيل الفيديو مع زر الإظهار/الإخفاء (أيقونة العين بدون نص) */}
+                  <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 p-1.5 rounded-xl shadow-sm">
+                    <button
+                      type="button"
+                      onClick={handleResumeVideoFromAdmin}
+                      disabled={isResumingVideo || !sessionState?.currentQuestion}
+                      title="متابعة تشغيل الفيديو بعد كشف الإجابة أو السؤال"
+                      className="px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white rounded-lg text-xs font-black flex items-center gap-1.5 shadow-sm transition-all cursor-pointer active:scale-95 disabled:opacity-40"
+                    >
+                      <Play className="w-3.5 h-3.5 fill-current" />
+                      <span>{isResumingVideo ? 'جارٍ المتابعة...' : 'متابعة الفيديو'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleResumeVisibility(!sessionState?.showResumeInRoom)}
+                      disabled={isUpdatingResumeVisibility}
+                      title={sessionState?.showResumeInRoom ? 'إخفاء زر متابعة الفيديو من شاشة العرض' : 'إظهار زر متابعة الفيديو في شاشة العرض'}
+                      className={`p-1.5 rounded-lg transition-all cursor-pointer border ${
+                        sessionState?.showResumeInRoom
+                          ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
+                          : 'bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border-slate-800'
+                      }`}
+                    >
+                      {sessionState?.showResumeInRoom ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                    </button>
+                  </div>
+
                   {/* زر تخطي مع زر الإظهار/الإخفاء (أيقونة العين بدون نص) */}
                   <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 p-1.5 rounded-xl shadow-sm">
                     <button
@@ -1498,23 +1578,63 @@ export default function LiveClassManager({
                       {sessionState?.showSkipInRoom ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
                     </button>
                   </div>
+
+                  {/* زر تشغيل / إيقاف الفيديو مع زر الإظهار/الإخفاء (أيقونة العين بدون نص) */}
+                  <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 p-1.5 rounded-xl shadow-sm">
+                    <button
+                      type="button"
+                      onClick={handleToggleVideoPlayFromAdmin}
+                      disabled={isTogglingVideoPlay || !sessionState?.videoUrl}
+                      title={sessionState?.videoPlaying ? 'إيقاف الفيديو مؤقتاً في شاشة العرض' : 'تشغيل الفيديو في شاشة العرض'}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-black flex items-center gap-1.5 shadow-sm transition-all cursor-pointer active:scale-95 disabled:opacity-40 ${
+                        sessionState?.videoPlaying
+                          ? 'bg-amber-500 hover:bg-amber-400 text-slate-950'
+                          : 'bg-slate-950 hover:bg-slate-850 text-slate-200 border border-slate-750'
+                      }`}
+                    >
+                      {sessionState?.videoPlaying ? (
+                        <>
+                          <Pause className="w-3.5 h-3.5 fill-current" />
+                          <span>إيقاف الفيديو</span>
+                        </>
+                      ) : (
+                        <>
+                          <Play className="w-3.5 h-3.5 fill-current text-emerald-400" />
+                          <span>تشغيل الفيديو</span>
+                        </>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleTogglePlayPauseVisibility(!sessionState?.showPlayPauseInRoom)}
+                      disabled={isUpdatingPlayPauseVisibility}
+                      title={sessionState?.showPlayPauseInRoom ? 'إخفاء زر تشغيل الفيديو من شاشة العرض' : 'إظهار زر تشغيل الفيديو في شاشة العرض'}
+                      className={`p-1.5 rounded-lg transition-all cursor-pointer border ${
+                        sessionState?.showPlayPauseInRoom
+                          ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
+                          : 'bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border-slate-800'
+                      }`}
+                    >
+                      {sessionState?.showPlayPauseInRoom ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                    </button>
+                  </div>
                 </div>
 
                 {/* أزرار التحكم في إظهار وإخفاء عناصر الإجابات في شاشة العرض */}
                 <div className="flex flex-wrap items-center gap-2">
-                  {/* زر إظهار/إخفاء عدد الأشخاص الذين اختاروا في أحد الخيارات */}
+                  {/* زر إظهار/إخفاء عدد الأشخاص الذين اختاروا في أحد الخيارات (افتراضياً مخفي) */}
                   <button
                     type="button"
-                    onClick={() => handleToggleOptionCountsVisibility(sessionState?.showOptionCountsInRoom === false ? true : false)}
+                    onClick={() => handleToggleOptionCountsVisibility(!sessionState?.showOptionCountsInRoom)}
                     disabled={isUpdatingOptionCountsVisibility}
-                    title={sessionState?.showOptionCountsInRoom !== false ? 'عدد المصوتين بالخيارات ظاهر بشاشة العرض - انقر للإخفاء' : 'عدد المصوتين بالخيارات مخفي بشاشة العرض - انقر للإظهار'}
+                    title={sessionState?.showOptionCountsInRoom ? 'عدد المصوتين بالخيارات ظاهر بشاشة العرض - انقر للإخفاء' : 'عدد المصوتين بالخيارات مخفي بشاشة العرض - انقر للإظهار'}
                     className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border shadow-sm ${
-                      sessionState?.showOptionCountsInRoom !== false
+                      sessionState?.showOptionCountsInRoom
                         ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25'
                         : 'bg-slate-900 border-slate-750 text-slate-400 hover:text-slate-200'
                     }`}
                   >
-                    {sessionState?.showOptionCountsInRoom !== false ? (
+                    {sessionState?.showOptionCountsInRoom ? (
                       <>
                         <Eye className="w-3.5 h-3.5 text-emerald-400" />
                         <span>أعداد الخيارات: إظهار</span>
@@ -1527,19 +1647,19 @@ export default function LiveClassManager({
                     )}
                   </button>
 
-                  {/* زر إظهار/إخفاء نصوص إجابات الطلاب (صح/خطأ وحرة) */}
+                  {/* زر إظهار/إخفاء نصوص إجابات الطلاب (صح/خطأ وحرة - افتراضياً مخفي) */}
                   <button
                     type="button"
-                    onClick={() => handleToggleStudentAnswersVisibility(sessionState?.showStudentTextAnswersInRoom === false ? true : false)}
+                    onClick={() => handleToggleStudentAnswersVisibility(!sessionState?.showStudentTextAnswersInRoom)}
                     disabled={isUpdatingStudentAnswersVisibility}
-                    title={sessionState?.showStudentTextAnswersInRoom !== false ? 'نصوص وإجابات الطلاب معروضة بشاشة العرض - انقر للإخفاء' : 'نصوص وإجابات الطلاب مخفية بشاشة العرض - انقر للإظهار'}
+                    title={sessionState?.showStudentTextAnswersInRoom ? 'نصوص وإجابات الطلاب معروضة بشاشة العرض - انقر للإخفاء' : 'نصوص وإجابات الطلاب مخفية بشاشة العرض - انقر للإظهار'}
                     className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border shadow-sm ${
-                      sessionState?.showStudentTextAnswersInRoom !== false
+                      sessionState?.showStudentTextAnswersInRoom
                         ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25'
                         : 'bg-slate-900 border-slate-750 text-slate-400 hover:text-slate-200'
                     }`}
                   >
-                    {sessionState?.showStudentTextAnswersInRoom !== false ? (
+                    {sessionState?.showStudentTextAnswersInRoom ? (
                       <>
                         <Eye className="w-3.5 h-3.5 text-emerald-400" />
                         <span>إجابات الطلاب: إظهار</span>

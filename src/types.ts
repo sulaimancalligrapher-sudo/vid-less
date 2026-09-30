@@ -242,7 +242,10 @@ export interface LiveSessionState {
   showQrInRoom?: boolean; // Controls whether join QR code appears on projector display screen
   showFinishLessonInRoom?: boolean; // Controls whether finish lesson button appears on projector display screen
   showRevealInRoom?: boolean; // Controls whether "الإجابة" button appears on projector display screen
+  showResumeInRoom?: boolean; // Controls whether "متابعة تشغيل الفيديو" button appears on projector display screen
   showSkipInRoom?: boolean; // Controls whether "تخطي" button appears on projector display screen
+  showPlayPauseInRoom?: boolean; // Controls whether Play/Pause button appears on projector display screen
+  videoPlaying?: boolean; // Controls Play/Pause state synced across room and admin
   showOptionCountsInRoom?: boolean; // Controls whether answer counts on options appear on projector display screen
   showStudentTextAnswersInRoom?: boolean; // Controls whether student text answers appear on projector display screen
   lessonTitle: string;

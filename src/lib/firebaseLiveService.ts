@@ -25,9 +25,12 @@ export const defaultLiveSessionState: LiveSessionState = {
   showQrInRoom: false,
   showFinishLessonInRoom: false,
   showRevealInRoom: false,
+  showResumeInRoom: false,
   showSkipInRoom: false,
-  showOptionCountsInRoom: true,
-  showStudentTextAnswersInRoom: true,
+  showPlayPauseInRoom: false,
+  videoPlaying: false,
+  showOptionCountsInRoom: false,
+  showStudentTextAnswersInRoom: false,
   lessonTitle: '',
   videoUrl: '',
   status: 'idle',
@@ -71,6 +74,13 @@ export function subscribeToLiveSession(
           showPinInRoom: Boolean(data.showPinInRoom),
           showQrInRoom: Boolean(data.showQrInRoom),
           showFinishLessonInRoom: Boolean(data.showFinishLessonInRoom),
+          showRevealInRoom: Boolean(data.showRevealInRoom),
+          showResumeInRoom: Boolean(data.showResumeInRoom),
+          showSkipInRoom: Boolean(data.showSkipInRoom),
+          showPlayPauseInRoom: Boolean(data.showPlayPauseInRoom),
+          videoPlaying: Boolean(data.videoPlaying),
+          showOptionCountsInRoom: Boolean(data.showOptionCountsInRoom),
+          showStudentTextAnswersInRoom: Boolean(data.showStudentTextAnswersInRoom),
           lessonTitle: data.lessonTitle || '',
           videoUrl: data.videoUrl || '',
           status: data.status || 'idle',
@@ -119,6 +129,13 @@ export async function getLiveSessionState(): Promise<LiveSessionState | null> {
         showPinInRoom: Boolean(data.showPinInRoom),
         showQrInRoom: Boolean(data.showQrInRoom),
         showFinishLessonInRoom: Boolean(data.showFinishLessonInRoom),
+        showRevealInRoom: Boolean(data.showRevealInRoom),
+        showResumeInRoom: Boolean(data.showResumeInRoom),
+        showSkipInRoom: Boolean(data.showSkipInRoom),
+        showPlayPauseInRoom: Boolean(data.showPlayPauseInRoom),
+        videoPlaying: Boolean(data.videoPlaying),
+        showOptionCountsInRoom: Boolean(data.showOptionCountsInRoom),
+        showStudentTextAnswersInRoom: Boolean(data.showStudentTextAnswersInRoom),
         lessonTitle: data.lessonTitle || '',
         videoUrl: data.videoUrl || '',
         status: data.status || 'idle',
@@ -719,6 +736,51 @@ export async function toggleShowStudentTextAnswersInRoom(show: boolean): Promise
     return { success: true, state: cachedState };
   } catch (error: any) {
     console.error('Failed to toggle showStudentTextAnswersInRoom in Firebase:', error);
+    return { success: false };
+  }
+}
+
+// Toggle showing "متابعة تشغيل الفيديو" button in projector display screen
+export async function toggleShowResumeInRoom(show: boolean): Promise<{ success: boolean; state?: LiveSessionState }> {
+  try {
+    await updateDoc(LIVE_DOC_REF, {
+      showResumeInRoom: show,
+      updatedAt: serverTimestamp(),
+    });
+    cachedState = { ...cachedState, showResumeInRoom: show };
+    return { success: true, state: cachedState };
+  } catch (error: any) {
+    console.error('Failed to toggle showResumeInRoom in Firebase:', error);
+    return { success: false };
+  }
+}
+
+// Toggle showing Play/Pause video controls in projector display screen
+export async function toggleShowPlayPauseInRoom(show: boolean): Promise<{ success: boolean; state?: LiveSessionState }> {
+  try {
+    await updateDoc(LIVE_DOC_REF, {
+      showPlayPauseInRoom: show,
+      updatedAt: serverTimestamp(),
+    });
+    cachedState = { ...cachedState, showPlayPauseInRoom: show };
+    return { success: true, state: cachedState };
+  } catch (error: any) {
+    console.error('Failed to toggle showPlayPauseInRoom in Firebase:', error);
+    return { success: false };
+  }
+}
+
+// Teacher toggles Play/Pause state synced across room and admin
+export async function toggleLiveVideoPlay(playing: boolean): Promise<{ success: boolean; state?: LiveSessionState }> {
+  try {
+    await updateDoc(LIVE_DOC_REF, {
+      videoPlaying: playing,
+      updatedAt: serverTimestamp(),
+    });
+    cachedState = { ...cachedState, videoPlaying: playing };
+    return { success: true, state: cachedState };
+  } catch (error: any) {
+    console.error('Failed to toggle videoPlay in Firebase:', error);
     return { success: false };
   }
 }

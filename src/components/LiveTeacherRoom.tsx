@@ -15,7 +15,7 @@ import {
   finishLiveSession, resetLiveSession, getLiveSessionState, recordLiveAnswersBatchT,
   updateLivePin, leaveLiveSession,
   formatSecondsToTime, parseTimeToSeconds, formatDriveImageUrl,
-  subscribeToLiveSession, toggleShowQrInRoom
+  subscribeToLiveSession, toggleShowQrInRoom, toggleLiveVideoPlay
 } from '../api';
 
 interface LiveTeacherRoomProps {
@@ -187,6 +187,18 @@ export default function LiveTeacherRoom({
     }
   };
 
+  // Synchronize play/pause state from Admin
+  useEffect(() => {
+    if (sessionState?.videoPlaying !== undefined && videoRef.current) {
+      if (sessionState.videoPlaying && videoRef.current.paused && sessionState.status !== 'question_active') {
+        videoRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
+      } else if (!sessionState.videoPlaying && !videoRef.current.paused) {
+        videoRef.current.pause();
+        setIsPlaying(false);
+      }
+    }
+  }, [sessionState?.videoPlaying, sessionState?.status]);
+
   // Play / Pause Toggle
   const togglePlay = () => {
     if (!videoRef.current) return;
@@ -195,9 +207,11 @@ export default function LiveTeacherRoom({
     if (videoRef.current.paused) {
       videoRef.current.play();
       setIsPlaying(true);
+      toggleLiveVideoPlay(true).catch(() => {});
     } else {
       videoRef.current.pause();
       setIsPlaying(false);
+      toggleLiveVideoPlay(false).catch(() => {});
     }
   };
 
@@ -744,20 +758,18 @@ export default function LiveTeacherRoom({
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <span className="px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-bold font-mono">
-                    السؤال {(sessionState.currentQuestionIndex ?? 0) + 1} من {selectedLesson?.questions.length || 0}
-                  </span>
-
-                  {/* وعند النقر على زر الإجابة: يضاف عدد الأشخاص الذين أجابوا صحيح والخطأ عدد فقط */}
+                <div className="flex items-center gap-3">
+                  {/* تظهر إحصائية الإجابات بحجم كبير وواضح عند النقر على زر الإجابة */}
                   {isRevealed && (
-                    <div className="flex items-center gap-1.5 font-mono text-xs">
-                      <span className="px-2.5 py-1 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold">
-                        صحيح: {answersList.filter(sub => evaluateLiveAnswer(currentQ, sub.answer)?.isCorrect === true).length}
-                      </span>
-                      <span className="px-2.5 py-1 rounded-xl bg-rose-500/20 text-rose-400 border border-rose-500/30 font-bold">
-                        خطأ: {answersList.filter(sub => evaluateLiveAnswer(currentQ, sub.answer)?.isCorrect === false).length}
-                      </span>
+                    <div className="flex items-center gap-3 font-mono">
+                      <div className="px-4 py-2 rounded-2xl bg-emerald-500/20 border-2 border-emerald-500/50 text-emerald-300 font-black text-sm sm:text-base flex items-center gap-2 shadow-lg shadow-emerald-500/20 animate-in zoom-in-95">
+                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+                        <span>صحيح: {answersList.filter(sub => evaluateLiveAnswer(currentQ, sub.answer)?.isCorrect === true).length}</span>
+                      </div>
+                      <div className="px-4 py-2 rounded-2xl bg-rose-500/20 border-2 border-rose-500/50 text-rose-300 font-black text-sm sm:text-base flex items-center gap-2 shadow-lg shadow-rose-500/20 animate-in zoom-in-95">
+                        <span className="w-2.5 h-2.5 rounded-full bg-rose-400 animate-pulse" />
+                        <span>خطأ: {answersList.filter(sub => evaluateLiveAnswer(currentQ, sub.answer)?.isCorrect === false).length}</span>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -822,8 +834,8 @@ export default function LiveTeacherRoom({
                                   <span>الإجابة الصحيحة</span>
                                 </span>
                               )}
-                              {/* التحكم في ظهور / إخفاء عدد الأشخاص الذين اختاروا في أحد الخيارات */}
-                              {sessionState?.showOptionCountsInRoom !== false && (
+                              {/* التحكم في ظهور / إخفاء عدد الأشخاص الذين اختاروا في أحد الخيارات (مخفي افتراضياً) */}
+                              {Boolean(sessionState?.showOptionCountsInRoom) && (
                                 <div className="text-left font-mono">
                                   <span className="text-base font-black text-slate-100">{count}</span>
                                   <span className="text-xs text-slate-400 ml-1">({pct}%)</span>
@@ -868,8 +880,8 @@ export default function LiveTeacherRoom({
                         )}
                       </div>
 
-                      {/* Live stream list of text submissions - controlled via Admin */}
-                      {sessionState?.showStudentTextAnswersInRoom !== false && (
+                      {/* Live stream list of text submissions - controlled via Admin (مخفي افتراضياً) */}
+                      {Boolean(sessionState?.showStudentTextAnswersInRoom) && (
                         <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-3 max-h-56 overflow-y-auto space-y-2">
                           <div className="text-[11px] font-bold text-slate-400 mb-1 px-1">
                             إجابات الطلاب المستلمة فورياً ({answersList.length}):
@@ -925,7 +937,7 @@ export default function LiveTeacherRoom({
 
                 <div className="flex items-center gap-3">
                   {!isRevealed ? (
-                    sessionState?.showRevealInRoom && (
+                    Boolean(sessionState?.showRevealInRoom) && (
                       <button
                         onClick={handleRevealAnswer}
                         className="px-5 py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black rounded-xl text-sm flex items-center gap-2 shadow-lg shadow-amber-500/20 active:scale-98 transition-all cursor-pointer animate-in fade-in"
@@ -935,16 +947,18 @@ export default function LiveTeacherRoom({
                       </button>
                     )
                   ) : (
-                    <button
-                      onClick={handleResumeVideo}
-                      className="px-6 py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-slate-950 font-black rounded-xl text-sm flex items-center gap-2 shadow-lg shadow-emerald-500/20 active:scale-98 transition-all cursor-pointer animate-in fade-in"
-                    >
-                      <Play className="w-4.5 h-4.5 fill-slate-950" />
-                      <span>متابعة تشغيل الفيديو ▶️</span>
-                    </button>
+                    Boolean(sessionState?.showResumeInRoom) && (
+                      <button
+                        onClick={handleResumeVideo}
+                        className="px-6 py-3 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-slate-950 font-black rounded-xl text-sm flex items-center gap-2 shadow-lg shadow-emerald-500/20 active:scale-98 transition-all cursor-pointer animate-in fade-in"
+                      >
+                        <Play className="w-4.5 h-4.5 fill-slate-950" />
+                        <span>متابعة تشغيل الفيديو ▶️</span>
+                      </button>
+                    )
                   )}
 
-                  {sessionState?.showSkipInRoom && (
+                  {Boolean(sessionState?.showSkipInRoom) && (
                     <button
                       onClick={handleResumeVideo}
                       className="px-4 py-3 bg-slate-900 hover:bg-slate-800 text-slate-300 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer animate-in fade-in"
@@ -981,13 +995,15 @@ export default function LiveTeacherRoom({
         {/* Controls row */}
         <div className="flex items-center justify-between text-xs">
           <div className="flex items-center gap-3">
-            <button
-              onClick={togglePlay}
-              className="p-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl transition-all cursor-pointer font-bold flex items-center gap-1.5 shadow-md shadow-amber-500/10"
-            >
-              {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 fill-slate-950" />}
-              <span className="hidden sm:inline">{isPlaying ? 'إيقاف' : 'تشغيل'}</span>
-            </button>
+            {Boolean(sessionState?.showPlayPauseInRoom) && (
+              <button
+                onClick={togglePlay}
+                className="p-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl transition-all cursor-pointer font-bold flex items-center gap-1.5 shadow-md shadow-amber-500/10 animate-in fade-in"
+              >
+                {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 fill-slate-950" />}
+                <span className="hidden sm:inline">{isPlaying ? 'إيقاف' : 'تشغيل'}</span>
+              </button>
+            )}
 
             {/* Time display */}
             <div className="text-slate-400 font-mono font-bold">
