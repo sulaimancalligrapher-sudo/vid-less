@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   MessageSquare, Send, Hand, ThumbsUp, ThumbsDown, 
   Sparkles, CheckCircle2, Clock, Trash2, Reply, Eye, 
-  EyeOff, Volume2, User, X, Check, Lock, Globe, AlertCircle
+  EyeOff, User, X, Lock, Globe, AlertCircle
 } from 'lucide-react';
 import { LiveStudentMessage } from '../types';
 
@@ -17,7 +17,9 @@ interface LiveChatModalProps {
   showChatInRoom: boolean;
   onToggleShowInRoom: (show: boolean) => Promise<void>;
   currentUserName?: string; // If student is viewing, their name
+  currentUserSheet?: string; // If student is viewing, their sheet #
   isTeacher?: boolean; // True for Admin / Teacher Room
+  onSendStudentMessage?: (type: 'question' | 'hand' | 'agree' | 'disagree' | 'clap', text?: string) => Promise<void>;
 }
 
 export default function LiveChatModal({
@@ -30,13 +32,21 @@ export default function LiveChatModal({
   showChatInRoom,
   onToggleShowInRoom,
   currentUserName,
+  currentUserSheet,
   isTeacher = false,
+  onSendStudentMessage,
 }: LiveChatModalProps) {
   const [selectedMessage, setSelectedMessage] = useState<LiveStudentMessage | null>(null);
   const [replyText, setReplyText] = useState('');
   const [replyType, setReplyType] = useState<'private' | 'public'>('private');
   const [isSubmittingReply, setIsSubmittingReply] = useState(false);
   const [filterType, setFilterType] = useState<'all' | 'questions' | 'reactions'>('all');
+  
+  // Student Composer State (Embedded inside the chat modal)
+  const [studentInputText, setStudentInputText] = useState('');
+  const [isSendingStudentMsg, setIsSendingStudentMsg] = useState(false);
+  const [studentSuccessNotice, setStudentSuccessNotice] = useState<string | null>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Auto scroll to bottom of messages
@@ -75,6 +85,29 @@ export default function LiveChatModal({
     }
   };
 
+  const handleStudentSubmit = async (
+    type: 'question' | 'hand' | 'agree' | 'disagree' | 'clap',
+    text?: string
+  ) => {
+    if (!onSendStudentMessage || isSendingStudentMsg) return;
+    try {
+      setIsSendingStudentMsg(true);
+      await onSendStudentMessage(type, text);
+      setStudentInputText('');
+      let banner = 'تم إرسال سؤالك للأستاذ بنجاح 📨';
+      if (type === 'hand') banner = 'تم رفع يدك للأستاذ ✋';
+      if (type === 'agree') banner = 'تم تسجيل موافقتك 👍';
+      if (type === 'disagree') banner = 'تم تسجيل عدم موافقتك 👎';
+      if (type === 'clap') banner = 'تم إرسال تشجيع وتصفيق 👏';
+      setStudentSuccessNotice(banner);
+      setTimeout(() => setStudentSuccessNotice(null), 3500);
+    } catch (err) {
+      console.error('Failed to send student message:', err);
+    } finally {
+      setIsSendingStudentMsg(false);
+    }
+  };
+
   const getReactionBadge = (msg: LiveStudentMessage) => {
     switch (msg.type) {
       case 'hand':
@@ -102,7 +135,7 @@ export default function LiveChatModal({
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-xs font-bold">
             <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-            <span>تصفيق وتشجيع 👏</span>
+            <span>تشجيع وتصفيق 👏</span>
           </span>
         );
       default:
@@ -121,11 +154,11 @@ export default function LiveChatModal({
         initial={{ opacity: 0, scale: 0.95, y: 10 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 10 }}
-        className="w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden"
+        className="w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl flex flex-col max-h-[92vh] overflow-hidden"
         dir="rtl"
       >
         {/* Header */}
-        <div className="p-4 sm:p-5 border-b border-slate-800 bg-slate-950/60 flex items-center justify-between gap-3">
+        <div className="p-4 sm:p-5 border-b border-slate-800 bg-slate-950/60 flex items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-indigo-500/20 border border-indigo-500/30 text-indigo-400 flex items-center justify-center shadow-inner">
               <MessageSquare className="w-5 h-5" />
@@ -133,7 +166,7 @@ export default function LiveChatModal({
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-base sm:text-lg font-black text-slate-100">
-                  {isTeacher ? 'محادثة وتفاعل الطلاب المباشر' : 'محادثتي مع الأستاذ'}
+                  {isTeacher ? 'محادثة وتفاعل الطلاب المباشر' : 'محادثة مع الأستاذ 💬'}
                 </h3>
                 <span className="px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 text-[11px] font-mono font-bold">
                   {filteredMessages.length} رسالة
@@ -142,7 +175,7 @@ export default function LiveChatModal({
               <p className="text-xs text-slate-400 font-semibold">
                 {isTeacher
                   ? 'استقبل أسئلة الطلاب، تفاعلاتهم (رفع اليد، موافق/معارض)، وأجبهم بشكل خاص أو عام على الشاشة.'
-                  : 'اطرح سؤالك أو استفسارك وتلقَّ رد المعلم أثناء الحصة.'}
+                  : 'اطرح سؤالك أو تفاعل بالأيقونات (رفع اليد / موافق) وتلقَّ رد المعلم أثناء الحصة.'}
               </p>
             </div>
           </div>
@@ -195,7 +228,7 @@ export default function LiveChatModal({
         </div>
 
         {/* Filter Pills (All / Questions / Reactions) */}
-        <div className="px-4 py-2.5 bg-slate-950/40 border-b border-slate-800 flex items-center gap-2 text-xs">
+        <div className="px-4 py-2 bg-slate-950/40 border-b border-slate-800 flex items-center gap-2 text-xs shrink-0">
           <span className="text-slate-400 font-bold ml-1">التصنيف:</span>
           <button
             onClick={() => setFilterType('all')}
@@ -205,7 +238,7 @@ export default function LiveChatModal({
                 : 'bg-slate-800 text-slate-400 hover:text-slate-200'
             }`}
           >
-            الكل ({messages.length})
+            الكل ({filteredMessages.length})
           </button>
           <button
             onClick={() => setFilterType('questions')}
@@ -215,7 +248,7 @@ export default function LiveChatModal({
                 : 'bg-slate-800 text-slate-400 hover:text-slate-200'
             }`}
           >
-            الأسئلة فقط 💬 ({messages.filter(m => m.type === 'question').length})
+            الأسئلة فقط 💬 ({filteredMessages.filter(m => m.type === 'question').length})
           </button>
           <button
             onClick={() => setFilterType('reactions')}
@@ -225,22 +258,22 @@ export default function LiveChatModal({
                 : 'bg-slate-800 text-slate-400 hover:text-slate-200'
             }`}
           >
-            التفاعلات (يد / موافق) ✋ ({messages.filter(m => m.type !== 'question').length})
+            التفاعلات ✋ ({filteredMessages.filter(m => m.type !== 'question').length})
           </button>
         </div>
 
         {/* Messages List Area */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3.5 min-h-[300px]">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3.5 min-h-[220px]">
           {filteredMessages.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-3 text-slate-500">
-              <div className="w-16 h-16 rounded-3xl bg-slate-800/60 border border-slate-800 flex items-center justify-center">
-                <MessageSquare className="w-8 h-8 opacity-40 text-indigo-400" />
+            <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-2 text-slate-500">
+              <div className="w-14 h-14 rounded-3xl bg-slate-800/60 border border-slate-800 flex items-center justify-center">
+                <MessageSquare className="w-7 h-7 opacity-40 text-indigo-400" />
               </div>
-              <h4 className="text-sm font-bold text-slate-400">لا توجد رسائل أو تفاعلات حالياً</h4>
+              <h4 className="text-sm font-bold text-slate-400">لا توجد رسائل حالياً</h4>
               <p className="text-xs max-w-xs leading-relaxed text-slate-500">
                 {isTeacher
-                  ? 'عندما يرسل أحد الطلاب استفساراً أو يرفع يده أو يبدي موافقة أثناء الدرس ستظهر هنا مباشرة مع تنبيه صوتي.'
-                  : 'يمكنك استخدام الأزرار أدناه لطرح سؤال على الأستاذ أو رفع اليد.'}
+                  ? 'عندما يرسل الطلاب استفسارات أو يرفعون أيديهم ستظهر هنا فوراً.'
+                  : 'يمكنك كتابة سؤالك في الحقل أدناه أو اختيار أيقونة سريعة مثل رفع اليد.'}
               </p>
             </div>
           ) : (
@@ -251,7 +284,7 @@ export default function LiveChatModal({
               return (
                 <div
                   key={msg.id}
-                  className={`p-4 rounded-2xl border transition-all ${
+                  className={`p-3.5 sm:p-4 rounded-2xl border transition-all ${
                     msg.type === 'hand'
                       ? 'bg-amber-950/20 border-amber-500/30'
                       : msg.type === 'agree'
@@ -269,7 +302,7 @@ export default function LiveChatModal({
                         <User className="w-3.5 h-3.5" />
                       </div>
                       <span className="font-black text-sm text-slate-100">
-                        {msg.senderName}
+                        {isMine ? `أنت (${msg.senderName})` : msg.senderName}
                       </span>
                       {msg.sheetNumber && (
                         <span className="text-[11px] font-mono text-slate-400 bg-slate-800 px-2 py-0.5 rounded-lg border border-slate-750">
@@ -358,9 +391,94 @@ export default function LiveChatModal({
           <div ref={messagesEndRef} />
         </div>
 
+        {/* Student Composer Drawer inside Modal (أيقونات سريعة + كتابة السؤال بنقرة واحدة) */}
+        {!isTeacher && onSendStudentMessage && (
+          <div className="p-3.5 sm:p-4 bg-slate-950 border-t border-slate-800 space-y-3 shrink-0">
+            {/* Quick Reactions inside the window */}
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-bold text-slate-400">تفاعل سريع:</span>
+              <div className="flex items-center gap-1.5 flex-1 overflow-x-auto py-0.5">
+                <button
+                  type="button"
+                  onClick={() => handleStudentSubmit('hand')}
+                  disabled={isSendingStudentMsg}
+                  className="px-2.5 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/30 border border-amber-500/30 text-amber-300 text-xs font-bold flex items-center gap-1 transition-all cursor-pointer disabled:opacity-50"
+                  title="رفع اليد"
+                >
+                  <Hand className="w-3.5 h-3.5 text-amber-400" />
+                  <span>رفع اليد ✋</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleStudentSubmit('agree')}
+                  disabled={isSendingStudentMsg}
+                  className="px-2.5 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-300 text-xs font-bold flex items-center gap-1 transition-all cursor-pointer disabled:opacity-50"
+                  title="موافق"
+                >
+                  <ThumbsUp className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>موافق 👍</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleStudentSubmit('disagree')}
+                  disabled={isSendingStudentMsg}
+                  className="px-2.5 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/30 border border-rose-500/30 text-rose-300 text-xs font-bold flex items-center gap-1 transition-all cursor-pointer disabled:opacity-50"
+                  title="غير موافق"
+                >
+                  <ThumbsDown className="w-3.5 h-3.5 text-rose-400" />
+                  <span>غير موافق 👎</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleStudentSubmit('clap')}
+                  disabled={isSendingStudentMsg}
+                  className="px-2.5 py-1.5 rounded-xl bg-indigo-500/15 hover:bg-indigo-500/30 border border-indigo-500/30 text-indigo-300 text-xs font-bold flex items-center gap-1 transition-all cursor-pointer disabled:opacity-50"
+                  title="تشجيع وتصفيق"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>تصفيق 👏</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Notification alert banner */}
+            {studentSuccessNotice && (
+              <div className="p-2 bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 rounded-xl text-xs font-bold flex items-center gap-2 animate-in fade-in">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span>{studentSuccessNotice}</span>
+              </div>
+            )}
+
+            {/* Question Text Input */}
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={studentInputText}
+                onChange={(e) => setStudentInputText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && studentInputText.trim()) {
+                    handleStudentSubmit('question', studentInputText.trim());
+                  }
+                }}
+                placeholder="اكتب سؤالك أو استفسارك للأستاذ هنا..."
+                className="flex-1 px-4 py-2.5 bg-slate-900 border border-slate-750 focus:border-indigo-400 rounded-xl text-slate-100 text-xs font-bold outline-none placeholder:text-slate-500"
+              />
+              <button
+                type="button"
+                onClick={() => handleStudentSubmit('question', studentInputText.trim())}
+                disabled={!studentInputText.trim() || isSendingStudentMsg}
+                className="px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md disabled:opacity-40 cursor-pointer active:scale-95 transition-all shrink-0"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>إرسال</span>
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Teacher Reply Form Drawer */}
         {isTeacher && selectedMessage && (
-          <div className="p-4 bg-slate-950 border-t border-indigo-500/40 space-y-3 animate-in slide-in-from-bottom-2">
+          <div className="p-4 bg-slate-950 border-t border-indigo-500/40 space-y-3 shrink-0 animate-in slide-in-from-bottom-2">
             <div className="flex items-center justify-between text-xs">
               <span className="font-black text-indigo-300 flex items-center gap-1.5">
                 <Reply className="w-4 h-4 text-indigo-400" />

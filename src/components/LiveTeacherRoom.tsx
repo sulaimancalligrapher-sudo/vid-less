@@ -74,10 +74,6 @@ export default function LiveTeacherRoom({
   const [isMuted, setIsMuted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   
-  // Lesson Starting Transition State (fixes black screen and announces lesson start)
-  const [isLessonStarting, setIsLessonStarting] = useState(false);
-  const [startingCountdown, setStartingCountdown] = useState(3);
-  
   // UI Panels
   const [showQrModal, setShowQrModal] = useState(false);
   const [showSaveSuccess, setShowSaveSuccess] = useState(false);
@@ -185,37 +181,17 @@ export default function LiveTeacherRoom({
         const match = allLessons.find(l => l.title === sessionState.lessonTitle);
         if (match) {
           setSelectedLesson(match);
-          setIsLessonStarting(true);
-          setStartingCountdown(3);
+          setIsPlaying(false);
+          if (videoRef.current) {
+            try {
+              videoRef.current.pause();
+              videoRef.current.currentTime = 0;
+            } catch {}
+          }
         }
       }
     }
   }, [sessionState?.lessonTitle, allLessons]);
-
-  // Countdown timer for "سوف يبدأ الدرس الآن"
-  useEffect(() => {
-    if (!isLessonStarting) return;
-    if (startingCountdown <= 0) {
-      setIsLessonStarting(false);
-      if (videoRef.current) {
-        videoRef.current.currentTime = 0;
-        videoRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
-      }
-      return;
-    }
-    const timer = setTimeout(() => {
-      setStartingCountdown(prev => prev - 1);
-    }, 1000);
-    return () => clearTimeout(timer);
-  }, [isLessonStarting, startingCountdown]);
-
-  const handleStartLessonNow = () => {
-    setIsLessonStarting(false);
-    if (videoRef.current) {
-      videoRef.current.currentTime = 0;
-      videoRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
-    }
-  };
 
   // Time tracking and smart auto-pause for questions
   const handleTimeUpdate = () => {
@@ -269,6 +245,13 @@ export default function LiveTeacherRoom({
       }
     }
   }, [sessionState?.videoPlaying, sessionState?.status]);
+
+  // When a question appears, immediately auto-close the chat modal on projector screen so the question is front and center
+  useEffect(() => {
+    if (sessionState?.status === 'question_active') {
+      setShowChatModal(false);
+    }
+  }, [sessionState?.status]);
 
   // When teacher resumes video after answering a question (from Admin or Remote)
   useEffect(() => {
@@ -555,8 +538,13 @@ export default function LiveTeacherRoom({
       setShowUnsavedPrompt(true);
     } else {
       setSelectedLesson(newLesson);
-      setIsLessonStarting(true);
-      setStartingCountdown(3);
+      setIsPlaying(false);
+      if (videoRef.current) {
+        try {
+          videoRef.current.pause();
+          videoRef.current.currentTime = 0;
+        } catch {}
+      }
     }
   };
 
@@ -819,51 +807,6 @@ export default function LiveTeacherRoom({
               className="w-full h-full object-contain cursor-pointer max-h-[calc(100vh-140px)]"
               playsInline
             />
-
-            {/* Lesson Starting Transition Overlay ("سوف يبدأ الدرس الآن") */}
-            <AnimatePresence>
-              {isLessonStarting && (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.98 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.98 }}
-                  className="absolute inset-0 bg-slate-950/95 backdrop-blur-xl z-30 flex flex-col items-center justify-center p-6 text-center"
-                >
-                  <div className="max-w-md w-full space-y-6 animate-in zoom-in-95 duration-300">
-                    <div className="w-24 h-24 mx-auto rounded-3xl bg-gradient-to-tr from-amber-500/20 via-amber-500/10 to-indigo-500/20 border border-amber-500/40 flex items-center justify-center shadow-2xl text-amber-400">
-                      <Play className="w-12 h-12 fill-amber-400 ml-1" />
-                    </div>
-
-                    <div className="space-y-2">
-                      <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-black">
-                        <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                        <span>سوف يبدأ الدرس الآن 🎬</span>
-                      </div>
-                      <h2 className="text-2xl sm:text-3xl font-black text-slate-100 tracking-tight">
-                        {selectedLesson.title}
-                      </h2>
-                      <p className="text-xs sm:text-sm text-slate-400">
-                        يبدأ عرض الفيديو التفاعلي خلال {startingCountdown} ثوانٍ...
-                      </p>
-                    </div>
-
-                    {/* Countdown and Instant Start Button */}
-                    <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
-                      <button
-                        onClick={handleStartLessonNow}
-                        className="w-full sm:w-auto px-6 py-3.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black rounded-2xl shadow-xl shadow-amber-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer text-sm active:scale-95"
-                      >
-                        <Play className="w-5 h-5 fill-slate-950" />
-                        <span>بدء تشغيل الدرس الآن ▶️</span>
-                      </button>
-                      <div className="w-12 h-12 rounded-2xl bg-slate-900 border border-slate-800 text-amber-400 font-mono font-black text-xl flex items-center justify-center shadow-inner">
-                        {startingCountdown}
-                      </div>
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
           </>
         ) : selectedLesson ? (
           <div className="text-center p-8 space-y-3">

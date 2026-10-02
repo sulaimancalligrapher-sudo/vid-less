@@ -189,6 +189,11 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
         setTimeLeft(rem);
       }
     }
+
+    // Auto-close chat modal whenever a new question is active so the question appears immediately
+    if (sessionState.status === 'question_active') {
+      setShowChatHistoryModal(false);
+    }
   }, [sessionState, currentQuestionKey, username, sheetNumber]);
 
   // Local Countdown ticker
@@ -210,8 +215,6 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
   const html5QrcodeRef = useRef<Html5Qrcode | null>(null);
 
   // Student Question & Reaction modal state
-  const [showAskModal, setShowAskModal] = useState(false);
-  const [studentQuestionInput, setStudentQuestionInput] = useState('');
   const [isSendingMessage, setIsSendingMessage] = useState(false);
   const [messageSuccessBanner, setMessageSuccessBanner] = useState<string | null>(null);
   const [showChatHistoryModal, setShowChatHistoryModal] = useState(false);
@@ -555,8 +558,6 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
 
       setMessageSuccessBanner(label);
       setTimeout(() => setMessageSuccessBanner(null), 4000);
-      setStudentQuestionInput('');
-      setShowAskModal(false);
     } catch (err: any) {
       console.error('Error sending student message:', err);
     } finally {
@@ -588,27 +589,26 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
             </p>
           </div>
 
-          {/* Accidental Exit Recovery Banner */}
+          {/* Compact Accidental Exit Recovery Bar (Slim & Clean) */}
           {username.trim().length > 0 && studentPin.trim().length > 0 && (
             <motion.div 
               initial={{ opacity: 0, y: -5 }}
               animate={{ opacity: 1, y: 0 }}
-              className="bg-indigo-950/60 border border-indigo-500/30 rounded-2xl p-4 mb-5 text-right relative overflow-hidden"
+              className="bg-indigo-950/70 border border-indigo-500/40 rounded-2xl p-2.5 mb-4 text-right flex items-center justify-between gap-2"
             >
-              <div className="flex items-center gap-2 mb-1.5 text-amber-400 font-bold text-xs">
-                <Sparkles className="w-4 h-4 text-amber-400" />
-                <span>مرحباً بك مجدداً يا {username}! 👋</span>
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                <span className="text-xs text-slate-200 font-bold truncate">
+                  مرحباً {username}، هل ترغب بالاستئناف؟
+                </span>
               </div>
-              <p className="text-[11px] text-slate-300 leading-relaxed mb-3 font-medium">
-                إذا أغلقت الصفحة بالخطأ، يمكنك النقر على الزر أدناه للعودة واستئناف الحصة فوراً بدون فقدان إجاباتك السابقة.
-              </p>
               <button
                 type="button"
                 onClick={() => handleJoin(username, sheetNumber, studentPin)}
-                className="w-full py-2.5 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white rounded-xl text-xs font-black shadow-lg shadow-emerald-900/30 transition-all cursor-pointer flex items-center justify-center gap-2"
+                className="py-1.5 px-3 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white rounded-xl text-xs font-black shadow-md transition-all cursor-pointer flex items-center gap-1 shrink-0 active:scale-95"
               >
-                <ArrowRight className="w-4 h-4" />
-                <span>العودة للحصة المباشرة فوراً 🚀</span>
+                <span>استئناف الحصة 🚀</span>
+                <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </motion.div>
           )}
@@ -1098,196 +1098,39 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
         </AnimatePresence>
       </main>
 
-      {/* Student Floating Interactive Action Bar (اسأل المعلم + رفع اليد + موافق/غير موافق) */}
+      {/* Student Floating Interactive Action Bar (زر موحد واحد: محادثة مع الأستاذ) */}
       <div className="sticky bottom-0 z-30 p-3 bg-slate-900/95 backdrop-blur-md border-t border-slate-800">
-        <div className="max-w-xl mx-auto flex items-center justify-between gap-2">
-          {/* Quick Reaction Icons: Hand, Agree, Disagree */}
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => handleSendStudentReaction('hand')}
-              disabled={isSendingMessage}
-              title="رفع اليد لطلب الكلمة أو الاستفسار ✋"
-              className="p-2.5 rounded-2xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 text-xs font-bold shadow-sm"
-            >
-              <Hand className="w-4 h-4 text-amber-400" />
-              <span className="hidden sm:inline">رفع اليد</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleSendStudentReaction('agree')}
-              disabled={isSendingMessage}
-              title="أوافق الأستاذ على النقطة المطروحة 👍"
-              className="p-2.5 rounded-2xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 text-xs font-bold shadow-sm"
-            >
-              <ThumbsUp className="w-4 h-4 text-emerald-400" />
-              <span className="hidden sm:inline">موافق</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleSendStudentReaction('disagree')}
-              disabled={isSendingMessage}
-              title="غير موافق أو غير واضح 👎"
-              className="p-2.5 rounded-2xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 text-xs font-bold shadow-sm"
-            >
-              <ThumbsDown className="w-4 h-4 text-rose-400" />
-              <span className="hidden sm:inline">غير موافق</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleSendStudentReaction('clap')}
-              disabled={isSendingMessage}
-              title="تصفيق وتشجيع 👏"
-              className="p-2.5 rounded-2xl bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-500/30 text-indigo-300 transition-all cursor-pointer active:scale-95 flex items-center text-xs font-bold shadow-sm"
-            >
-              <Sparkles className="w-4 h-4 text-indigo-400" />
-            </button>
+        <div className="max-w-xl mx-auto flex items-center justify-between gap-3">
+          <div className="text-xs text-slate-400 font-bold flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span>متصل بالحصة التفاعلية</span>
           </div>
 
-          {/* Main Action: Ask Teacher Button */}
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setShowChatHistoryModal(true);
-                setHasUnreadReplies(false);
-              }}
-              title="عرض سجل المحادثة وردود الأستاذ"
-              className={`p-2.5 rounded-2xl border transition-all cursor-pointer relative ${
-                hasUnreadReplies
-                  ? 'bg-amber-500/20 border-amber-400 text-amber-300 animate-pulse'
-                  : 'bg-slate-800 hover:bg-slate-750 border-slate-700 text-slate-300'
-              }`}
-            >
-              <MessageSquare className="w-4 h-4" />
-              {hasUnreadReplies && (
-                <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-amber-400 animate-ping" />
-              )}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setShowAskModal(true)}
-              className="py-2.5 px-4 bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-600 hover:from-indigo-500 hover:to-purple-500 text-white font-black text-xs rounded-2xl shadow-lg shadow-indigo-600/30 flex items-center gap-2 transition-all cursor-pointer active:scale-95"
-            >
-              <MessageSquare className="w-4 h-4" />
-              <span>اسأل المعلم 💬</span>
-            </button>
-          </div>
+          {/* Single Unified Action: محادثة مع الأستاذ */}
+          <button
+            type="button"
+            onClick={() => {
+              setShowChatHistoryModal(true);
+              setHasUnreadReplies(false);
+            }}
+            className={`py-2.5 px-5 rounded-2xl font-black text-xs flex items-center gap-2 transition-all cursor-pointer shadow-lg active:scale-95 ${
+              hasUnreadReplies
+                ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 shadow-amber-500/30 animate-pulse'
+                : 'bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-600 hover:from-indigo-500 hover:to-purple-500 text-white shadow-indigo-600/30'
+            }`}
+          >
+            <MessageSquare className="w-4 h-4" />
+            <span>محادثة مع الأستاذ 💬</span>
+            {hasUnreadReplies && (
+              <span className="px-1.5 py-0.2 rounded-full bg-slate-950 text-amber-300 text-[10px] font-mono font-bold animate-ping">
+                رد جديد!
+              </span>
+            )}
+          </button>
         </div>
       </div>
 
-      {/* Ask Teacher Small Dialog Window (نافذة صغيرة لكتابة سؤاله أو استفساره) */}
-      <AnimatePresence>
-        {showAskModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 15 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 15 }}
-              className="w-full max-w-md bg-slate-900 border border-indigo-500/40 rounded-3xl p-5 sm:p-6 shadow-2xl space-y-4 text-right"
-              dir="rtl"
-            >
-              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-                <div className="flex items-center gap-2.5 text-indigo-400 font-black text-sm">
-                  <div className="w-8 h-8 rounded-xl bg-indigo-500/20 flex items-center justify-center">
-                    <MessageSquare className="w-4 h-4" />
-                  </div>
-                  <span>اسأل المعلم أثناء الحصة 💬</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowAskModal(false)}
-                  className="p-1.5 text-slate-400 hover:text-white rounded-xl bg-slate-800 hover:bg-slate-700 transition-all cursor-pointer"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              {/* Quick Reaction Icons Inside Modal */}
-              <div>
-                <label className="block text-xs font-bold text-slate-400 mb-2">
-                  أو اختر تفاعلاً سريعاً بنقرة واحدة:
-                </label>
-                <div className="grid grid-cols-4 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleSendStudentReaction('hand')}
-                    className="p-2.5 rounded-2xl bg-amber-500/15 hover:bg-amber-500/30 border border-amber-500/30 text-amber-300 text-xs font-bold flex flex-col items-center gap-1 transition-all cursor-pointer"
-                  >
-                    <Hand className="w-5 h-5 text-amber-400" />
-                    <span>رفع اليد ✋</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSendStudentReaction('agree')}
-                    className="p-2.5 rounded-2xl bg-emerald-500/15 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-300 text-xs font-bold flex flex-col items-center gap-1 transition-all cursor-pointer"
-                  >
-                    <ThumbsUp className="w-5 h-5 text-emerald-400" />
-                    <span>موافق 👍</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSendStudentReaction('disagree')}
-                    className="p-2.5 rounded-2xl bg-rose-500/15 hover:bg-rose-500/30 border border-rose-500/30 text-rose-300 text-xs font-bold flex flex-col items-center gap-1 transition-all cursor-pointer"
-                  >
-                    <ThumbsDown className="w-5 h-5 text-rose-400" />
-                    <span>معارض 👎</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSendStudentReaction('clap')}
-                    className="p-2.5 rounded-2xl bg-indigo-500/15 hover:bg-indigo-500/30 border border-indigo-500/30 text-indigo-300 text-xs font-bold flex flex-col items-center gap-1 transition-all cursor-pointer"
-                  >
-                    <Sparkles className="w-5 h-5 text-indigo-400" />
-                    <span>تشجيع 👏</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Text Input for question */}
-              <div>
-                <label className="block text-xs font-bold text-slate-300 mb-1.5">
-                  اكتب سؤالك أو استفسارك للأستاذ:
-                </label>
-                <textarea
-                  value={studentQuestionInput}
-                  onChange={(e) => setStudentQuestionInput(e.target.value)}
-                  placeholder="مثال: يا أستاذ هل يمكن إعادة توضيح النقطة السابقة؟"
-                  rows={3}
-                  className="w-full px-4 py-3 bg-slate-950 border border-slate-750 focus:border-indigo-400 rounded-2xl text-slate-100 text-xs font-bold outline-none resize-none transition-all placeholder:text-slate-600"
-                  autoFocus
-                />
-              </div>
-
-              {/* Buttons */}
-              <div className="flex items-center gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => setShowAskModal(false)}
-                  className="py-2.5 px-4 bg-slate-800 hover:bg-slate-750 text-slate-400 rounded-2xl text-xs font-bold cursor-pointer transition-all"
-                >
-                  إلغاء
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSendStudentReaction('question', studentQuestionInput)}
-                  disabled={!studentQuestionInput.trim() || isSendingMessage}
-                  className="flex-1 py-2.5 px-4 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white font-black text-xs rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/30 transition-all cursor-pointer disabled:opacity-40"
-                >
-                  <Send className="w-4 h-4" />
-                  <span>{isSendingMessage ? 'جارٍ الإرسال...' : 'إرسال السؤال للأستاذ 🚀'}</span>
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Student Chat History and Teacher Replies Modal */}
+      {/* Unified Student Chat & Reactions Modal */}
       <LiveChatModal
         isOpen={showChatHistoryModal}
         onClose={() => setShowChatHistoryModal(false)}
@@ -1298,7 +1141,11 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
         showChatInRoom={Boolean(sessionState?.showChatInRoom)}
         onToggleShowInRoom={async () => {}}
         currentUserName={username}
+        currentUserSheet={sheetNumber}
         isTeacher={false}
+        onSendStudentMessage={async (type, text) => {
+          await handleSendStudentReaction(type, text);
+        }}
       />
 
       {/* Footer Info */}
