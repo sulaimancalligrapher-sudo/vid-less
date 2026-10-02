@@ -11,7 +11,8 @@ import {
   LiveSessionState, 
   LiveQuestionItem, 
   LiveConnectedStudent, 
-  LiveStudentAnswerSubmission 
+  LiveStudentAnswerSubmission,
+  LiveStudentMessage
 } from '../types';
 
 const LIVE_DOC_REF = doc(db, 'live_sessions', 'main');
@@ -31,6 +32,8 @@ export const defaultLiveSessionState: LiveSessionState = {
   videoPlaying: false,
   showOptionCountsInRoom: false,
   showStudentTextAnswersInRoom: false,
+  showChatInRoom: false,
+  messages: [],
   lessonTitle: '',
   videoUrl: '',
   status: 'idle',
@@ -81,6 +84,8 @@ export function subscribeToLiveSession(
           videoPlaying: Boolean(data.videoPlaying),
           showOptionCountsInRoom: Boolean(data.showOptionCountsInRoom),
           showStudentTextAnswersInRoom: Boolean(data.showStudentTextAnswersInRoom),
+          showChatInRoom: Boolean(data.showChatInRoom),
+          messages: Array.isArray(data.messages) ? data.messages : [],
           lessonTitle: data.lessonTitle || '',
           videoUrl: data.videoUrl || '',
           status: data.status || 'idle',
@@ -784,6 +789,126 @@ export async function toggleLiveVideoPlay(playing: boolean): Promise<{ success: 
     return { success: true, state: cachedState };
   } catch (error: any) {
     console.error('Failed to toggle videoPlay in Firebase:', error);
+    return { success: false };
+  }
+}
+
+// Student sends a message or reaction (Raise Hand, Agree, Disagree, Question, Clap)
+export async function sendStudentMessage(payload: {
+  senderName: string;
+  sheetNumber?: string;
+  type: 'question' | 'hand' | 'agree' | 'disagree' | 'clap';
+  text?: string;
+}): Promise<{ success: boolean; messageId: string }> {
+  try {
+    const newMessage: LiveStudentMessage = {
+      id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      senderName: payload.senderName.trim(),
+      sheetNumber: payload.sheetNumber?.trim() || '',
+      type: payload.type,
+      text: payload.text?.trim() || '',
+      createdAt: Date.now(),
+    };
+
+    const currentMessages = cachedState.messages || [];
+    // Keep last 100 messages to prevent document size bloat
+    const updatedMessages = [...currentMessages.slice(-99), newMessage];
+
+    await updateDoc(LIVE_DOC_REF, {
+      messages: updatedMessages,
+      updatedAt: serverTimestamp(),
+    });
+
+    cachedState = { ...cachedState, messages: updatedMessages };
+    return { success: true, messageId: newMessage.id };
+  } catch (error: any) {
+    console.error('Failed to send student message:', error);
+    throw error;
+  }
+}
+
+// Teacher replies to a student message (private or public)
+export async function replyToStudentMessage(
+  messageId: string,
+  replyText: string,
+  replyType: 'private' | 'public'
+): Promise<{ success: boolean }> {
+  try {
+    const currentMessages = cachedState.messages || [];
+    const updatedMessages = currentMessages.map((msg) => {
+      if (msg.id === messageId) {
+        return {
+          ...msg,
+          reply: {
+            text: replyText.trim(),
+            type: replyType,
+            repliedAt: Date.now(),
+            repliedBy: 'الأستاذ',
+          },
+        };
+      }
+      return msg;
+    });
+
+    await updateDoc(LIVE_DOC_REF, {
+      messages: updatedMessages,
+      updatedAt: serverTimestamp(),
+    });
+
+    cachedState = { ...cachedState, messages: updatedMessages };
+    return { success: true };
+  } catch (error: any) {
+    console.error('Failed to reply to student message:', error);
+    throw error;
+  }
+}
+
+// Teacher deletes a specific student message
+export async function deleteStudentMessage(messageId: string): Promise<{ success: boolean }> {
+  try {
+    const currentMessages = cachedState.messages || [];
+    const updatedMessages = currentMessages.filter((m) => m.id !== messageId);
+
+    await updateDoc(LIVE_DOC_REF, {
+      messages: updatedMessages,
+      updatedAt: serverTimestamp(),
+    });
+
+    cachedState = { ...cachedState, messages: updatedMessages };
+    return { success: true };
+  } catch (error: any) {
+    console.error('Failed to delete student message:', error);
+    throw error;
+  }
+}
+
+// Teacher clears all student messages
+export async function clearAllStudentMessages(): Promise<{ success: boolean }> {
+  try {
+    await updateDoc(LIVE_DOC_REF, {
+      messages: [],
+      updatedAt: serverTimestamp(),
+    });
+
+    cachedState = { ...cachedState, messages: [] };
+    return { success: true };
+  } catch (error: any) {
+    console.error('Failed to clear student messages:', error);
+    throw error;
+  }
+}
+
+// Toggle showing chat / messages on projector display screen
+export async function toggleShowChatInRoom(show: boolean): Promise<{ success: boolean; state?: LiveSessionState }> {
+  try {
+    await updateDoc(LIVE_DOC_REF, {
+      showChatInRoom: show,
+      updatedAt: serverTimestamp(),
+    });
+    cachedState = { ...cachedState, showChatInRoom: show };
+    return { success: true, state: cachedState };
+  } catch (error: any) {
+    console.error('Failed to toggle showChatInRoom in Firebase:', error);
     return { success: false };
   }
 }

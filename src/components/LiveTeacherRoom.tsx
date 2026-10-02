@@ -5,7 +5,7 @@ import {
   QrCode, Users, CheckCircle2, AlertCircle, AlertTriangle, Sparkles, 
   ChevronRight, ChevronLeft, ArrowLeft, RefreshCw, FileSpreadsheet, 
   Eye, FastForward, Clock, ShieldAlert, Check, X, Award, ExternalLink, Copy,
-  KeyRound, ShieldCheck, Tv
+  KeyRound, ShieldCheck, Tv, MessageSquare
 } from 'lucide-react';
 import { 
   LiveLessonRow, LiveQuestionItem, LiveSessionState, LiveConnectedStudent, LiveAnswerRecord, LiveStudentAnswerSubmission, evaluateLiveAnswer, normalizeArabicText 
@@ -15,8 +15,10 @@ import {
   finishLiveSession, resetLiveSession, getLiveSessionState, recordLiveAnswersBatchT,
   updateLivePin, leaveLiveSession,
   formatSecondsToTime, parseTimeToSeconds, formatDriveImageUrl,
-  subscribeToLiveSession, toggleShowQrInRoom, toggleLiveVideoPlay
+  subscribeToLiveSession, toggleShowQrInRoom, toggleLiveVideoPlay,
+  replyToStudentMessage, deleteStudentMessage, clearAllStudentMessages, toggleShowChatInRoom
 } from '../api';
+import LiveChatModal from './LiveChatModal';
 
 interface LiveTeacherRoomProps {
   initialLesson?: LiveLessonRow;
@@ -83,6 +85,32 @@ export default function LiveTeacherRoom({
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedPin, setCopiedPin] = useState(false);
 
+  // Chat Modal and Live Audio Alert in Theater Room
+  const [showChatModal, setShowChatModal] = useState(false);
+  const [hasNewMessagesAlert, setHasNewMessagesAlert] = useState(false);
+  const prevRoomMessagesCountRef = useRef<number>(0);
+
+  const playRoomNewMessageSound = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) {
+        const ctx = new AudioCtx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(440, ctx.currentTime);
+        osc.frequency.setValueAtTime(659.25, ctx.currentTime + 0.12);
+        osc.frequency.setValueAtTime(880, ctx.currentTime + 0.24);
+        gain.gain.setValueAtTime(0.2, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.45);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.45);
+      }
+    } catch {}
+  };
+
   // Unsaved Answers Safety Prompt States
   const [showUnsavedPrompt, setShowUnsavedPrompt] = useState(false);
   const [showFinishConfirmModal, setShowFinishConfirmModal] = useState(false);
@@ -134,7 +162,15 @@ export default function LiveTeacherRoom({
   // Connect to Live Session via Firebase Real-time WebSockets
   useEffect(() => {
     const unsubscribe = subscribeToLiveSession((state) => {
-      if (state) setSessionState(state);
+      if (state) {
+        setSessionState(state);
+        const newCount = (state.messages || []).length;
+        if (prevRoomMessagesCountRef.current > 0 && newCount > prevRoomMessagesCountRef.current) {
+          playRoomNewMessageSound();
+          setHasNewMessagesAlert(true);
+        }
+        prevRoomMessagesCountRef.current = newCount;
+      }
     });
 
     return () => {
@@ -723,6 +759,30 @@ export default function LiveTeacherRoom({
               )}
               <span>
                 {isFinishingLesson ? 'جارٍ الحفظ والإنهاء...' : 'إنهاء الدرس'}
+              </span>
+            </button>
+          )}
+
+          {/* Chat & Student Messages Button (Controlled via Admin showChatInRoom) */}
+          {sessionState?.showChatInRoom && (
+            <button
+              onClick={() => {
+                setShowChatModal(true);
+                setHasNewMessagesAlert(false);
+              }}
+              title="عرض محادثة وأسئلة الطلاب على شاشة العرض"
+              className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-md animate-in fade-in ${
+                hasNewMessagesAlert
+                  ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 border border-amber-300 shadow-amber-500/40 animate-pulse'
+                  : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-600/20'
+              }`}
+            >
+              <MessageSquare className="w-4 h-4" />
+              <span>المحادثة</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-black ${
+                hasNewMessagesAlert ? 'bg-black text-amber-300' : 'bg-black/20 text-white'
+              }`}>
+                {(sessionState?.messages || []).length}
               </span>
             </button>
           )}
@@ -1431,6 +1491,27 @@ export default function LiveTeacherRoom({
           </div>
         )}
       </AnimatePresence>
+
+      {/* Classroom Projector / Teacher Theater Chat Modal */}
+      <LiveChatModal
+        isOpen={showChatModal}
+        onClose={() => setShowChatModal(false)}
+        messages={sessionState?.messages || []}
+        onReply={async (messageId, replyText, replyType) => {
+          await replyToStudentMessage(messageId, replyText, replyType);
+        }}
+        onDeleteMessage={async (messageId) => {
+          await deleteStudentMessage(messageId);
+        }}
+        onClearAll={async () => {
+          await clearAllStudentMessages();
+        }}
+        showChatInRoom={Boolean(sessionState?.showChatInRoom)}
+        onToggleShowInRoom={async (show) => {
+          await toggleShowChatInRoom(show);
+        }}
+        isTeacher={true}
+      />
     </div>
   );
 }

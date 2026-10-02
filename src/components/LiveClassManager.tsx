@@ -1,11 +1,12 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Tv, Plus, Play, Edit3, Trash2, Save, FileSpreadsheet, 
   Users, CheckCircle2, Clock, HelpCircle, Image, ExternalLink, 
   RefreshCw, Search, QrCode, Copy, Check, Sparkles, ChevronDown, 
   ChevronUp, ArrowLeft, AlertCircle, X, KeyRound, ShieldCheck, UserX,
-  Power, ShieldAlert, DownloadCloud, History, ListVideo, Eye, EyeOff, FastForward, Pause
+  Power, ShieldAlert, DownloadCloud, History, ListVideo, Eye, EyeOff, FastForward, Pause,
+  MessageSquare
 } from 'lucide-react';
 import { 
   LiveLessonRow, LiveQuestionItem, LiveAnswerRecord, LiveSessionState, evaluateLiveAnswer, normalizeArabicText 
@@ -20,8 +21,10 @@ import {
   toggleShowPlayPauseInRoom, toggleLiveVideoPlay,
   toggleShowOptionCountsInRoom, toggleShowStudentTextAnswersInRoom,
   finishLiveSession, revealLiveAnswer, resumeLiveVideo,
-  initLiveSession, triggerLiveQuestion
+  initLiveSession, triggerLiveQuestion,
+  replyToStudentMessage, deleteStudentMessage, clearAllStudentMessages, toggleShowChatInRoom
 } from '../api';
+import LiveChatModal from './LiveChatModal';
 
 interface LiveClassManagerProps {
   onStartTeacherTheater: (lesson: LiveLessonRow) => void;
@@ -103,6 +106,34 @@ export default function LiveClassManager({
   const [isRevealingAnswer, setIsRevealingAnswer] = useState(false);
   const [isSkippingQuestion, setIsSkippingQuestion] = useState(false);
 
+  // Chat and student messaging states
+  const [showChatModal, setShowChatModal] = useState(false);
+  const [isUpdatingChatVisibility, setIsUpdatingChatVisibility] = useState(false);
+  const prevTeacherMsgCountRef = useRef<number>(0);
+  const [hasNewMessagesAlert, setHasNewMessagesAlert] = useState(false);
+
+  // Play audio chime when student sends a question or reaction
+  const playNewMessageNotificationSound = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) {
+        const ctx = new AudioCtx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(440, ctx.currentTime); // A4
+        osc.frequency.setValueAtTime(659.25, ctx.currentTime + 0.12); // E5
+        osc.frequency.setValueAtTime(880, ctx.currentTime + 0.24); // A5
+        gain.gain.setValueAtTime(0.2, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.45);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.45);
+      }
+    } catch {}
+  };
+
   // Link copy state
   const [copiedLink, setCopiedLink] = useState(false);
 
@@ -116,7 +147,15 @@ export default function LiveClassManager({
   // Listen to Live Session updates via Firebase Real-time WebSockets
   useEffect(() => {
     const unsubscribe = subscribeToLiveSession((s) => {
-      if (s) setSessionState(s);
+      if (s) {
+        setSessionState(s);
+        const newCount = (s.messages || []).length;
+        if (prevTeacherMsgCountRef.current > 0 && newCount > prevTeacherMsgCountRef.current) {
+          playNewMessageNotificationSound();
+          setHasNewMessagesAlert(true);
+        }
+        prevTeacherMsgCountRef.current = newCount;
+      }
     });
 
     return () => {
@@ -1456,6 +1495,59 @@ export default function LiveClassManager({
                     {sessionState?.showFinishLessonInRoom ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
                   </button>
                 </div>
+
+                {/* 3. زر محادثة مع الطلاب + إظهار/إخفاء على شاشة العرض */}
+                <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 p-1.5 rounded-xl shadow-sm">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowChatModal(true);
+                      setHasNewMessagesAlert(false);
+                    }}
+                    title="فتح نافذة محادثات وأسئلة وتفاعلات الطلاب"
+                    className={`px-3 py-1.5 rounded-lg text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer border ${
+                      hasNewMessagesAlert
+                        ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 border-amber-300 shadow-lg shadow-amber-500/30 animate-pulse'
+                        : (sessionState?.messages || []).length > 0
+                        ? 'bg-indigo-600/30 hover:bg-indigo-600 text-indigo-300 hover:text-white border-indigo-500/40'
+                        : 'bg-slate-950 hover:bg-slate-800 text-slate-300 border-slate-800'
+                    }`}
+                  >
+                    <MessageSquare className="w-3.5 h-3.5" />
+                    <span>محادثة</span>
+                    <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-black ${
+                      hasNewMessagesAlert
+                        ? 'bg-black text-amber-300'
+                        : 'bg-slate-800 text-indigo-300'
+                    }`}>
+                      {(sessionState?.messages || []).length}
+                    </span>
+                  </button>
+
+                  {/* زر إظهار وإخفاء المحادثة في شاشة العرض (أيقونة العين فقط بدون نص) */}
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        setIsUpdatingChatVisibility(true);
+                        await toggleShowChatInRoom(!sessionState?.showChatInRoom);
+                      } catch (e) {
+                        console.error('Failed to toggle chat visibility in room:', e);
+                      } finally {
+                        setIsUpdatingChatVisibility(false);
+                      }
+                    }}
+                    disabled={isUpdatingChatVisibility}
+                    title={sessionState?.showChatInRoom ? 'إخفاء المحادثة من شاشة العرض' : 'إظهار المحادثة في شاشة العرض'}
+                    className={`p-1.5 rounded-lg transition-all cursor-pointer border ${
+                      sessionState?.showChatInRoom
+                        ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
+                        : 'bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border-slate-800'
+                    }`}
+                  >
+                    {sessionState?.showChatInRoom ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
 
               {/* 3. توقيت الأسئلة (المنقول من شاشة العرض) */}
@@ -2608,6 +2700,26 @@ export default function LiveClassManager({
           </div>
         )}
       </AnimatePresence>
+      {/* Student Chat & Messages Modal (Teacher Administration) */}
+      <LiveChatModal
+        isOpen={showChatModal}
+        onClose={() => setShowChatModal(false)}
+        messages={sessionState?.messages || []}
+        onReply={async (messageId, replyText, replyType) => {
+          await replyToStudentMessage(messageId, replyText, replyType);
+        }}
+        onDeleteMessage={async (messageId) => {
+          await deleteStudentMessage(messageId);
+        }}
+        onClearAll={async () => {
+          await clearAllStudentMessages();
+        }}
+        showChatInRoom={Boolean(sessionState?.showChatInRoom)}
+        onToggleShowInRoom={async (show) => {
+          await toggleShowChatInRoom(show);
+        }}
+        isTeacher={true}
+      />
     </div>
   );
 }

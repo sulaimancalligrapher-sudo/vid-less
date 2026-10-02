@@ -4,16 +4,17 @@ import {
   Tv, Sparkles, CheckCircle2, XCircle, Clock, Send, 
   User, Hash, LogOut, ArrowRight, Volume2, HelpCircle, 
   Award, ShieldAlert, Wifi, WifiOff, Loader2,
-  KeyRound, ShieldCheck, Camera, QrCode, X
+  KeyRound, ShieldCheck, Camera, QrCode, X, MessageSquare, Hand, ThumbsUp, ThumbsDown
 } from 'lucide-react';
 import { Html5Qrcode } from 'html5-qrcode';
 import { 
-  LiveSessionState, LiveQuestionItem, evaluateLiveAnswer 
+  LiveSessionState, LiveQuestionItem, evaluateLiveAnswer, LiveStudentMessage
 } from '../types';
 import { 
   getLiveSessionState, joinLiveSession, pingLiveSession, leaveLiveSession, submitLiveAnswer, 
-  formatDriveImageUrl, subscribeToLiveSession 
+  formatDriveImageUrl, subscribeToLiveSession, sendStudentMessage, replyToStudentMessage, deleteStudentMessage, clearAllStudentMessages, toggleShowChatInRoom
 } from '../api';
+import LiveChatModal from './LiveChatModal';
 import { useLanguage } from '../translations';
 
 interface LiveStudentViewProps {
@@ -207,6 +208,17 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
   const [scannerError, setScannerError] = useState<string | null>(null);
   const [scanSuccessMsg, setScanSuccessMsg] = useState<string | null>(null);
   const html5QrcodeRef = useRef<Html5Qrcode | null>(null);
+
+  // Student Question & Reaction modal state
+  const [showAskModal, setShowAskModal] = useState(false);
+  const [studentQuestionInput, setStudentQuestionInput] = useState('');
+  const [isSendingMessage, setIsSendingMessage] = useState(false);
+  const [messageSuccessBanner, setMessageSuccessBanner] = useState<string | null>(null);
+  const [showChatHistoryModal, setShowChatHistoryModal] = useState(false);
+
+  // Track previous message count for audio alert & new notification badge
+  const prevMessagesCountRef = useRef<number>(0);
+  const [hasUnreadReplies, setHasUnreadReplies] = useState(false);
 
   // Stop & cleanup QR scanner
   const stopScanner = async () => {
@@ -480,6 +492,75 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
       console.error('Error submitting answer:', err);
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  // Play subtle notification tone for replies
+  const playReplySound = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) {
+        const ctx = new AudioCtx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+        osc.frequency.setValueAtTime(880, ctx.currentTime + 0.1); // A5
+        gain.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.35);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.35);
+      }
+    } catch {}
+  };
+
+  // Check for new teacher replies targeted at this student
+  useEffect(() => {
+    if (!sessionState?.messages || !isJoined) return;
+    const myCleanName = username.trim().toLowerCase();
+    const myMessages = sessionState.messages.filter(
+      (m) => m.senderName.trim().toLowerCase() === myCleanName
+    );
+    const hasAnyReply = myMessages.some((m) => m.reply?.text);
+    if (hasAnyReply && prevMessagesCountRef.current < sessionState.messages.length) {
+      // New reply or message received
+      playReplySound();
+      setHasUnreadReplies(true);
+    }
+    prevMessagesCountRef.current = sessionState.messages.length;
+  }, [sessionState?.messages, isJoined, username]);
+
+  // Send Student Message or Reaction
+  const handleSendStudentReaction = async (
+    type: 'question' | 'hand' | 'agree' | 'disagree' | 'clap',
+    text?: string
+  ) => {
+    if (!username.trim()) return;
+    try {
+      setIsSendingMessage(true);
+      await sendStudentMessage({
+        senderName: username.trim(),
+        sheetNumber: sheetNumber.trim(),
+        type,
+        text: text?.trim() || undefined,
+      });
+
+      let label = 'تم إرسال رسالتك للأستاذ بنجاح! 📨';
+      if (type === 'hand') label = 'تم رفع يدك للأستاذ بنجاح ✋';
+      if (type === 'agree') label = 'تم تسجيل موافقتك بنجاح 👍';
+      if (type === 'disagree') label = 'تم تسجيل عدم موافقتك بنجاح 👎';
+      if (type === 'clap') label = 'تم إرسال تشجيع وتصفيق للأستاذ 👏';
+
+      setMessageSuccessBanner(label);
+      setTimeout(() => setMessageSuccessBanner(null), 4000);
+      setStudentQuestionInput('');
+      setShowAskModal(false);
+    } catch (err: any) {
+      console.error('Error sending student message:', err);
+    } finally {
+      setIsSendingMessage(false);
     }
   };
 
@@ -759,7 +840,22 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
       </header>
 
       {/* Main Dynamic Interactive Body */}
-      <main className="flex-1 max-w-xl w-full mx-auto p-4 flex flex-col justify-center">
+      <main className="flex-1 max-w-xl w-full mx-auto p-4 flex flex-col justify-center relative">
+        {/* Success toast after sending question or reaction */}
+        <AnimatePresence>
+          {messageSuccessBanner && (
+            <motion.div
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="absolute top-2 left-4 right-4 z-30 p-3 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-bold rounded-2xl text-xs flex items-center justify-center gap-2 shadow-xl backdrop-blur-md"
+            >
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>{messageSuccessBanner}</span>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <AnimatePresence mode="wait">
           {/* CASE A: Active Question Mode */}
           {isQuestionActive ? (
@@ -1002,8 +1098,211 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
         </AnimatePresence>
       </main>
 
+      {/* Student Floating Interactive Action Bar (اسأل المعلم + رفع اليد + موافق/غير موافق) */}
+      <div className="sticky bottom-0 z-30 p-3 bg-slate-900/95 backdrop-blur-md border-t border-slate-800">
+        <div className="max-w-xl mx-auto flex items-center justify-between gap-2">
+          {/* Quick Reaction Icons: Hand, Agree, Disagree */}
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => handleSendStudentReaction('hand')}
+              disabled={isSendingMessage}
+              title="رفع اليد لطلب الكلمة أو الاستفسار ✋"
+              className="p-2.5 rounded-2xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 text-xs font-bold shadow-sm"
+            >
+              <Hand className="w-4 h-4 text-amber-400" />
+              <span className="hidden sm:inline">رفع اليد</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleSendStudentReaction('agree')}
+              disabled={isSendingMessage}
+              title="أوافق الأستاذ على النقطة المطروحة 👍"
+              className="p-2.5 rounded-2xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 text-xs font-bold shadow-sm"
+            >
+              <ThumbsUp className="w-4 h-4 text-emerald-400" />
+              <span className="hidden sm:inline">موافق</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleSendStudentReaction('disagree')}
+              disabled={isSendingMessage}
+              title="غير موافق أو غير واضح 👎"
+              className="p-2.5 rounded-2xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 transition-all cursor-pointer active:scale-95 flex items-center gap-1.5 text-xs font-bold shadow-sm"
+            >
+              <ThumbsDown className="w-4 h-4 text-rose-400" />
+              <span className="hidden sm:inline">غير موافق</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleSendStudentReaction('clap')}
+              disabled={isSendingMessage}
+              title="تصفيق وتشجيع 👏"
+              className="p-2.5 rounded-2xl bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-500/30 text-indigo-300 transition-all cursor-pointer active:scale-95 flex items-center text-xs font-bold shadow-sm"
+            >
+              <Sparkles className="w-4 h-4 text-indigo-400" />
+            </button>
+          </div>
+
+          {/* Main Action: Ask Teacher Button */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setShowChatHistoryModal(true);
+                setHasUnreadReplies(false);
+              }}
+              title="عرض سجل المحادثة وردود الأستاذ"
+              className={`p-2.5 rounded-2xl border transition-all cursor-pointer relative ${
+                hasUnreadReplies
+                  ? 'bg-amber-500/20 border-amber-400 text-amber-300 animate-pulse'
+                  : 'bg-slate-800 hover:bg-slate-750 border-slate-700 text-slate-300'
+              }`}
+            >
+              <MessageSquare className="w-4 h-4" />
+              {hasUnreadReplies && (
+                <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-amber-400 animate-ping" />
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowAskModal(true)}
+              className="py-2.5 px-4 bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-600 hover:from-indigo-500 hover:to-purple-500 text-white font-black text-xs rounded-2xl shadow-lg shadow-indigo-600/30 flex items-center gap-2 transition-all cursor-pointer active:scale-95"
+            >
+              <MessageSquare className="w-4 h-4" />
+              <span>اسأل المعلم 💬</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Ask Teacher Small Dialog Window (نافذة صغيرة لكتابة سؤاله أو استفساره) */}
+      <AnimatePresence>
+        {showAskModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              className="w-full max-w-md bg-slate-900 border border-indigo-500/40 rounded-3xl p-5 sm:p-6 shadow-2xl space-y-4 text-right"
+              dir="rtl"
+            >
+              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                <div className="flex items-center gap-2.5 text-indigo-400 font-black text-sm">
+                  <div className="w-8 h-8 rounded-xl bg-indigo-500/20 flex items-center justify-center">
+                    <MessageSquare className="w-4 h-4" />
+                  </div>
+                  <span>اسأل المعلم أثناء الحصة 💬</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowAskModal(false)}
+                  className="p-1.5 text-slate-400 hover:text-white rounded-xl bg-slate-800 hover:bg-slate-700 transition-all cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Quick Reaction Icons Inside Modal */}
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-2">
+                  أو اختر تفاعلاً سريعاً بنقرة واحدة:
+                </label>
+                <div className="grid grid-cols-4 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleSendStudentReaction('hand')}
+                    className="p-2.5 rounded-2xl bg-amber-500/15 hover:bg-amber-500/30 border border-amber-500/30 text-amber-300 text-xs font-bold flex flex-col items-center gap-1 transition-all cursor-pointer"
+                  >
+                    <Hand className="w-5 h-5 text-amber-400" />
+                    <span>رفع اليد ✋</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSendStudentReaction('agree')}
+                    className="p-2.5 rounded-2xl bg-emerald-500/15 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-300 text-xs font-bold flex flex-col items-center gap-1 transition-all cursor-pointer"
+                  >
+                    <ThumbsUp className="w-5 h-5 text-emerald-400" />
+                    <span>موافق 👍</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSendStudentReaction('disagree')}
+                    className="p-2.5 rounded-2xl bg-rose-500/15 hover:bg-rose-500/30 border border-rose-500/30 text-rose-300 text-xs font-bold flex flex-col items-center gap-1 transition-all cursor-pointer"
+                  >
+                    <ThumbsDown className="w-5 h-5 text-rose-400" />
+                    <span>معارض 👎</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSendStudentReaction('clap')}
+                    className="p-2.5 rounded-2xl bg-indigo-500/15 hover:bg-indigo-500/30 border border-indigo-500/30 text-indigo-300 text-xs font-bold flex flex-col items-center gap-1 transition-all cursor-pointer"
+                  >
+                    <Sparkles className="w-5 h-5 text-indigo-400" />
+                    <span>تشجيع 👏</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Text Input for question */}
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                  اكتب سؤالك أو استفسارك للأستاذ:
+                </label>
+                <textarea
+                  value={studentQuestionInput}
+                  onChange={(e) => setStudentQuestionInput(e.target.value)}
+                  placeholder="مثال: يا أستاذ هل يمكن إعادة توضيح النقطة السابقة؟"
+                  rows={3}
+                  className="w-full px-4 py-3 bg-slate-950 border border-slate-750 focus:border-indigo-400 rounded-2xl text-slate-100 text-xs font-bold outline-none resize-none transition-all placeholder:text-slate-600"
+                  autoFocus
+                />
+              </div>
+
+              {/* Buttons */}
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowAskModal(false)}
+                  className="py-2.5 px-4 bg-slate-800 hover:bg-slate-750 text-slate-400 rounded-2xl text-xs font-bold cursor-pointer transition-all"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSendStudentReaction('question', studentQuestionInput)}
+                  disabled={!studentQuestionInput.trim() || isSendingMessage}
+                  className="flex-1 py-2.5 px-4 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white font-black text-xs rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/30 transition-all cursor-pointer disabled:opacity-40"
+                >
+                  <Send className="w-4 h-4" />
+                  <span>{isSendingMessage ? 'جارٍ الإرسال...' : 'إرسال السؤال للأستاذ 🚀'}</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Student Chat History and Teacher Replies Modal */}
+      <LiveChatModal
+        isOpen={showChatHistoryModal}
+        onClose={() => setShowChatHistoryModal(false)}
+        messages={sessionState?.messages || []}
+        onReply={async () => {}}
+        onDeleteMessage={async () => {}}
+        onClearAll={async () => {}}
+        showChatInRoom={Boolean(sessionState?.showChatInRoom)}
+        onToggleShowInRoom={async () => {}}
+        currentUserName={username}
+        isTeacher={false}
+      />
+
       {/* Footer Info */}
-      <footer className="p-3 text-center text-[10px] text-slate-600 font-mono border-t border-slate-900">
+      <footer className="p-2.5 text-center text-[10px] text-slate-600 font-mono border-t border-slate-900">
         نظام الحصص التفاعلية الحية • متزامن لحظياً عبر السحابة
       </footer>
     </div>

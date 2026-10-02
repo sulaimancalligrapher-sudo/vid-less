@@ -1926,6 +1926,11 @@ export {
   toggleShowStudentTextAnswersInRoom,
   getLiveBackup,
   restoreLiveBackup,
+  sendStudentMessage,
+  replyToStudentMessage,
+  deleteStudentMessage,
+  clearAllStudentMessages,
+  toggleShowChatInRoom,
 } from './lib/firebaseLiveService';
 
 

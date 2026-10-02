@@ -233,6 +233,21 @@ export interface LiveStudentAnswerSubmission {
   submittedAt: number;
 }
 
+export interface LiveStudentMessage {
+  id: string;
+  senderName: string;
+  sheetNumber?: string;
+  type: 'question' | 'hand' | 'agree' | 'disagree' | 'clap';
+  text?: string;
+  createdAt: number;
+  reply?: {
+    text: string;
+    type: 'private' | 'public';
+    repliedAt: number;
+    repliedBy?: string;
+  };
+}
+
 export interface LiveSessionState {
   sessionId: string;
   sessionPin?: string;
@@ -248,6 +263,8 @@ export interface LiveSessionState {
   videoPlaying?: boolean; // Controls Play/Pause state synced across room and admin
   showOptionCountsInRoom?: boolean; // Controls whether answer counts on options appear on projector display screen
   showStudentTextAnswersInRoom?: boolean; // Controls whether student text answers appear on projector display screen
+  showChatInRoom?: boolean; // Controls whether chat window / badge appears on projector display screen
+  messages?: LiveStudentMessage[]; // Live list of questions and reactions from students
   lessonTitle: string;
   videoUrl: string;
   status: 'idle' | 'waiting' | 'playing' | 'question_active' | 'revealed' | 'finished' | 'program_ended';
