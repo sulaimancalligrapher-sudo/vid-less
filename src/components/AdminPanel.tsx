@@ -13,6 +13,7 @@ import { AdminQuestionRow, AdminAnswerRow, AdminQuestionItem, LiveLessonRow } fr
 import TranslationEditor from './TranslationEditor';
 import TelegramManager from './TelegramManager';
 import LiveClassManager from './LiveClassManager';
+import LiveDirectManager from './LiveDirectManager';
 import { 
   fetchAdminQuestions, saveAdminQuestion, deleteAdminQuestion, fetchAdminAnswers, 
   updateAdminAnswer, saveBatchAdminQuestions,
@@ -25,10 +26,11 @@ import {
 interface AdminPanelProps {
   onClose: () => void;
   onStartTeacherTheater?: (lesson: LiveLessonRow) => void;
+  onOpenLiveDirectDisplay?: () => void;
 }
 
-export default function AdminPanel({ onClose, onStartTeacherTheater }: AdminPanelProps) {
-  const [activeTab, setActiveTab] = useState<'questions' | 'answers' | 'translations' | 'telegram' | 'live'>('questions');
+export default function AdminPanel({ onClose, onStartTeacherTheater, onOpenLiveDirectDisplay }: AdminPanelProps) {
+  const [activeTab, setActiveTab] = useState<'questions' | 'answers' | 'translations' | 'telegram' | 'live' | 'live-direct'>('questions');
 
   // Questions state
   const [questions, setQuestions] = useState<AdminQuestionRow[]>([]);
@@ -823,6 +825,18 @@ export default function AdminPanel({ onClose, onStartTeacherTheater }: AdminPane
             <Tv className="w-4 h-4 text-amber-400" />
             <span>الحصص التفاعلية المباشرة 🎯 (Questions-T)</span>
           </button>
+
+          <button
+            onClick={() => setActiveTab('live-direct')}
+            className={`px-5 py-3 rounded-t-2xl font-bold text-xs sm:text-sm flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
+              activeTab === 'live-direct'
+                ? 'bg-slate-900 text-amber-400 border-amber-500 shadow-sm'
+                : 'text-slate-400 hover:text-slate-200 border-transparent'
+            }`}
+          >
+            <Mic className="w-4 h-4 text-amber-400 animate-pulse" />
+            <span>Live 🎙️ (شرح مباشر)</span>
+          </button>
         </div>
 
         {/* Tab Content Body */}
@@ -1120,6 +1134,15 @@ export default function AdminPanel({ onClose, onStartTeacherTheater }: AdminPane
                     onStartTeacherTheater(lesson);
                   }
                 }}
+              />
+            </div>
+          )}
+
+          {/* TAB 6: LIVE DIRECT LECTURE (Live - Questions-Live & Answers-Live) */}
+          {activeTab === 'live-direct' && (
+            <div className="py-2">
+              <LiveDirectManager 
+                onOpenDisplayScreen={onOpenLiveDirectDisplay}
               />
             </div>
           )}

@@ -11,12 +11,13 @@ import AdminPanel from './components/AdminPanel';
 import LanguageSelector from './components/LanguageSelector';
 import LiveTeacherRoom from './components/LiveTeacherRoom';
 import LiveStudentView from './components/LiveStudentView';
+import LiveDirectDisplayRoom from './components/LiveDirectDisplayRoom';
 import { useLanguage } from './translations';
 import { 
   Settings, RefreshCw, BookOpen, Sparkles, Database, Sun, Moon, 
   Lock, ShieldCheck, Copy, CheckCircle2, ArrowLeft, ExternalLink, 
   KeyRound, Layers, ShieldAlert, FileSpreadsheet, UserCheck,
-  Facebook, Instagram, Youtube, Tv
+  Facebook, Instagram, Youtube, Tv, Mic
 } from 'lucide-react';
 
 const LineIcon = ({ className = "w-4 h-4" }: { className?: string }) => (
@@ -31,14 +32,15 @@ export default function App() {
   const [isConfigured, setIsConfigured] = useState(isApiConfigured());
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
-  // Page Routing Mode: 'student' | 'admin' | 'live-teacher' | 'live-student'
-  const [pageMode, setPageMode] = useState<'student' | 'admin' | 'live-teacher' | 'live-student'>(() => {
+  // Page Routing Mode: 'student' | 'admin' | 'live-teacher' | 'live-student' | 'live-direct-display'
+  const [pageMode, setPageMode] = useState<'student' | 'admin' | 'live-teacher' | 'live-student' | 'live-direct-display'>(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       const p = params.get('page');
       if (p === 'admin') return 'admin';
       if (p === 'live-teacher') return 'live-teacher';
       if (p === 'live-student') return 'live-student';
+      if (p === 'live-direct-display' || p === 'live-direct' || p === 'live-display') return 'live-direct-display';
     }
     return 'student';
   });
@@ -99,7 +101,7 @@ export default function App() {
   }, [webAppUrl, isConfigured]);
 
   // Sync route with URL query param and popstate
-  const navigateToPage = (mode: 'student' | 'admin' | 'live-teacher' | 'live-student') => {
+  const navigateToPage = (mode: 'student' | 'admin' | 'live-teacher' | 'live-student' | 'live-direct-display') => {
     setPageMode(mode);
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
@@ -109,6 +111,8 @@ export default function App() {
         url.searchParams.set('page', 'live-teacher');
       } else if (mode === 'live-student') {
         url.searchParams.set('page', 'live-student');
+      } else if (mode === 'live-direct-display') {
+        url.searchParams.set('page', 'live-direct-display');
       } else {
         url.searchParams.delete('page');
       }
@@ -123,6 +127,7 @@ export default function App() {
       if (p === 'admin') setPageMode('admin');
       else if (p === 'live-teacher') setPageMode('live-teacher');
       else if (p === 'live-student') setPageMode('live-student');
+      else if (p === 'live-direct-display' || p === 'live-direct' || p === 'live-display') setPageMode('live-direct-display');
       else setPageMode('student');
     };
     window.addEventListener('popstate', handlePopState);
@@ -251,6 +256,15 @@ export default function App() {
     );
   }
 
+  // Dedicated Fullscreen Mode: Live Direct Lecture Display (Projector / Theater Screen)
+  if (pageMode === 'live-direct-display') {
+    return (
+      <LiveDirectDisplayRoom
+        onBackToAdmin={() => navigateToPage('admin')}
+      />
+    );
+  }
+
   return (
     <div className="bg-gradient-to-br from-[#faf7f2] via-[#f5efe5] to-[#ebf3ed] dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 text-slate-800 dark:text-slate-100 min-h-screen flex flex-col font-sans selection:bg-amber-500/20 selection:text-amber-800 transition-colors duration-300">
       
@@ -355,6 +369,16 @@ export default function App() {
                 >
                   <Tv className="w-4 h-4" />
                   <span>عرض البروجكتر 📽️</span>
+                </button>
+
+                {/* Switch to Live Direct Theater Screen */}
+                <button
+                  onClick={() => navigateToPage('live-direct-display')}
+                  className="px-3.5 py-2.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 rounded-2xl cursor-pointer transition-all active:scale-95 shadow-sm flex items-center gap-1.5 text-xs font-black whitespace-nowrap"
+                  title="فتح شاشة العرض المباشر (المسرح) للنوع الجديد Live"
+                >
+                  <Mic className="w-4 h-4 text-amber-400" />
+                  <span>شاشة Live 🎙️</span>
                 </button>
 
                 {/* Switch to Student Page */}

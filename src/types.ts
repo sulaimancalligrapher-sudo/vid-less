@@ -267,6 +267,8 @@ export interface LiveSessionState {
   messages?: LiveStudentMessage[]; // Live list of questions and reactions from students
   lessonTitle: string;
   videoUrl: string;
+  mode?: 'video' | 'direct'; // 'video' for Video Classroom (Questions-T), 'direct' for Live Lecture (Questions-Live)
+  explanationText?: string; // Optional message or topic shown to students during live explanation
   status: 'idle' | 'waiting' | 'playing' | 'question_active' | 'revealed' | 'finished' | 'program_ended';
   currentQuestionIndex: number | null;
   currentQuestion: LiveQuestionItem | null;
@@ -276,6 +278,42 @@ export interface LiveSessionState {
   connectedStudents: LiveConnectedStudent[];
   answersForCurrentQuestion: Record<string, LiveStudentAnswerSubmission>;
   allSessionAnswers: Record<string, Record<number, string>>;
+}
+
+// ==========================================
+// --- LIVE DIRECT LECTURE (Questions-Live & Answers-Live) ---
+// ==========================================
+export interface LiveDirectQuestionItem {
+  index: number;
+  question: string; // نص السؤال
+  options: string[]; // الخيارات (مصفوفة من نصوص الخيارات)
+  isTextAnswer?: boolean; // true if text input instead of multiple choice
+  correctAnswer: string; // رقم الخيار الصحيح (1, 2, 3...) أو نص الإجابة
+  timeLimit?: number; // بالثواني (افتراضي 30)
+  image?: string; // رابط صورة توضيحية اختياري
+}
+
+export interface LiveDirectLessonRow {
+  id?: string;
+  rowIndex?: number;
+  title: string; // موضوع المحاضرة / الحصة المباشرة
+  description?: string; // وصف أو نبذة
+  questions: LiveDirectQuestionItem[];
+  settingTimeLimit?: number;
+  settingShowResult?: 'نعم' | 'لا';
+  createdAt?: number;
+}
+
+export interface LiveDirectAnswerRecord {
+  rowIndex?: number;
+  timestamp: string;
+  sheetNumber: string;
+  username: string;
+  studentName?: string;
+  lessonTitle: string;
+  answers: Record<number, string>;
+  totalScore?: string;
+  percentage?: number;
 }
 
 export interface LiveAnswerRecord {
@@ -369,6 +407,13 @@ export function evaluateLiveAnswer(
       return { isCorrect: null };
     }
   }
+}
+
+export function formatSecondsToTime(sec: number): string {
+  if (isNaN(sec) || sec < 0) return '00:00';
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 
 

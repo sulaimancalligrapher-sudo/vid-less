@@ -2,7 +2,8 @@ import {
   WordData, AdminQuestionRow, AdminAnswerRow, Question, AdminQuestionItem, 
   HeaderNavButton, HeaderConfig, StudentCorrection,
   TelegramConfig, TelegramTemplateItem, TelegramUserBinding, TelegramBroadcastMessage,
-  LiveQuestionItem, LiveLessonRow, LiveAnswerRecord, LiveSessionState, LiveStudentAnswerSubmission
+  LiveQuestionItem, LiveLessonRow, LiveAnswerRecord, LiveSessionState, LiveStudentAnswerSubmission,
+  LiveDirectQuestionItem, LiveDirectLessonRow, LiveDirectAnswerRecord
 } from './types';
 
 // Helper to get Web App URL from localStorage or environment variables
@@ -20,7 +21,7 @@ export function getWebAppUrl(): string {
   }
 
   // 3. Default fallback hardcoded URL
-  const fallbackUrl: string = 'https://script.google.com/macros/s/AKfycbxFKm-Is3TLJcFFthHdEFgU60qhrvYwT3jUqHd_oBUhlcfaWZiOuETelDCe40zEHk4OsQ/exec';
+  const fallbackUrl: string = 'https://script.google.com/macros/s/AKfycbyvWuUgtsg3ajeGyMA_w_8ny2RQbS9Eana17H3QYtYZ1b6Jurk1RySP1j0Fh6lDacjCMg/exec';
   if (fallbackUrl && fallbackUrl.trim().length > 0) {
     return fallbackUrl.trim();
   }
@@ -1892,6 +1893,108 @@ export async function saveLiveAnswerT(payload: {
   }
 }
 
+// ==========================================
+// --- LIVE DIRECT LECTURE (Questions-Live & Answers-Live) API ---
+// ==========================================
+const LOCAL_STORAGE_LIVE_DIRECT_QUESTIONS = 'local_live_direct_questions_cache';
+const LOCAL_STORAGE_LIVE_DIRECT_ANSWERS = 'local_live_direct_answers_cache';
+
+// Fetch Live Direct Lessons / Question Sets from Google Sheets (Questions-Live)
+export async function fetchLiveQuestionsDirect(): Promise<LiveDirectLessonRow[]> {
+  try {
+    const res = await fetchGas({ action: 'getLiveQuestionsDirect' }, 'GET');
+    if (res && res.success && Array.isArray(res.data)) {
+      const sanitized = res.data.map((lesson: any) => ({
+        ...lesson,
+        questions: (lesson.questions || []).map((q: any, qIdx: number) => ({
+          ...q,
+          index: qIdx,
+          timeLimit: q.timeLimit || 30,
+        })),
+      }));
+      localStorage.setItem(LOCAL_STORAGE_LIVE_DIRECT_QUESTIONS, JSON.stringify(sanitized));
+      return sanitized;
+    }
+  } catch (err) {
+    console.warn('Could not fetch Questions-Live from Google Sheets, checking local cache:', err);
+  }
+
+  const cached = localStorage.getItem(LOCAL_STORAGE_LIVE_DIRECT_QUESTIONS);
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch {}
+  }
+
+  return [];
+}
+
+// Save or Update a Live Direct Lesson in Google Sheets (Questions-Live)
+export async function saveLiveLessonDirect(lesson: LiveDirectLessonRow): Promise<{ success: boolean; message?: string }> {
+  const existing = await fetchLiveQuestionsDirect();
+  const index = existing.findIndex(l => l.title === lesson.title || (lesson.rowIndex && l.rowIndex === lesson.rowIndex));
+  if (index >= 0) {
+    existing[index] = lesson;
+  } else {
+    existing.push(lesson);
+  }
+  localStorage.setItem(LOCAL_STORAGE_LIVE_DIRECT_QUESTIONS, JSON.stringify(existing));
+
+  try {
+    const res = await fetchGas({ action: 'saveLiveLessonDirect' }, 'POST', lesson);
+    return res || { success: true, message: 'تم حفظ الأسئلة في ورقة Questions-Live بنجاح' };
+  } catch (err: any) {
+    console.error('Failed to save to Google Sheets Questions-Live:', err);
+    return { success: true, message: 'تم الحفظ محلياً بنجاح (سيتم الرفع للشيت عند توفر الاتصال)' };
+  }
+}
+
+// Fetch Live Direct Answers from Google Sheets (Answers-Live)
+export async function fetchLiveAnswersDirect(): Promise<LiveDirectAnswerRecord[]> {
+  try {
+    const res = await fetchGas({ action: 'getLiveAnswersDirect' }, 'GET');
+    if (res && res.success && Array.isArray(res.data)) {
+      localStorage.setItem(LOCAL_STORAGE_LIVE_DIRECT_ANSWERS, JSON.stringify(res.data));
+      return res.data;
+    }
+  } catch (err) {
+    console.warn('Could not fetch Answers-Live from Google Sheets:', err);
+  }
+  const cached = localStorage.getItem(LOCAL_STORAGE_LIVE_DIRECT_ANSWERS);
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch {}
+  }
+  return [];
+}
+
+// Batch Record Student Answers to Google Sheets (Answers-Live)
+export async function recordLiveAnswersBatchDirect(records: LiveDirectAnswerRecord[]): Promise<{ success: boolean; count?: number; message?: string }> {
+  try {
+    const res = await fetchGas({ action: 'batchRecordLiveAnswersDirect' }, 'POST', {
+      action: 'batchRecordLiveAnswersDirect',
+      records: records
+    });
+    return res || { success: true, count: records.length };
+  } catch (err: any) {
+    console.error('Error recording batch answers to Answers-Live:', err);
+    return { success: false, message: err.message };
+  }
+}
+
+// Initialize / Auto-create Questions-Live and Answers-Live sheets in Google Spreadsheet
+export async function setupLiveDirectSheetsApi(): Promise<{ success: boolean; message?: string }> {
+  try {
+    const res = await fetchGas({ action: 'setupLiveDirectSheets' }, 'POST', { action: 'setupLiveDirectSheets' });
+    return res || { success: true, message: 'تم إنشاء وتهيئة أوراق (Questions-Live) و (Answers-Live) في الشيت بنجاح! ⚡' };
+  } catch (err: any) {
+    console.error('Error creating live direct sheets in Google Sheets:', err);
+    return { success: false, message: err.message || 'تعذر الاتصال بخادم Google Apps Script' };
+  }
+}
+
+
 // ----------------------------------------------------
 // Real-Time Live Hub (Powered by Firebase Firestore)
 // Works seamlessly on Vercel and all static/serverless platforms
@@ -1901,6 +2004,7 @@ export {
   subscribeToLiveSession,
   getLiveSessionState,
   initLiveSession,
+  returnToLiveExplanation,
   joinLiveSession,
   updateLivePin,
   pingLiveSession,

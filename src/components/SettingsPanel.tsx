@@ -273,6 +273,13 @@ function TEST_BIND_STUDENT_222() {
   return res;
 }
 
+// 3. إنشاء وتهيئة أوراق Live المباشر (Questions-Live و Answers-Live) بنقرة واحدة
+function RUN_SETUP_LIVE_DIRECT_SHEETS() {
+  var res = setupLiveDirectSheets();
+  Logger.log('نتيجة تهيئة أوراق Live المباشر: ' + JSON.stringify(res));
+  return res;
+}
+
 function doGet(e) {
   var action = (e && e.parameter) ? e.parameter.action : '';
   var response;
@@ -298,6 +305,12 @@ function doGet(e) {
       response = getLiveQuestionsT();
     } else if (action === 'getLiveAnswersT') {
       response = getLiveAnswersT();
+    } else if (action === 'getLiveQuestionsDirect') {
+      response = getLiveQuestionsDirect();
+    } else if (action === 'getLiveAnswersDirect') {
+      response = getLiveAnswersDirect();
+    } else if (action === 'setupLiveDirectSheets') {
+      response = setupLiveDirectSheets();
     } else if (action === 'getAdminQuestions') {
       response = getAdminQuestions();
     } else if (action === 'getAdminAnswers') {
@@ -410,6 +423,12 @@ function doPost(e) {
       response = saveLiveAnswerT(payload);
     } else if (action === 'batchRecordLiveAnswersT') {
       response = batchRecordLiveAnswersT(payload.records);
+    } else if (action === 'saveLiveLessonDirect') {
+      response = saveLiveLessonDirect(payload.lesson || payload);
+    } else if (action === 'batchRecordLiveAnswersDirect') {
+      response = batchRecordLiveAnswersDirect(payload.records || []);
+    } else if (action === 'setupLiveDirectSheets') {
+      response = setupLiveDirectSheets();
     } else if (action === 'getAllSettingsStudents') {
       response = getAllSettingsStudents();
     } else {
@@ -3078,5 +3097,300 @@ function batchRecordLiveAnswersT(records) {
     return { success: false, message: err.message };
   }
 }
+
+// ==========================================
+// --- LIVE DIRECT LECTURE (Questions-Live & Answers-Live) ---
+// ==========================================
+
+function getOrCreateLiveQuestionsDirectSheet() {
+  var ss = getSpreadsheet();
+  var sheet = ss.getSheetByName('Questions-Live');
+  if (!sheet) {
+    sheet = ss.insertSheet('Questions-Live');
+    // هيكل ورقة Questions-Live:
+    // A: موضوع المحاضرة / الحصة المباشرة | B: وصف أو نبذة
+    // ثم 5 أعمدة لكل سؤال (C:G, H:L, M:Q...)
+    var headers = ['موضوع المحاضرة / الحصة المباشرة', 'وصف المحاضرة'];
+    for (var i = 1; i <= 20; i++) {
+      headers.push('نص س' + i);            // العمود C, H, M...
+      headers.push('نوع/خيارات س' + i);    // العمود D, I, N... (خيارات مفصولة بفاصلة أو 'نص')
+      headers.push('طريقة إجابة س' + i);   // العمود E, J, O... (رقم خيار 1,2.. أو نص الإجابة أو فارغ للحرة)
+      headers.push('المهلة بالثواني س' + i); // العمود F, K, P... (افتراضي 30)
+      headers.push('رابط صورة س' + i);      // العمود G, L, Q...
+    }
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#fef3c7');
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+function getOrCreateLiveAnswersDirectSheet() {
+  var ss = getSpreadsheet();
+  var sheet = ss.getSheetByName('Answers-Live');
+  if (!sheet) {
+    sheet = ss.insertSheet('Answers-Live');
+    // هيكل ورقة Answers-Live:
+    // A: تاريخ وتوقيت الإجابة | B: رقم المشترك | C: اسم المشترك | D: موضوع الحصة المباشرة | E: إجمالي الدرجة | F: النسبة %
+    var headers = ['تاريخ وتوقيت الإجابة', 'رقم المشترك', 'اسم المشترك', 'موضوع الحصة المباشرة', 'إجمالي الدرجة', 'النسبة %'];
+    for (var i = 1; i <= 20; i++) {
+      headers.push('إجابة س' + i);
+    }
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#ecfdf5');
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+function setupLiveDirectSheets() {
+  try {
+    var qSheet = getOrCreateLiveQuestionsDirectSheet();
+    var aSheet = getOrCreateLiveAnswersDirectSheet();
+    return { 
+      success: true, 
+      message: 'تم إنشاء وتهيئة أوراق (Questions-Live) و (Answers-Live) بنجاح وبكافة الترويسات المطلوبة!' 
+    };
+  } catch (err) {
+    return { success: false, message: err.message };
+  }
+}
+
+function getLiveQuestionsDirect() {
+  try {
+    var sheet = getOrCreateLiveQuestionsDirectSheet();
+    var lastRow = sheet.getLastRow();
+    if (lastRow <= 1) return { success: true, data: [] };
+    
+    var lastCol = sheet.getLastColumn();
+    if (lastCol < 2) return { success: true, data: [] };
+    
+    var rows = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    var list = [];
+    
+    for (var r = 0; r < rows.length; r++) {
+      var row = rows[r];
+      var title = String(row[0] || '').trim();
+      if (!title) continue;
+      
+      var description = String(row[1] || '').trim();
+      var questions = [];
+      var qIndex = 0;
+      
+      for (var col = 2; col < row.length; col += 5) {
+        var qTextRaw = row[col];
+        var qTypeOrOptionsRaw = row[col + 1];
+        var qCorrectAnswerRaw = row[col + 2];
+        var qTimeLimitRaw = row[col + 3];
+        var qImageRaw = row[col + 4];
+        
+        var qText = String(qTextRaw || '').trim();
+        var qImage = formatDriveImageUrl(String(qImageRaw || '').trim());
+        var typeOrOptsStr = String(qTypeOrOptionsRaw || '').trim();
+        var correctAnswer = String(qCorrectAnswerRaw !== undefined && qCorrectAnswerRaw !== null ? qCorrectAnswerRaw : '').trim();
+        var timeLimit = parseInt(qTimeLimitRaw, 10) || 30;
+        
+        if (qText !== '' || qImage !== '' || typeOrOptsStr !== '') {
+          var options = [];
+          var isTextAnswer = false;
+          
+          if (typeOrOptsStr === 'نص') {
+            isTextAnswer = true;
+          } else if (typeOrOptsStr) {
+            options = typeOrOptsStr.split(/[,،]/).map(function(s) { return s.trim(); }).filter(Boolean);
+          } else {
+            isTextAnswer = true;
+          }
+          
+          questions.push({
+            index: qIndex,
+            question: qText,
+            options: options,
+            isTextAnswer: isTextAnswer,
+            correctAnswer: correctAnswer,
+            timeLimit: timeLimit,
+            image: qImage
+          });
+          qIndex++;
+        }
+      }
+      
+      list.push({
+        rowIndex: r + 2,
+        title: title,
+        description: description,
+        questions: questions
+      });
+    }
+    return { success: true, data: list };
+  } catch (err) {
+    return { success: false, message: err.message };
+  }
+}
+
+function saveLiveLessonDirect(lesson) {
+  try {
+    if (!lesson || !lesson.title) return { success: false, message: 'موضوع المحاضرة مطلوب' };
+    var sheet = getOrCreateLiveQuestionsDirectSheet();
+    
+    var rowValues = [
+      lesson.title,
+      lesson.description || ''
+    ];
+    
+    var qs = lesson.questions || [];
+    var totalQuestionsCount = Math.max(15, qs.length);
+    for (var i = 0; i < totalQuestionsCount; i++) {
+      var q = qs[i];
+      if (q && (q.question || q.image || (q.options && q.options.length))) {
+        rowValues.push(q.question || '');
+        if (q.isTextAnswer) {
+          rowValues.push('نص');
+        } else {
+          rowValues.push((q.options || []).join(', '));
+        }
+        rowValues.push(q.correctAnswer || '');
+        rowValues.push(q.timeLimit || 30);
+        rowValues.push(q.image || '');
+      } else {
+        rowValues.push('', '', '', '', '');
+      }
+    }
+    
+    var targetRow = 0;
+    if (lesson.rowIndex && lesson.rowIndex > 1) {
+      targetRow = lesson.rowIndex;
+    } else {
+      var lastRow = sheet.getLastRow();
+      if (lastRow > 1) {
+        var titles = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+        for (var t = 0; t < titles.length; t++) {
+          if (String(titles[t][0]).trim() === String(lesson.title).trim()) {
+            targetRow = t + 2;
+            break;
+          }
+        }
+      }
+    }
+    
+    if (targetRow > 1) {
+      sheet.getRange(targetRow, 1, 1, rowValues.length).setValues([rowValues]);
+    } else {
+      sheet.appendRow(rowValues);
+    }
+    
+    return { success: true, message: 'تم حفظ موضوع وأسئلة الحصة المباشرة في ورقة Questions-Live بنجاح' };
+  } catch (err) {
+    return { success: false, message: err.message };
+  }
+}
+
+function getLiveAnswersDirect() {
+  try {
+    var sheet = getOrCreateLiveAnswersDirectSheet();
+    var lastRow = sheet.getLastRow();
+    if (lastRow <= 1) return { success: true, data: [] };
+    
+    var lastCol = Math.max(sheet.getLastColumn(), 26);
+    var rows = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    var list = [];
+    for (var r = 0; r < rows.length; r++) {
+      var row = rows[r];
+      var answersMap = {};
+      for (var a = 0; a < (lastCol - 6); a++) {
+        var val = String(row[6 + a] !== undefined && row[6 + a] !== null ? row[6 + a] : '').trim();
+        if (val) answersMap[a] = val;
+      }
+      list.push({
+        rowIndex: r + 2,
+        timestamp: String(row[0] || ''),
+        sheetNumber: String(row[1] || ''),
+        username: String(row[2] || ''),
+        studentName: String(row[2] || ''),
+        lessonTitle: String(row[3] || ''),
+        totalScore: String(row[4] || ''),
+        percentage: parseFloat(row[5]) || 0,
+        answers: answersMap
+      });
+    }
+    return { success: true, data: list };
+  } catch (err) {
+    return { success: false, message: err.message };
+  }
+}
+
+function batchRecordLiveAnswersDirect(records) {
+  try {
+    if (!records || !records.length) return { success: true, count: 0 };
+    var sheet = getOrCreateLiveAnswersDirectSheet();
+    var lastRow = sheet.getLastRow();
+    
+    var existingRows = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, 4).getValues() : [];
+    
+    for (var i = 0; i < records.length; i++) {
+      var rec = records[i];
+      var recSheetNum = String(rec.sheetNumber || '').trim();
+      var recUsername = String(rec.username || rec.studentName || '').trim();
+      var recLesson = String(rec.lessonTitle || '').trim();
+      var ansMap = rec.answers || {};
+      var totalScore = rec.totalScore !== undefined ? String(rec.totalScore) : '';
+      var percentage = rec.percentage !== undefined ? rec.percentage : '';
+      
+      var normSheet = normalizeLiveKey(recSheetNum);
+      var normUser = normalizeLiveKey(recUsername);
+      var normLesson = normalizeLiveKey(recLesson);
+      
+      var foundRow = 0;
+      var existingTimestamp = '';
+      for (var r = 0; r < existingRows.length; r++) {
+        var rowA = String(existingRows[r][0] || '').trim();
+        var rowB = normalizeLiveKey(existingRows[r][1]);
+        var rowC = normalizeLiveKey(existingRows[r][2]);
+        var rowD = normalizeLiveKey(existingRows[r][3]);
+        
+        var matchLesson = (rowD === normLesson);
+        var matchStudent = false;
+        if (normSheet && rowB && normSheet === rowB) {
+          matchStudent = true;
+        } else if (normUser && rowC && normUser === rowC) {
+          matchStudent = true;
+        }
+        
+        if (matchLesson && matchStudent) {
+          foundRow = r + 2;
+          existingTimestamp = rowA;
+          break;
+        }
+      }
+      
+      var finalTimestamp = rec.timestamp ? String(rec.timestamp) : existingTimestamp || new Date().toLocaleString('ar-SA');
+      
+      var rowValues = [
+        finalTimestamp,
+        recSheetNum,
+        recUsername,
+        recLesson,
+        totalScore,
+        percentage
+      ];
+      for (var a = 0; a < 20; a++) {
+        rowValues.push(ansMap[a] !== undefined ? String(ansMap[a]) : '');
+      }
+      
+      if (foundRow > 1) {
+        sheet.getRange(foundRow, 1, 1, rowValues.length).setValues([rowValues]);
+        existingRows[foundRow - 2] = [finalTimestamp, recSheetNum, recUsername, recLesson];
+      } else {
+        sheet.appendRow(rowValues);
+        existingRows.push([finalTimestamp, recSheetNum, recUsername, recLesson]);
+      }
+    }
+    
+    return { success: true, count: records.length };
+  } catch (err) {
+    return { success: false, message: err.message };
+  }
+}
+
 `;
 }

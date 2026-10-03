@@ -1153,13 +1153,17 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
 
               <div className="space-y-2 relative">
                 <span className="text-[11px] font-black uppercase tracking-wider text-amber-400 bg-amber-500/10 px-3 py-1 rounded-full border border-amber-500/20">
-                  {sessionState?.status === 'playing' ? '🔴 الفيديو يعمل على الشاشة الآن' : 'في انتظار بدء العرض'}
+                  {sessionState?.mode === 'direct'
+                    ? (sessionState?.status === 'playing' ? '🎙️ الأستاذ يشرح الآن' : 'في انتظار بدء الشرح المباشر')
+                    : (sessionState?.status === 'playing' ? '🔴 الفيديو يعمل على الشاشة الآن' : 'في انتظار بدء العرض')}
                 </span>
                 <h3 className="text-lg sm:text-xl font-black text-slate-100">
                   استمع وركز مع الأستاذ 👨‍🏫
                 </h3>
                 <p className="text-xs text-slate-400 max-w-sm mx-auto leading-relaxed font-semibold">
-                  الفيديو يُعرض أمامكم على الشاشة الكبيرة. عندما يصل الفيديو إلى سؤال تفاعلي، ستظهر الخيارات هنا على جوالك تلقائياً لتجيب عنها فوراً!
+                  {sessionState?.mode === 'direct'
+                    ? 'الأستاذ يلقي الشرح والملاحظات المباشرة. بمجرد أن يطرح الأستاذ سؤالاً تفاعلياً، ستظهر الخيارات هنا على جوالك فورياً لتجيب عنه مباشرة!'
+                    : 'الفيديو يُعرض أمامكم على الشاشة الكبيرة. عندما يصل الفيديو إلى سؤال تفاعلي، ستظهر الخيارات هنا على جوالك تلقائياً لتجيب عنها فوراً!'}
                 </p>
               </div>
 

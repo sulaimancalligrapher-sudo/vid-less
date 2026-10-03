@@ -350,14 +350,18 @@ export async function leaveLiveSession(username: string, sheetNumber?: string): 
 // Teacher initializes a lesson theater
 export async function initLiveSession(payload: {
   lessonTitle: string;
-  videoUrl: string;
+  videoUrl?: string;
+  mode?: 'video' | 'direct';
+  explanationText?: string;
   timeLimit?: number;
   showResult?: 'نعم' | 'لا';
 }): Promise<{ success: boolean; state?: LiveSessionState }> {
   try {
     const update: Partial<LiveSessionState> = {
       lessonTitle: payload.lessonTitle,
-      videoUrl: payload.videoUrl,
+      videoUrl: payload.videoUrl || '',
+      mode: payload.mode || (payload.videoUrl ? 'video' : 'direct'),
+      explanationText: payload.explanationText || '',
       timeLimit: payload.timeLimit ?? 30,
       showResult: payload.showResult ?? 'نعم',
       status: 'waiting',
@@ -377,6 +381,31 @@ export async function initLiveSession(payload: {
     return { success: true, state: cachedState };
   } catch (error: any) {
     console.error('Failed to init live lesson:', error);
+    throw error;
+  }
+}
+
+// Teacher returns to explanation mode (clears active question so students return to live listening screen)
+export async function returnToLiveExplanation(payload?: {
+  explanationText?: string;
+}): Promise<{ success: boolean; state?: LiveSessionState }> {
+  try {
+    const update: Partial<LiveSessionState> = {
+      status: 'playing',
+      currentQuestionIndex: null,
+      currentQuestion: null,
+      questionTriggeredAt: null,
+      answersForCurrentQuestion: {},
+      explanationText: payload?.explanationText ?? cachedState.explanationText ?? '',
+    };
+    await updateDoc(LIVE_DOC_REF, {
+      ...update,
+      updatedAt: serverTimestamp(),
+    });
+    cachedState = { ...cachedState, ...update };
+    return { success: true, state: cachedState };
+  } catch (error: any) {
+    console.error('Failed to return to live explanation:', error);
     throw error;
   }
 }
