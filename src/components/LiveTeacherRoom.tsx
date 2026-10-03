@@ -16,7 +16,8 @@ import {
   updateLivePin, leaveLiveSession,
   formatSecondsToTime, parseTimeToSeconds, formatDriveImageUrl,
   subscribeToLiveSession, toggleShowQrInRoom, toggleLiveVideoPlay,
-  replyToStudentMessage, deleteStudentMessage, clearAllStudentMessages, toggleShowChatInRoom
+  replyToStudentMessage, deleteStudentMessage, clearAllStudentMessages, toggleShowChatInRoom,
+  sendTeacherBroadcastMessage
 } from '../api';
 import LiveChatModal from './LiveChatModal';
 
@@ -1440,6 +1441,7 @@ export default function LiveTeacherRoom({
         isOpen={showChatModal}
         onClose={() => setShowChatModal(false)}
         messages={sessionState?.messages || []}
+        connectedStudents={sessionState?.connectedStudents || []}
         onReply={async (messageId, replyText, replyType) => {
           await replyToStudentMessage(messageId, replyText, replyType);
         }}
@@ -1448,6 +1450,9 @@ export default function LiveTeacherRoom({
         }}
         onClearAll={async () => {
           await clearAllStudentMessages();
+        }}
+        onSendTeacherBroadcast={async (text, recipientStudent, recipientSheet) => {
+          await sendTeacherBroadcastMessage({ text, recipientStudent, recipientSheet });
         }}
         showChatInRoom={Boolean(sessionState?.showChatInRoom)}
         onToggleShowInRoom={async (show) => {

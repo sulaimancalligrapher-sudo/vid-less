@@ -22,7 +22,8 @@ import {
   toggleShowOptionCountsInRoom, toggleShowStudentTextAnswersInRoom,
   finishLiveSession, revealLiveAnswer, resumeLiveVideo,
   initLiveSession, triggerLiveQuestion,
-  replyToStudentMessage, deleteStudentMessage, clearAllStudentMessages, toggleShowChatInRoom
+  replyToStudentMessage, deleteStudentMessage, clearAllStudentMessages, toggleShowChatInRoom,
+  sendTeacherBroadcastMessage
 } from '../api';
 import LiveChatModal from './LiveChatModal';
 
@@ -66,6 +67,7 @@ export default function LiveClassManager({
   const [lessons, setLessons] = useState<LiveLessonRow[]>([]);
   const [answers, setAnswers] = useState<LiveAnswerRecord[]>([]);
   const [sessionState, setSessionState] = useState<LiveSessionState | null>(null);
+  const sessionStateRef = useRef<LiveSessionState | null>(null);
   const [loadingLessons, setLoadingLessons] = useState(false);
   const [loadingAnswers, setLoadingAnswers] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -95,6 +97,7 @@ export default function LiveClassManager({
   const [isFinishingLesson, setIsFinishingLesson] = useState(false);
   const [showFinishLessonConfirmModal, setShowFinishLessonConfirmModal] = useState(false);
   const [pendingLessonSwitchTitle, setPendingLessonSwitchTitle] = useState<string | null>(null);
+  const [isSavingAndSwitchingLesson, setIsSavingAndSwitchingLesson] = useState(false);
   const [isUpdatingRevealVisibility, setIsUpdatingRevealVisibility] = useState(false);
   const [isUpdatingResumeVisibility, setIsUpdatingResumeVisibility] = useState(false);
   const [isUpdatingSkipVisibility, setIsUpdatingSkipVisibility] = useState(false);
@@ -148,6 +151,7 @@ export default function LiveClassManager({
   useEffect(() => {
     const unsubscribe = subscribeToLiveSession((s) => {
       if (s) {
+        sessionStateRef.current = s;
         setSessionState(s);
         const newCount = (s.messages || []).length;
         if (prevTeacherMsgCountRef.current > 0 && newCount > prevTeacherMsgCountRef.current) {
@@ -395,13 +399,14 @@ export default function LiveClassManager({
     }
   };
 
-  // Determine currently active lesson from sessionState
+  // Determine currently active lesson from sessionState or fallback to first lesson
   const activeLesson = useMemo(() => {
     if (sessionState?.lessonTitle) {
-      const match = lessons.find(l => l.title === sessionState.lessonTitle);
+      const trimmed = sessionState.lessonTitle.trim().toLowerCase();
+      const match = lessons.find(l => l.title.trim().toLowerCase() === trimmed);
       if (match) return match;
     }
-    return null;
+    return lessons.length > 0 ? lessons[0] : null;
   }, [sessionState?.lessonTitle, lessons]);
 
   // Trigger question directly from Admin panel (transferred from display screen)
@@ -446,18 +451,19 @@ export default function LiveClassManager({
   };
 
   // Helper to save current lesson answers to Google Sheets Answers-T
-  const saveCurrentLessonAnswersToSheets = async (): Promise<{ success: boolean; count: number }> => {
-    const hasAllSession = sessionState?.allSessionAnswers && Object.keys(sessionState.allSessionAnswers).length > 0;
-    const hasCurrentQ = sessionState?.answersForCurrentQuestion && Object.keys(sessionState.answersForCurrentQuestion).length > 0;
+  const saveCurrentLessonAnswersToSheets = async (targetState?: LiveSessionState | null): Promise<{ success: boolean; count: number }> => {
+    const stateToUse = targetState || sessionStateRef.current || sessionState;
+    const hasAllSession = stateToUse?.allSessionAnswers && Object.keys(stateToUse.allSessionAnswers).length > 0;
+    const hasCurrentQ = stateToUse?.answersForCurrentQuestion && Object.keys(stateToUse.answersForCurrentQuestion).length > 0;
     if (!hasAllSession && !hasCurrentQ) {
       return { success: true, count: 0 };
     }
 
-    const lessonTitle = sessionState?.lessonTitle || activeLesson?.title || (lessons[0]?.title || 'درس تفاعلي مباشر');
+    const lessonTitle = stateToUse?.lessonTitle || activeLesson?.title || (lessons[0]?.title || 'درس تفاعلي مباشر');
     const targetLesson = lessons.find(l => l.title === lessonTitle) || activeLesson;
     const timestamp = new Date().toLocaleString('ar-SA');
     const records: LiveAnswerRecord[] = [];
-    const students = sessionState?.connectedStudents || [];
+    const students = stateToUse?.connectedStudents || [];
     const studentMap = new Map<string, { username: string; sheetNumber: string }>();
 
     students.forEach(s => {
@@ -469,8 +475,8 @@ export default function LiveClassManager({
     });
 
     // Also include students from allSessionAnswers keys
-    if (sessionState?.allSessionAnswers) {
-      Object.keys(sessionState.allSessionAnswers).forEach(rawKey => {
+    if (stateToUse?.allSessionAnswers) {
+      Object.keys(stateToUse.allSessionAnswers).forEach(rawKey => {
         let u = rawKey.includes('_') ? rawKey.split('_')[0] : rawKey;
         let num = rawKey.includes('_') ? rawKey.split('_').slice(1).join('_') : '';
         if (u && !studentMap.has(u.toLowerCase())) {
@@ -481,15 +487,15 @@ export default function LiveClassManager({
 
     // Merge all answers (allSessionAnswers + current active question answers if any)
     const mergedAnswers: Record<string, Record<number, any>> = {};
-    if (sessionState?.allSessionAnswers) {
-      Object.entries(sessionState.allSessionAnswers).forEach(([k, ansObj]) => {
+    if (stateToUse?.allSessionAnswers) {
+      Object.entries(stateToUse.allSessionAnswers).forEach(([k, ansObj]) => {
         mergedAnswers[k] = { ...(ansObj || {}) };
       });
     }
 
-    if (sessionState?.answersForCurrentQuestion && sessionState.currentQuestionIndex !== null && sessionState.currentQuestionIndex !== undefined) {
-      const qIdx = sessionState.currentQuestionIndex;
-      Object.entries(sessionState.answersForCurrentQuestion).forEach(([studentKey, ansData]: [string, any]) => {
+    if (stateToUse?.answersForCurrentQuestion && stateToUse.currentQuestionIndex !== null && stateToUse.currentQuestionIndex !== undefined) {
+      const qIdx = stateToUse.currentQuestionIndex;
+      Object.entries(stateToUse.answersForCurrentQuestion).forEach(([studentKey, ansData]: [string, any]) => {
         if (!mergedAnswers[studentKey]) {
           mergedAnswers[studentKey] = {};
         }
@@ -613,15 +619,16 @@ export default function LiveClassManager({
   };
 
   // Switch active lesson from admin panel:
-  // If there are answers in the outgoing lesson, ask via modal first
+  // If the previous lesson has not been finished yet, prompt modal to confirm saving answers
   const handleSelectLesson = async (lessonTitle: string) => {
     const target = lessons.find(l => l.title === lessonTitle);
     if (!target) return;
 
-    const hasAnswers = (sessionState?.allSessionAnswers && Object.keys(sessionState.allSessionAnswers).length > 0) ||
-      (sessionState?.answersForCurrentQuestion && Object.keys(sessionState.answersForCurrentQuestion).length > 0);
+    // Check if there is an active lesson running that wasn't finished
+    const currentTitle = sessionState?.lessonTitle;
+    const isUnfinishedActiveLesson = currentTitle && currentTitle !== target.title && sessionState?.status !== 'finished';
 
-    if (sessionState?.lessonTitle && sessionState.lessonTitle !== target.title && hasAnswers) {
+    if (isUnfinishedActiveLesson) {
       setPendingLessonSwitchTitle(target.title);
       return;
     }
@@ -633,27 +640,45 @@ export default function LiveClassManager({
     const target = lessons.find(l => l.title === lessonTitle);
     if (!target) return;
 
-    if (saveAnswersFirst) {
-      try {
-        const saveResult = await saveCurrentLessonAnswersToSheets();
-        if (saveResult.count > 0) {
-          setSaveMessage(`تم حفظ إجابات الدرس السابق (${sessionState?.lessonTitle}) لـ ${saveResult.count} طالب في الشيت.`);
-          setTimeout(() => setSaveMessage(null), 4000);
-        }
-      } catch (err) {
-        console.warn('Auto-saving before changing lesson encountered an issue:', err);
-      }
-    }
-
+    setIsSavingAndSwitchingLesson(true);
     try {
-      await initLiveSession({
+      if (saveAnswersFirst) {
+        try {
+          // Refresh session state directly from Firebase to ensure we have latest answers from all students
+          const latestState = await getLiveSessionState() || sessionStateRef.current || sessionState;
+          if (latestState) {
+            sessionStateRef.current = latestState;
+            setSessionState(latestState);
+          }
+          const saveResult = await saveCurrentLessonAnswersToSheets(latestState);
+          if (saveResult.count > 0) {
+            setSaveMessage(`تم حفظ إجابات الدرس السابق (${latestState?.lessonTitle || ''}) لـ ${saveResult.count} طالب في الشيت بنجاح.`);
+            setTimeout(() => setSaveMessage(null), 5000);
+          } else {
+            setSaveMessage(`تم فحص الإجابات: لا توجد إجابات مسجلة للدرس السابق.`);
+            setTimeout(() => setSaveMessage(null), 4000);
+          }
+        } catch (err: any) {
+          console.error('Auto-saving before changing lesson encountered an issue:', err);
+          setSaveMessage(`تنبيه: حدث خطأ أثناء الحفظ التلقائي: ${err?.message || ''}`);
+          setTimeout(() => setSaveMessage(null), 5000);
+        }
+      }
+
+      const res = await initLiveSession({
         lessonTitle: target.title,
         videoUrl: target.videoUrl,
         timeLimit: target.settingTimeLimit || 30,
         showResult: target.settingShowResult || 'نعم',
       });
+      if (res && res.state) {
+        setSessionState(res.state);
+        sessionStateRef.current = res.state;
+      }
     } catch (e) {
       console.error('Failed to switch active lesson from admin:', e);
+    } finally {
+      setIsSavingAndSwitchingLesson(false);
     }
   };
 
@@ -1550,13 +1575,13 @@ export default function LiveClassManager({
                 </div>
               </div>
 
-              {/* 3. توقيت الأسئلة (المنقول من شاشة العرض) */}
-              {activeLesson && activeLesson.questions && activeLesson.questions.length > 0 ? (
-                <div className="pt-2.5 border-t border-slate-800/80 flex flex-wrap items-center gap-2">
-                  <div className="flex items-center gap-1.5 text-xs text-slate-300 font-bold ml-1">
-                    <Clock className="w-3.5 h-3.5 text-amber-400" />
-                    <span>توقيت الأسئلة:</span>
-                  </div>
+              {/* 3. توقيت الأسئلة (الخاص بالمعلم والإدارة) */}
+              <div className="pt-2.5 border-t border-slate-800/80 flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-1.5 text-xs text-slate-300 font-bold ml-1">
+                  <Clock className="w-3.5 h-3.5 text-amber-400" />
+                  <span>توقيت الأسئلة:</span>
+                </div>
+                {activeLesson && activeLesson.questions && activeLesson.questions.length > 0 ? (
                   <div className="flex flex-wrap items-center gap-1.5 overflow-x-auto py-0.5">
                     {activeLesson.questions.map((q, idx) => {
                       const isActive = sessionState?.currentQuestionIndex === idx && sessionState?.status === 'question_active';
@@ -1582,12 +1607,16 @@ export default function LiveClassManager({
                       );
                     })}
                   </div>
-                </div>
-              ) : activeLesson ? (
-                <div className="pt-2 border-t border-slate-800/80 text-[11px] text-slate-500 italic">
-                  لا توجد أسئلة محددة التوقيت لهذا الدرس.
-                </div>
-              ) : null}
+                ) : activeLesson ? (
+                  <span className="text-[11px] text-slate-400 italic">
+                    لا توجد أسئلة محددة التوقيت لهذا الدرس (يمكنك إضافة توقيت بالثواني من ورقة Questions-T).
+                  </span>
+                ) : (
+                  <span className="text-[11px] text-amber-400/80 italic">
+                    اختر درساً من القائمة أعلاه لعرض توقيت أسئلته.
+                  </span>
+                )}
+              </div>
 
               {/* 4. أزرار التحكم في السؤال وإظهار الإجابات في شاشة العرض */}
               <div className="pt-2.5 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2.5">
@@ -1598,7 +1627,7 @@ export default function LiveClassManager({
                     <button
                       type="button"
                       onClick={handleRevealAnswerFromAdmin}
-                      disabled={isRevealingAnswer || sessionState?.status === 'revealed' || !sessionState?.currentQuestion}
+                      disabled={isRevealingAnswer || sessionState?.status === 'revealed' || sessionState?.status !== 'question_active'}
                       title="كشف الإجابة الصحيحة للطلاب"
                       className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 rounded-lg text-xs font-black flex items-center gap-1.5 shadow-sm transition-all cursor-pointer active:scale-95 disabled:opacity-40"
                     >
@@ -1620,14 +1649,18 @@ export default function LiveClassManager({
                     </button>
                   </div>
 
-                  {/* زر متابعة تشغيل الفيديو مع زر الإظهار/الإخفاء (أيقونة العين بدون نص) */}
+                  {/* زر متابعة تشغيل الفيديو (يعمل بعد النقر على زر الإجابة) */}
                   <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 p-1.5 rounded-xl shadow-sm">
                     <button
                       type="button"
                       onClick={handleResumeVideoFromAdmin}
-                      disabled={isResumingVideo || !sessionState?.currentQuestion}
-                      title="متابعة تشغيل الفيديو بعد كشف الإجابة أو السؤال"
-                      className="px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white rounded-lg text-xs font-black flex items-center gap-1.5 shadow-sm transition-all cursor-pointer active:scale-95 disabled:opacity-40"
+                      disabled={isResumingVideo || sessionState?.status !== 'revealed'}
+                      title={sessionState?.status === 'revealed' ? 'متابعة تشغيل الفيديو واستئناف العرض' : 'متابعة الفيديو (متاح بعد كشف الإجابة)'}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-black flex items-center gap-1.5 shadow-sm transition-all cursor-pointer active:scale-95 disabled:opacity-40 ${
+                        sessionState?.status === 'revealed'
+                          ? 'bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white animate-pulse'
+                          : 'bg-slate-950 text-slate-400 border border-slate-800'
+                      }`}
                     >
                       <Play className="w-3.5 h-3.5 fill-current" />
                       <span>{isResumingVideo ? 'جارٍ المتابعة...' : 'متابعة الفيديو'}</span>
@@ -1647,13 +1680,13 @@ export default function LiveClassManager({
                     </button>
                   </div>
 
-                  {/* زر تخطي مع زر الإظهار/الإخفاء (أيقونة العين بدون نص) */}
+                  {/* زر تخطي (يعمل عند ظهور السؤال) */}
                   <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 p-1.5 rounded-xl shadow-sm">
                     <button
                       type="button"
                       onClick={handleSkipQuestionFromAdmin}
-                      disabled={isSkippingQuestion || !sessionState?.currentQuestion}
-                      title="تخطي السؤال الحالي ومتابعة الفيديو"
+                      disabled={isSkippingQuestion || (sessionState?.status !== 'question_active' && sessionState?.status !== 'revealed')}
+                      title="تخطي السؤال الحالي ومتابعة الفيديو فوراً"
                       className="px-3 py-1.5 bg-slate-950 hover:bg-slate-850 text-slate-200 border border-slate-750 hover:border-slate-600 rounded-lg text-xs font-black flex items-center gap-1.5 shadow-sm transition-all cursor-pointer active:scale-95 disabled:opacity-40"
                     >
                       <FastForward className="w-3.5 h-3.5 text-amber-400" />
@@ -1674,13 +1707,24 @@ export default function LiveClassManager({
                     </button>
                   </div>
 
-                  {/* زر تشغيل / إيقاف الفيديو مع زر الإظهار/الإخفاء (أيقونة العين بدون نص) */}
+                  {/* زر تشغيل / إيقاف الفيديو (يعمل في البداية وبعد متابعة الفيديو، ويتعطل أثناء السؤال وكشف الإجابة) */}
                   <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 p-1.5 rounded-xl shadow-sm">
                     <button
                       type="button"
                       onClick={handleToggleVideoPlayFromAdmin}
-                      disabled={isTogglingVideoPlay || !sessionState?.videoUrl}
-                      title={sessionState?.videoPlaying ? 'إيقاف الفيديو مؤقتاً في شاشة العرض' : 'تشغيل الفيديو في شاشة العرض'}
+                      disabled={
+                        isTogglingVideoPlay || 
+                        !sessionState?.videoUrl || 
+                        sessionState?.status === 'question_active' || 
+                        sessionState?.status === 'revealed'
+                      }
+                      title={
+                        sessionState?.status === 'question_active' || sessionState?.status === 'revealed'
+                          ? 'يتوقف زر التشغيل مؤقتاً أثناء عرض السؤال أو كشف الإجابة (استخدم زر تخطي أو متابعة الفيديو)'
+                          : sessionState?.videoPlaying 
+                            ? 'إيقاف الفيديو مؤقتاً في شاشة العرض' 
+                            : 'تشغيل الفيديو في شاشة العرض'
+                      }
                       className={`px-3 py-1.5 rounded-lg text-xs font-black flex items-center gap-1.5 shadow-sm transition-all cursor-pointer active:scale-95 disabled:opacity-40 ${
                         sessionState?.videoPlaying
                           ? 'bg-amber-500 hover:bg-amber-400 text-slate-950'
@@ -2664,33 +2708,42 @@ export default function LiveClassManager({
               <div className="flex flex-col gap-2 pt-2">
                 <button
                   type="button"
+                  disabled={isSavingAndSwitchingLesson}
                   onClick={async () => {
                     const next = pendingLessonSwitchTitle;
-                    setPendingLessonSwitchTitle(null);
+                    if (!next) return;
                     await executeLessonSwitch(next, true);
+                    setPendingLessonSwitchTitle(null);
                   }}
-                  className="w-full py-2.5 px-4 rounded-xl text-xs font-black bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white shadow-lg transition-all cursor-pointer flex items-center justify-center gap-2"
+                  className="w-full py-2.5 px-4 rounded-xl text-xs font-black bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white shadow-lg transition-all cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50"
                 >
-                  <Check className="w-4 h-4" />
-                  <span>حفظ إجابات الدرس السابق والانتقال ✅</span>
+                  {isSavingAndSwitchingLesson ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Check className="w-4 h-4" />
+                  )}
+                  <span>{isSavingAndSwitchingLesson ? 'جارٍ حفظ الإجابات والانتقال للدرس الجديد...' : 'حفظ إجابات الدرس السابق والانتقال ✅'}</span>
                 </button>
 
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
+                    disabled={isSavingAndSwitchingLesson}
                     onClick={async () => {
                       const next = pendingLessonSwitchTitle;
-                      setPendingLessonSwitchTitle(null);
+                      if (!next) return;
                       await executeLessonSwitch(next, false);
+                      setPendingLessonSwitchTitle(null);
                     }}
-                    className="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-750 text-rose-300 hover:text-rose-200 border border-rose-500/20 rounded-xl text-xs font-bold transition-all cursor-pointer text-center"
+                    className="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-750 text-rose-300 hover:text-rose-200 border border-rose-500/20 rounded-xl text-xs font-bold transition-all cursor-pointer text-center disabled:opacity-50"
                   >
                     الانتقال بدون حفظ
                   </button>
                   <button
                     type="button"
+                    disabled={isSavingAndSwitchingLesson}
                     onClick={() => setPendingLessonSwitchTitle(null)}
-                    className="py-2 px-4 bg-slate-800 hover:bg-slate-750 text-slate-400 hover:text-slate-200 rounded-xl text-xs font-bold transition-all cursor-pointer text-center"
+                    className="py-2 px-4 bg-slate-800 hover:bg-slate-750 text-slate-400 hover:text-slate-200 rounded-xl text-xs font-bold transition-all cursor-pointer text-center disabled:opacity-50"
                   >
                     إلغاء
                   </button>
@@ -2705,6 +2758,7 @@ export default function LiveClassManager({
         isOpen={showChatModal}
         onClose={() => setShowChatModal(false)}
         messages={sessionState?.messages || []}
+        connectedStudents={sessionState?.connectedStudents || []}
         onReply={async (messageId, replyText, replyType) => {
           await replyToStudentMessage(messageId, replyText, replyType);
         }}
@@ -2713,6 +2767,9 @@ export default function LiveClassManager({
         }}
         onClearAll={async () => {
           await clearAllStudentMessages();
+        }}
+        onSendTeacherBroadcast={async (text, recipientStudent, recipientSheet) => {
+          await sendTeacherBroadcastMessage({ text, recipientStudent, recipientSheet });
         }}
         showChatInRoom={Boolean(sessionState?.showChatInRoom)}
         onToggleShowInRoom={async (show) => {

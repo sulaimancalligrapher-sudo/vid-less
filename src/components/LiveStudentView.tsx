@@ -867,14 +867,14 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
               className="w-full space-y-4"
             >
               {/* Question Header & Timer */}
-              <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-5 shadow-xl">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-black text-indigo-400 bg-indigo-500/10 px-3 py-1 rounded-full border border-indigo-500/20">
+              <div className="bg-slate-900/90 border border-slate-800 rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 shadow-xl">
+                <div className="flex items-center justify-between mb-2 sm:mb-3">
+                  <span className="text-[11px] sm:text-xs font-black text-indigo-400 bg-indigo-500/10 px-2.5 sm:px-3 py-0.5 sm:py-1 rounded-full border border-indigo-500/20">
                     السؤال {(sessionState.currentQuestionIndex ?? 0) + 1}
                   </span>
                   
                   {/* Timer Badge */}
-                  <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black font-mono border ${
+                  <div className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-0.5 sm:py-1 rounded-full text-xs font-black font-mono border ${
                     timeLeft <= 5 
                       ? 'bg-rose-500/20 border-rose-500/40 text-rose-400 animate-bounce' 
                       : 'bg-amber-500/10 border-amber-500/20 text-amber-400'
@@ -886,7 +886,7 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
 
                 {/* Optional Question Image */}
                 {currentQ.image && (
-                  <div className="aspect-video max-h-48 w-full rounded-2xl overflow-hidden border border-slate-800 mb-3 bg-slate-950">
+                  <div className="aspect-video max-h-40 sm:max-h-48 w-full rounded-xl sm:rounded-2xl overflow-hidden border border-slate-800 mb-2 sm:mb-3 bg-slate-950">
                     <img 
                       src={formatDriveImageUrl(currentQ.image)} 
                       alt="Question Visual" 
@@ -895,14 +895,14 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
                   </div>
                 )}
 
-                <h3 className="text-base sm:text-lg font-black text-slate-100 leading-relaxed text-right">
+                <h3 className="text-sm sm:text-lg font-black text-slate-100 leading-relaxed text-right">
                   {currentQ.question}
                 </h3>
               </div>
 
-              {/* Sub-case 1: Multiple Choice Options */}
+              {/* Sub-case 1: Multiple Choice Options (تحسين هوامش الأزرار للجوالات والشاشات الصغيرة) */}
               {isMultipleChoice ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
                   {currentQ.options.map((opt, idx) => {
                     const isSelected = selectedOption === opt;
                     const letter = OPTION_LETTERS[idx] || `${idx + 1}`;
@@ -914,26 +914,26 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
                         whileTap={{ scale: 0.97 }}
                         disabled={Boolean(submittedAnswer) || isSubmitting}
                         onClick={() => handleSendAnswer(opt)}
-                        className={`relative p-4 rounded-2xl border text-right font-bold transition-all flex items-center justify-between cursor-pointer shadow-md ${
+                        className={`relative p-2.5 sm:p-4 rounded-xl sm:rounded-2xl border text-right font-bold transition-all flex items-center justify-between cursor-pointer shadow-md ${
                           isSelected 
-                            ? 'ring-4 ring-amber-400 bg-indigo-600 text-white border-white scale-[1.02]' 
+                            ? 'ring-3 sm:ring-4 ring-amber-400 bg-indigo-600 text-white border-white scale-[1.01] sm:scale-[1.02]' 
                             : submittedAnswer 
                               ? 'opacity-50 bg-slate-900 border-slate-800 text-slate-400 cursor-not-allowed'
                               : `bg-gradient-to-r ${colorGradient}`
                         }`}
                       >
-                        <div className="flex items-center gap-3 min-w-0 flex-1">
-                          <span className="w-8 h-8 rounded-xl bg-black/20 border border-white/20 flex items-center justify-center font-black text-sm shrink-0">
+                        <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+                          <span className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg sm:rounded-xl bg-black/20 border border-white/20 flex items-center justify-center font-black text-xs sm:text-sm shrink-0">
                             {letter}
                           </span>
-                          <span className="text-sm sm:text-base leading-snug break-words">
+                          <span className="text-xs sm:text-base leading-snug break-words">
                             {opt}
                           </span>
                         </div>
 
                         {isSelected && (
-                          <div className="w-6 h-6 rounded-full bg-white text-indigo-700 flex items-center justify-center shrink-0">
-                            <CheckCircle2 className="w-5 h-5 fill-white text-indigo-600" />
+                          <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-white text-indigo-700 flex items-center justify-center shrink-0">
+                            <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 fill-white text-indigo-600" />
                           </div>
                         )}
                       </motion.button>

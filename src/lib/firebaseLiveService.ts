@@ -898,6 +898,51 @@ export async function clearAllStudentMessages(): Promise<{ success: boolean }> {
   }
 }
 
+// Teacher sends a broadcast message or direct private message to a specific student
+export async function sendTeacherBroadcastMessage(payload: {
+  text: string;
+  recipientStudent?: string; // If empty, public broadcast to all
+  recipientSheet?: string;
+}): Promise<{ success: boolean; messageId: string }> {
+  try {
+    const isPrivate = Boolean(payload.recipientStudent && payload.recipientStudent.trim());
+    const newMessage: LiveStudentMessage = {
+      id: `teach_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      senderName: 'الأستاذ 👨‍🏫',
+      sheetNumber: payload.recipientSheet?.trim() || '',
+      type: 'question',
+      text: payload.text.trim(),
+      createdAt: Date.now(),
+      reply: {
+        text: payload.text.trim(),
+        type: isPrivate ? 'private' : 'public',
+        repliedAt: Date.now(),
+        repliedBy: 'الأستاذ',
+      },
+    };
+
+    // If private to a student, set senderName as the student so it routes to their private feed
+    if (isPrivate && payload.recipientStudent) {
+      newMessage.senderName = payload.recipientStudent.trim();
+      newMessage.text = `رسالة خاصة من الأستاذ: ${payload.text.trim()}`;
+    }
+
+    const currentMessages = cachedState.messages || [];
+    const updatedMessages = [...currentMessages.slice(-99), newMessage];
+
+    await updateDoc(LIVE_DOC_REF, {
+      messages: updatedMessages,
+      updatedAt: serverTimestamp(),
+    });
+
+    cachedState = { ...cachedState, messages: updatedMessages };
+    return { success: true, messageId: newMessage.id };
+  } catch (error: any) {
+    console.error('Failed to send teacher broadcast message:', error);
+    throw error;
+  }
+}
+
 // Toggle showing chat / messages on projector display screen
 export async function toggleShowChatInRoom(show: boolean): Promise<{ success: boolean; state?: LiveSessionState }> {
   try {
