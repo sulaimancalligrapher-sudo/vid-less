@@ -97,6 +97,7 @@ export default function LiveClassManager({
   const [isFinishingLesson, setIsFinishingLesson] = useState(false);
   const [showFinishLessonConfirmModal, setShowFinishLessonConfirmModal] = useState(false);
   const [pendingLessonSwitchTitle, setPendingLessonSwitchTitle] = useState<string | null>(null);
+  const [selectedLessonTitle, setSelectedLessonTitle] = useState<string>('');
   const [isSavingAndSwitchingLesson, setIsSavingAndSwitchingLesson] = useState(false);
   const [isUpdatingRevealVisibility, setIsUpdatingRevealVisibility] = useState(false);
   const [isUpdatingResumeVisibility, setIsUpdatingResumeVisibility] = useState(false);
@@ -399,15 +400,16 @@ export default function LiveClassManager({
     }
   };
 
-  // Determine currently active lesson from sessionState or fallback to first lesson
+  // Determine currently active lesson from explicitly selected lesson or active session
   const activeLesson = useMemo(() => {
-    if (sessionState?.lessonTitle) {
-      const trimmed = sessionState.lessonTitle.trim().toLowerCase();
+    const titleToUse = selectedLessonTitle;
+    if (titleToUse) {
+      const trimmed = titleToUse.trim().toLowerCase();
       const match = lessons.find(l => l.title.trim().toLowerCase() === trimmed);
       if (match) return match;
     }
-    return lessons.length > 0 ? lessons[0] : null;
-  }, [sessionState?.lessonTitle, lessons]);
+    return null;
+  }, [selectedLessonTitle, lessons]);
 
   // Trigger question directly from Admin panel (transferred from display screen)
   const handleTriggerQuestionFromAdmin = async (q: LiveQuestionItem, idx: number) => {
@@ -671,6 +673,7 @@ export default function LiveClassManager({
         timeLimit: target.settingTimeLimit || 30,
         showResult: target.settingShowResult || 'نعم',
       });
+      setSelectedLessonTitle(target.title);
       if (res && res.state) {
         setSessionState(res.state);
         sessionStateRef.current = res.state;
@@ -1454,10 +1457,12 @@ export default function LiveClassManager({
                       <ListVideo className="w-4 h-4 text-amber-400" />
                     </div>
                     <select
-                      value={activeLesson?.title || ''}
+                      value={selectedLessonTitle}
                       onChange={(e) => {
-                        if (e.target.value) {
-                          handleSelectLesson(e.target.value);
+                        const val = e.target.value;
+                        setSelectedLessonTitle(val);
+                        if (val) {
+                          handleSelectLesson(val);
                         }
                       }}
                       className="bg-slate-950 border border-slate-750 hover:border-amber-500/50 text-slate-100 text-xs font-bold rounded-lg px-2.5 py-1.5 outline-none cursor-pointer focus:border-amber-400 transition-colors shadow-sm min-w-[200px]"

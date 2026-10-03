@@ -30,3 +30,22 @@ html, body {
   animation: spin-slow 2s linear infinite;
 }
 
+/* QR Code Reader responsive camera styles */
+#qr-reader, #live-student-qr-reader {
+  border: none !important;
+  width: 100% !important;
+}
+
+#qr-reader video, #live-student-qr-reader video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+  border-radius: 1rem;
+}
+
+#qr-reader__scan_region, #live-student-qr-reader__scan_region {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+

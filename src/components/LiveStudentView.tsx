@@ -4,7 +4,8 @@ import {
   Tv, Sparkles, CheckCircle2, XCircle, Clock, Send, 
   User, Hash, LogOut, ArrowRight, Volume2, HelpCircle, 
   Award, ShieldAlert, Wifi, WifiOff, Loader2,
-  KeyRound, ShieldCheck, Camera, QrCode, X, MessageSquare, Hand, ThumbsUp, ThumbsDown
+  KeyRound, ShieldCheck, Camera, QrCode, X, MessageSquare, Hand, ThumbsUp, ThumbsDown,
+  Image as ImageIcon
 } from 'lucide-react';
 import { Html5Qrcode } from 'html5-qrcode';
 import { 
@@ -266,20 +267,27 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
       } catch (e) {}
     }
 
-    // 2. URL Format e.g. https://.../?page=live-student&pin=5821&username=سليمان&sheetNumber=12
-    if (text.includes('http://') || text.includes('https://') || text.includes('?')) {
+    // 2. URL Format or query string e.g. https://.../?page=live-student&pin=5821&username=سليمان&sheetNumber=12
+    if (text.includes('http://') || text.includes('https://') || text.includes('?') || text.includes('pin=')) {
       try {
-        const urlStr = text.startsWith('http') ? text : `https://dummy.com/${text}`;
+        const urlStr = text.startsWith('http') ? text : `https://dummy.com/${text.startsWith('/') ? text.slice(1) : text}`;
         const urlObj = new URL(urlStr);
         const p = urlObj.searchParams;
         const user = p.get('username') || p.get('name') || p.get('user') || p.get('student') || p.get('student_name');
         const sheet = p.get('sheet_number') || p.get('sheetNumber') || p.get('number') || p.get('sheet') || p.get('num') || p.get('id');
         const pinVal = p.get('pin') || p.get('code') || p.get('p');
-        if (user) result.username = user.trim();
+        if (user && !user.startsWith('http')) result.username = user.trim();
         if (sheet) result.sheetNumber = sheet.trim();
         if (pinVal) result.pin = pinVal.trim();
-        if (result.username || result.sheetNumber || result.pin) return result;
       } catch (e) {}
+
+      // Fallback regex for pin inside any url or string
+      const pinRegexMatch = text.match(/[?&#]pin=([a-zA-Z0-9]+)/i);
+      if (pinRegexMatch && !result.pin) {
+        result.pin = pinRegexMatch[1].trim();
+      }
+
+      if (result.username || result.sheetNumber || result.pin) return result;
     }
 
     // 3. Raw Numeric PIN (4 to 6 digits, e.g. "5821")
@@ -310,13 +318,18 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
             sheet = parts[0];
             user = parts[1];
           }
-          return { username: user, sheetNumber: sheet };
+          if (!user.startsWith('http')) {
+            return { username: user, sheetNumber: sheet };
+          }
         }
       }
     }
 
-    // 6. Plain text fallback: assume username
-    return { username: text };
+    // 6. Plain text fallback: assume username ONLY if not a url
+    if (!text.startsWith('http') && !text.includes('://')) {
+      return { username: text };
+    }
+    return null;
   };
 
   const handleScanSuccess = async (decodedText: string) => {
@@ -378,6 +391,30 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
     }
   };
 
+  const handleScanFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setScannerError(null);
+      let scanner = html5QrcodeRef.current;
+      if (!scanner) {
+        scanner = new Html5Qrcode('live-student-qr-reader', {
+          experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+          verbose: false,
+        });
+        html5QrcodeRef.current = scanner;
+      }
+      const decodedText = await scanner.scanFile(file, true);
+      if (decodedText) {
+        handleScanSuccess(decodedText);
+      }
+    } catch (err: any) {
+      console.error('File scan error:', err);
+      setScannerError('لم يتم العثور على رمز QR واضح في الصورة المختارة. يرجى تجربة صورة أوضح.');
+    }
+  };
+
   const startScanner = () => {
     setScannerError(null);
     setScanSuccessMsg(null);
@@ -389,28 +426,72 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
       if (!elem) return;
 
       try {
-        const html5QrCode = new Html5Qrcode('live-student-qr-reader');
+        if (html5QrcodeRef.current) {
+          try {
+            await html5QrcodeRef.current.stop();
+            await html5QrcodeRef.current.clear();
+          } catch {}
+          html5QrcodeRef.current = null;
+        }
+
+        const html5QrCode = new Html5Qrcode('live-student-qr-reader', {
+          experimentalFeatures: {
+            useBarCodeDetectorIfSupported: true,
+          },
+          verbose: false,
+        });
         html5QrcodeRef.current = html5QrCode;
-        const config = { fps: 10, qrbox: { width: 220, height: 220 } };
+
+        // Dynamic responsive qrbox for mobile and tablet screens
+        const config = {
+          fps: 15,
+          qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
+            const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+            const size = Math.max(160, Math.floor(minEdge * 0.8));
+            return { width: size, height: size };
+          },
+          aspectRatio: 1.0,
+        };
+
+        // Select camera: prioritize rear / environment camera on mobile/tablets
+        let cameraIdOrConfig: any = { facingMode: 'environment' };
+        try {
+          const cameras = await Html5Qrcode.getCameras();
+          if (cameras && cameras.length > 0) {
+            const backCam = cameras.find(c => /back|rear|environment|خلف/i.test(c.label)) || cameras[cameras.length - 1];
+            if (backCam) {
+              cameraIdOrConfig = { deviceId: { exact: backCam.id } };
+            }
+          }
+        } catch {}
 
         try {
           await html5QrCode.start(
-            { facingMode: 'environment' },
+            cameraIdOrConfig,
             config,
             (decodedText) => handleScanSuccess(decodedText),
             () => {}
           );
         } catch (e) {
-          await html5QrCode.start(
-            { facingMode: 'user' },
-            config,
-            (decodedText) => handleScanSuccess(decodedText),
-            () => {}
-          );
+          try {
+            await html5QrCode.start(
+              { facingMode: 'environment' },
+              config,
+              (decodedText) => handleScanSuccess(decodedText),
+              () => {}
+            );
+          } catch (e2) {
+            await html5QrCode.start(
+              { facingMode: 'user' },
+              config,
+              (decodedText) => handleScanSuccess(decodedText),
+              () => {}
+            );
+          }
         }
       } catch (err: any) {
         console.error('Camera QR start error:', err);
-        setScannerError('تعذر فتح الكاميرا. يرجى التأكد من السماح بالوصول للكاميرا.');
+        setScannerError('تعذر تشغيل الكاميرا. يرجى التأكد من السماح بصلاحية الكاميرا في إعدادات المتصفح.');
       }
     }, 250);
   };

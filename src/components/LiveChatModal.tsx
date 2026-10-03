@@ -47,7 +47,6 @@ export default function LiveChatModal({
   const [replyText, setReplyText] = useState('');
   const [replyType, setReplyType] = useState<'private' | 'public'>('private');
   const [isSubmittingReply, setIsSubmittingReply] = useState(false);
-  const [filterType, setFilterType] = useState<'all' | 'questions' | 'reactions'>('all');
   
   // Student Composer State (Embedded inside the chat modal)
   const [studentInputText, setStudentInputText] = useState('');
@@ -67,6 +66,7 @@ export default function LiveChatModal({
 
   // Common notification banner
   const [teacherNotice, setTeacherNotice] = useState<string | null>(null);
+  const [activeTeacherComposer, setActiveTeacherComposer] = useState<'none' | 'public' | 'private'>('none');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -95,16 +95,17 @@ export default function LiveChatModal({
 
   if (!isOpen) return null;
 
-  // Filter messages
+  // Filter messages: show messages directly without category tabs
   const filteredMessages = messages.filter((m) => {
     if (!isTeacher && currentUserName) {
-      // For student: can see their own messages, OR public replies/questions
-      const isMine = m.senderName.trim().toLowerCase() === currentUserName.trim().toLowerCase();
-      const isPublic = m.reply?.type === 'public';
-      if (!isMine && !isPublic) return false;
+      const cleanMyName = currentUserName.trim().toLowerCase();
+      const isMine = m.senderName.trim().toLowerCase() === cleanMyName;
+      const isPublicReply = m.reply?.type === 'public';
+      const isTeacherMsg = m.senderName.includes('الأستاذ') || m.id.startsWith('teach_');
+      const isPrivateToMe = isTeacherMsg && m.text?.includes(currentUserName);
+      const isPublicTeacherMsg = isTeacherMsg && !m.text?.startsWith('رسالة خاصة');
+      if (!isMine && !isPublicReply && !isPrivateToMe && !isPublicTeacherMsg) return false;
     }
-    if (filterType === 'questions') return m.type === 'question';
-    if (filterType === 'reactions') return m.type !== 'question';
     return true;
   });
 
@@ -152,6 +153,7 @@ export default function LiveChatModal({
       await onSendTeacherBroadcast(teacherPublicText.trim(), undefined, undefined);
       setTeacherPublicText('');
       setShowPublicEmojiPicker(false);
+      setActiveTeacherComposer('none');
       setTeacherNotice('تم نشر الرسالة العامة لجميع الطلاب وعلى الشاشة بنجاح 🌐');
       setTimeout(() => setTeacherNotice(null), 3500);
     } catch (err) {
@@ -173,6 +175,7 @@ export default function LiveChatModal({
       );
       setTeacherPrivateText('');
       setShowPrivateEmojiPicker(false);
+      setActiveTeacherComposer('none');
       setTeacherNotice(`تم إرسال الرسالة الخاصة للمشترك (${selectedStudentTarget}) بنجاح 🔒`);
       setTimeout(() => setTeacherNotice(null), 3500);
     } catch (err) {
@@ -183,6 +186,24 @@ export default function LiveChatModal({
   };
 
   const getReactionBadge = (msg: LiveStudentMessage) => {
+    const isTeacherMsg = msg.senderName.includes('الأستاذ') || msg.id.startsWith('teach_');
+    if (isTeacherMsg) {
+      if (msg.text?.startsWith('رسالة خاصة')) {
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[11px] font-bold">
+            <Lock className="w-3 h-3 text-amber-400" />
+            <span>رسالة خاصة 🔒</span>
+          </span>
+        );
+      }
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[11px] font-bold">
+          <Megaphone className="w-3 h-3 text-emerald-400" />
+          <span>رسالة عامة 🌐</span>
+        </span>
+      );
+    }
+
     switch (msg.type) {
       case 'hand':
         return (
@@ -301,41 +322,6 @@ export default function LiveChatModal({
           </div>
         </div>
 
-        {/* Filter Pills (All / Questions / Reactions) */}
-        <div className="px-3 py-1.5 bg-slate-950/40 border-b border-slate-800 flex items-center gap-2 text-xs shrink-0">
-          <span className="text-slate-400 font-bold text-[11px] ml-1">عرض:</span>
-          <button
-            onClick={() => setFilterType('all')}
-            className={`px-2.5 py-0.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              filterType === 'all'
-                ? 'bg-indigo-600 text-white shadow-sm'
-                : 'bg-slate-800 text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            الكل ({filteredMessages.length})
-          </button>
-          <button
-            onClick={() => setFilterType('questions')}
-            className={`px-2.5 py-0.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              filterType === 'questions'
-                ? 'bg-indigo-600 text-white shadow-sm'
-                : 'bg-slate-800 text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            الأسئلة 💬 ({filteredMessages.filter(m => m.type === 'question').length})
-          </button>
-          <button
-            onClick={() => setFilterType('reactions')}
-            className={`px-2.5 py-0.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              filterType === 'reactions'
-                ? 'bg-indigo-600 text-white shadow-sm'
-                : 'bg-slate-800 text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            التفاعلات ✋ ({filteredMessages.filter(m => m.type !== 'question').length})
-          </button>
-        </div>
-
         {/* Messages List Area */}
         <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-2.5 min-h-[180px]">
           {filteredMessages.length === 0 ? (
@@ -346,20 +332,24 @@ export default function LiveChatModal({
               <h4 className="text-xs font-bold text-slate-400">لا توجد رسائل حالياً</h4>
               <p className="text-[11px] max-w-xs leading-relaxed text-slate-500">
                 {isTeacher
-                  ? 'يمكنك إرسال رسالة عامة للجميع أو اختيار طالب معين وإرسال رسالة خاصة له عبر الصندوق أدناه.'
+                  ? 'يمكنك إرسال رسالة عامة للجميع أو اختيار طالب معين وإرسال رسالة خاصة له عبر الزرين أدناه.'
                   : 'يمكنك كتابة سؤالك في الحقل أدناه أو اختيار أيقونة سريعة مثل رفع اليد.'}
               </p>
             </div>
           ) : (
             filteredMessages.map((msg) => {
               const isMine = currentUserName && msg.senderName.trim().toLowerCase() === currentUserName.trim().toLowerCase();
-              const hasReply = Boolean(msg.reply?.text);
+              const isTeacherMsg = msg.senderName.includes('الأستاذ') || msg.id.startsWith('teach_');
+              const isDuplicateText = Boolean(msg.reply?.text) && msg.reply!.text.trim().toLowerCase() === (msg.text || '').trim().toLowerCase();
+              const hasReply = !isTeacherMsg && Boolean(msg.reply?.text) && !isDuplicateText;
 
               return (
                 <div
                   key={msg.id}
                   className={`p-3 rounded-2xl border transition-all ${
-                    msg.type === 'hand'
+                    isTeacherMsg
+                      ? 'bg-emerald-950/20 border-emerald-500/30'
+                      : msg.type === 'hand'
                       ? 'bg-amber-950/20 border-amber-500/30'
                       : msg.type === 'agree'
                       ? 'bg-emerald-950/20 border-emerald-500/30'
@@ -372,17 +362,38 @@ export default function LiveChatModal({
                 >
                   <div className="flex items-start justify-between gap-2 mb-1.5">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <div className="w-6 h-6 rounded-lg bg-slate-800 border border-slate-700 text-indigo-400 flex items-center justify-center font-bold text-xs">
-                        <User className="w-3 h-3" />
+                      <div className="w-6 h-6 rounded-lg bg-slate-800 border border-slate-700 text-indigo-400 flex items-center justify-center font-bold text-xs shrink-0">
+                        {isTeacherMsg ? <Megaphone className="w-3 h-3 text-emerald-400" /> : <User className="w-3 h-3" />}
                       </div>
                       <span className="font-black text-xs sm:text-sm text-slate-100">
                         {isMine ? `أنت (${msg.senderName})` : msg.senderName}
                       </span>
                       {msg.sheetNumber && (
-                        <span className="text-[10px] font-mono text-slate-400 bg-slate-800 px-1.5 py-0.5 rounded border border-slate-750">
+                        <span className="text-[10px] font-mono text-slate-300 bg-slate-800 px-1.5 py-0.5 rounded-md border border-slate-700">
                           #{msg.sheetNumber}
                         </span>
                       )}
+
+                      {/* زر إرسال الرد / تعديل الرد مرفوع مباشرة مع الاسم ورقم الطالب */}
+                      {isTeacher && !isTeacherMsg && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedMessage(msg);
+                            setReplyText(msg.reply?.text || '');
+                            setReplyType('private');
+                          }}
+                          className={`px-2.5 py-0.5 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer border shadow-sm mr-1 ${
+                            hasReply
+                              ? 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border-amber-500/40'
+                              : 'bg-indigo-600/30 hover:bg-indigo-600 text-indigo-200 hover:text-white border-indigo-500/40'
+                          }`}
+                        >
+                          <Reply className="w-3 h-3" />
+                          <span>{hasReply ? 'تعديل الرد' : 'إرسال الرد'}</span>
+                        </button>
+                      )}
+
                       {getReactionBadge(msg)}
                     </div>
 
@@ -393,7 +404,7 @@ export default function LiveChatModal({
                         <button
                           type="button"
                           onClick={() => onDeleteMessage(msg.id)}
-                          className="p-1 text-slate-400 hover:text-rose-400 transition-colors ml-1"
+                          className="p-1 text-slate-400 hover:text-rose-400 transition-colors ml-1 cursor-pointer"
                           title="حذف الرسالة"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -402,60 +413,30 @@ export default function LiveChatModal({
                     </div>
                   </div>
 
-                  {/* Message Text Content */}
+                  {/* Message Text Content (مع إزالة التكرار) */}
                   {msg.text && (
-                    <p className="text-xs sm:text-sm font-semibold text-slate-200 mt-1 leading-relaxed bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/80">
-                      {msg.text}
-                    </p>
+                    <div className="mt-1">
+                      {hasReply && (
+                        <div className="text-[10px] text-slate-400 font-bold mb-0.5">سؤال المشترك:</div>
+                      )}
+                      <p className="text-xs sm:text-sm font-semibold text-slate-200 leading-relaxed bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/80">
+                        {msg.text}
+                      </p>
+                    </div>
                   )}
 
-                  {/* Teacher Reply Section */}
-                  {hasReply && (
+                  {/* Teacher Reply Section (يظهر الرد بدون تكرار) */}
+                  {hasReply && msg.reply?.text && (
                     <div className="mt-2.5 p-2.5 rounded-xl bg-slate-950 border border-indigo-500/30 space-y-1 animate-in fade-in">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-1.5 text-[11px] font-black text-indigo-400">
                           <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                           <span>رد الأستاذ ({msg.reply?.repliedBy || 'المعلم'}):</span>
                         </div>
-                        <span className={`px-2 py-0.5 rounded-md text-[9px] font-bold flex items-center gap-1 ${
-                          msg.reply?.type === 'public'
-                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                            : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                        }`}>
-                          {msg.reply?.type === 'public' ? (
-                            <>
-                              <Globe className="w-2.5 h-2.5" />
-                              <span>إجابة عامة</span>
-                            </>
-                          ) : (
-                            <>
-                              <Lock className="w-2.5 h-2.5" />
-                              <span>خاصة للسائل</span>
-                            </>
-                          )}
-                        </span>
                       </div>
                       <p className="text-xs sm:text-sm font-bold text-slate-100 leading-relaxed pr-2">
-                        {msg.reply?.text}
+                        {msg.reply.text}
                       </p>
-                    </div>
-                  )}
-
-                  {/* Teacher Reply Trigger Button */}
-                  {isTeacher && (
-                    <div className="mt-2 pt-1.5 border-t border-slate-800/60 flex items-center justify-end">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedMessage(msg);
-                          setReplyText(msg.reply?.text || '');
-                          setReplyType(msg.reply?.type || 'private');
-                        }}
-                        className="px-2.5 py-1 bg-indigo-600/30 hover:bg-indigo-600 text-indigo-300 hover:text-white rounded-lg text-[11px] font-bold flex items-center gap-1 border border-indigo-500/40 transition-all cursor-pointer"
-                      >
-                        <Reply className="w-3 h-3" />
-                        <span>{hasReply ? 'تعديل الرد' : 'إرسال رد'}</span>
-                      </button>
                     </div>
                   )}
                 </div>
@@ -465,9 +446,9 @@ export default function LiveChatModal({
           <div ref={messagesEndRef} />
         </div>
 
-        {/* 1. TEACHER COMPOSER DRAWER (نافذة رسائل الإدارة: رسالة عامة منفصلة + رسالة خاصة لمشترك منفصلة) */}
+        {/* 1. TEACHER COMPOSER DRAWER (زران: رسالة عامة + رسالة خاصة عند النقر يظهر حقل الإرسال) */}
         {isTeacher && onSendTeacherBroadcast && (
-          <div className="p-3 bg-slate-950 border-t border-slate-800 space-y-3 shrink-0">
+          <div className="p-3 bg-slate-950 border-t border-slate-800 space-y-2.5 shrink-0">
             {/* Notification alert banner */}
             {teacherNotice && (
               <div className="p-2 bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 rounded-xl text-xs font-bold flex items-center gap-2 animate-in fade-in">
@@ -476,173 +457,228 @@ export default function LiveChatModal({
               </div>
             )}
 
-            {/* القسم الأول: رسالة عامة للجميع وعلى الشاشة (منفصلة وظاهرة) */}
-            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-2.5 space-y-2">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-black text-emerald-400 flex items-center gap-1.5">
-                  <Megaphone className="w-3.5 h-3.5" />
-                  <span>رسالة عامة للجميع (تظهر على الشاشة وللطلاب) 🌐</span>
-                </span>
-                <span className="text-[10px] text-slate-500 font-bold">عامة</span>
-              </div>
+            {/* زران في الأسفل لاختيار نوع الرسالة */}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setActiveTeacherComposer(prev => prev === 'public' ? 'none' : 'public')}
+                className={`flex-1 py-2 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer border ${
+                  activeTeacherComposer === 'public'
+                    ? 'bg-emerald-600 text-white border-emerald-400 shadow-md ring-2 ring-emerald-500/20'
+                    : 'bg-slate-900 hover:bg-slate-850 text-slate-300 border-slate-800'
+                }`}
+              >
+                <Megaphone className="w-4 h-4 text-emerald-400" />
+                <span>رسالة عامة للجميع 🌐</span>
+              </button>
 
-              <div className="flex items-center gap-2 relative">
-                {/* زر خاص بالأيقونات والابتسامات السريعة */}
-                <button
-                  type="button"
-                  onClick={() => setShowPublicEmojiPicker(!showPublicEmojiPicker)}
-                  title="إدراج أيقونات وعبارات تشجيعية"
-                  className={`p-2 rounded-xl border transition-all cursor-pointer shrink-0 ${
-                    showPublicEmojiPicker
-                      ? 'bg-amber-500/20 border-amber-400 text-amber-300'
-                      : 'bg-slate-950 border-slate-750 text-slate-400 hover:text-amber-400'
-                  }`}
-                >
-                  <Smile className="w-4 h-4" />
-                </button>
-
-                <input
-                  type="text"
-                  value={teacherPublicText}
-                  onChange={(e) => setTeacherPublicText(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleSendPublicBroadcast();
-                  }}
-                  placeholder="اكتب إعلاناً أو رسالة عامة للجميع على الشاشة..."
-                  className="flex-1 px-3.5 py-2 bg-slate-950 border border-slate-750 focus:border-emerald-400 rounded-xl text-slate-100 text-xs font-bold outline-none placeholder:text-slate-500"
-                />
-
-                <button
-                  type="button"
-                  onClick={handleSendPublicBroadcast}
-                  disabled={!teacherPublicText.trim() || isSendingPublic}
-                  className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md disabled:opacity-40 cursor-pointer active:scale-95 transition-all shrink-0"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  <span>إرسال للجميع 🌐</span>
-                </button>
-              </div>
-
-              {/* القائمة المنبثقة للأيقونات والابتسامات السريعة للرسالة العامة */}
-              <AnimatePresence>
-                {showPublicEmojiPicker && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="p-2 bg-slate-950 border border-slate-800 rounded-xl flex flex-wrap items-center gap-1.5 overflow-hidden"
-                  >
-                    <span className="text-[10px] text-slate-400 font-bold ml-1">أيقونات وعبارات:</span>
-                    {COMMON_EMOJIS.map((em, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => setTeacherPublicText(prev => prev ? `${prev} ${em}` : em)}
-                        className="px-2 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-800 hover:border-slate-700 text-xs font-bold transition-all cursor-pointer"
-                      >
-                        {em}
-                      </button>
-                    ))}
-                  </motion.div>
-                )}
-              </AnimatePresence>
+              <button
+                type="button"
+                onClick={() => setActiveTeacherComposer(prev => prev === 'private' ? 'none' : 'private')}
+                className={`flex-1 py-2 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer border ${
+                  activeTeacherComposer === 'private'
+                    ? 'bg-amber-600 text-white border-amber-400 shadow-md ring-2 ring-amber-500/20'
+                    : 'bg-slate-900 hover:bg-slate-850 text-slate-300 border-slate-800'
+                }`}
+              >
+                <Lock className="w-4 h-4 text-amber-400" />
+                <span>رسالة خاصة لمشترك 🔒</span>
+              </button>
             </div>
 
-            {/* القسم الثاني: إرسال رسالة خاصة لمشترك محدد (خاصة للإدارة) */}
-            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-2.5 space-y-2">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-black text-amber-400 flex items-center gap-1.5">
-                  <Lock className="w-3.5 h-3.5" />
-                  <span>إرسال رسالة خاصة لمشترك (للإدارة فقط) 🔒</span>
-                </span>
-                <span className="text-[10px] text-amber-500/80 font-mono font-bold">
-                  {availableStudents.length > 0 ? `${availableStudents.length} مشترك متاح` : 'لا يوجد مشتركين متصلين'}
-                </span>
-              </div>
+            {/* حقل إرسال رسالة عامة للجميع (يظهر عند النقر على زر رسالة عامة) */}
+            <AnimatePresence>
+              {activeTeacherComposer === 'public' && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10, height: 0 }}
+                  animate={{ opacity: 1, y: 0, height: 'auto' }}
+                  exit={{ opacity: 0, y: 10, height: 0 }}
+                  className="bg-slate-900/90 border border-slate-800 rounded-2xl p-2.5 space-y-2 overflow-hidden"
+                >
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-black text-emerald-400 flex items-center gap-1.5">
+                      <Megaphone className="w-3.5 h-3.5" />
+                      <span>رسالة عامة تظهر لجميع الطلاب وعلى شاشة العرض 🌐</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTeacherComposer('none')}
+                      className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
 
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                {/* قائمة أسماء المشتركين */}
-                <div className="sm:w-1/3 min-w-[170px]">
-                  <select
-                    value={selectedStudentTarget}
-                    onChange={(e) => setSelectedStudentTarget(e.target.value)}
-                    className="w-full px-2.5 py-2 bg-slate-950 border border-amber-500/40 focus:border-amber-400 rounded-xl text-amber-200 text-xs font-bold outline-none cursor-pointer"
-                  >
-                    <option value="">-- اختر المشترك لإرسال خاص --</option>
-                    {availableStudents.map((st, i) => (
-                      <option key={i} value={st.username}>
-                        {st.username} {st.sheetNumber ? `(#${st.sheetNumber})` : ''}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                  <div className="flex items-center gap-2 relative">
+                    <button
+                      type="button"
+                      onClick={() => setShowPublicEmojiPicker(!showPublicEmojiPicker)}
+                      title="إدراج أيقونات وعبارات تشجيعية"
+                      className={`p-2 rounded-xl border transition-all cursor-pointer shrink-0 ${
+                        showPublicEmojiPicker
+                          ? 'bg-amber-500/20 border-amber-400 text-amber-300'
+                          : 'bg-slate-950 border-slate-750 text-slate-400 hover:text-amber-400'
+                      }`}
+                    >
+                      <Smile className="w-4 h-4" />
+                    </button>
 
-                {/* حقل نص الرسالة الخاصة */}
-                <div className="flex-1 flex items-center gap-2 relative">
-                  <button
-                    type="button"
-                    onClick={() => setShowPrivateEmojiPicker(!showPrivateEmojiPicker)}
-                    title="إدراج أيقونات سريعة"
-                    className={`p-2 rounded-xl border transition-all cursor-pointer shrink-0 ${
-                      showPrivateEmojiPicker
-                        ? 'bg-amber-500/20 border-amber-400 text-amber-300'
-                        : 'bg-slate-950 border-slate-750 text-slate-400 hover:text-amber-400'
-                    }`}
-                  >
-                    <Smile className="w-4 h-4" />
-                  </button>
+                    <input
+                      type="text"
+                      value={teacherPublicText}
+                      onChange={(e) => setTeacherPublicText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleSendPublicBroadcast();
+                      }}
+                      placeholder="اكتب إعلاناً أو رسالة عامة للجميع على الشاشة..."
+                      className="flex-1 px-3.5 py-2 bg-slate-950 border border-slate-750 focus:border-emerald-400 rounded-xl text-slate-100 text-xs font-bold outline-none placeholder:text-slate-500"
+                      autoFocus
+                    />
 
-                  <input
-                    type="text"
-                    value={teacherPrivateText}
-                    onChange={(e) => setTeacherPrivateText(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleSendPrivateToStudent();
-                    }}
-                    placeholder={
-                      selectedStudentTarget
-                        ? `اكتب رسالة خاصة لـ (${selectedStudentTarget})...`
-                        : 'اختر مشتركاً أولاً لكتابة رسالة خاصة له...'
-                    }
-                    className="flex-1 px-3 py-2 bg-slate-950 border border-slate-750 focus:border-amber-400 rounded-xl text-slate-100 text-xs font-bold outline-none placeholder:text-slate-500"
-                  />
+                    <button
+                      type="button"
+                      onClick={handleSendPublicBroadcast}
+                      disabled={!teacherPublicText.trim() || isSendingPublic}
+                      className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md disabled:opacity-40 cursor-pointer active:scale-95 transition-all shrink-0"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      <span>إرسال للجميع 🌐</span>
+                    </button>
+                  </div>
 
-                  <button
-                    type="button"
-                    onClick={handleSendPrivateToStudent}
-                    disabled={!teacherPrivateText.trim() || !selectedStudentTarget || isSendingPrivate}
-                    className="px-3.5 py-2 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-slate-950 font-black rounded-xl text-xs flex items-center gap-1.5 shadow-md disabled:opacity-40 cursor-pointer active:scale-95 transition-all shrink-0"
-                  >
-                    <Send className="w-3.5 h-3.5" />
-                    <span>إرسال خاص 🔒</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* القائمة المنبثقة للأيقونات للرسالة الخاصة */}
-              <AnimatePresence>
-                {showPrivateEmojiPicker && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="p-2 bg-slate-950 border border-slate-800 rounded-xl flex flex-wrap items-center gap-1.5 overflow-hidden"
-                  >
-                    <span className="text-[10px] text-slate-400 font-bold ml-1">أيقونات:</span>
-                    {COMMON_EMOJIS.map((em, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => setTeacherPrivateText(prev => prev ? `${prev} ${em}` : em)}
-                        className="px-2 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-800 hover:border-slate-700 text-xs font-bold transition-all cursor-pointer"
+                  <AnimatePresence>
+                    {showPublicEmojiPicker && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="p-2 bg-slate-950 border border-slate-800 rounded-xl flex flex-wrap items-center gap-1.5 overflow-hidden"
                       >
-                        {em}
+                        <span className="text-[10px] text-slate-400 font-bold ml-1">أيقونات:</span>
+                        {COMMON_EMOJIS.map((em, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => setTeacherPublicText(prev => prev ? `${prev} ${em}` : em)}
+                            className="px-2 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-800 hover:border-slate-700 text-xs font-bold transition-all cursor-pointer"
+                          >
+                            {em}
+                          </button>
+                        ))}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* حقل إرسال رسالة خاصة لمشترك (يظهر عند النقر على زر رسالة خاصة) */}
+            <AnimatePresence>
+              {activeTeacherComposer === 'private' && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10, height: 0 }}
+                  animate={{ opacity: 1, y: 0, height: 'auto' }}
+                  exit={{ opacity: 0, y: 10, height: 0 }}
+                  className="bg-slate-900/90 border border-slate-800 rounded-2xl p-2.5 space-y-2 overflow-hidden"
+                >
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-black text-amber-400 flex items-center gap-1.5">
+                      <Lock className="w-3.5 h-3.5" />
+                      <span>إرسال رسالة خاصة لمشترك (تصل له فقط) 🔒</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTeacherComposer('none')}
+                      className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                    {/* قائمة أسماء المشتركين */}
+                    <div className="sm:w-1/3 min-w-[170px]">
+                      <select
+                        value={selectedStudentTarget}
+                        onChange={(e) => setSelectedStudentTarget(e.target.value)}
+                        className="w-full px-2.5 py-2 bg-slate-950 border border-amber-500/40 focus:border-amber-400 rounded-xl text-amber-200 text-xs font-bold outline-none cursor-pointer"
+                      >
+                        <option value="">-- اختر المشترك لإرسال خاص --</option>
+                        {availableStudents.map((st, i) => (
+                          <option key={i} value={st.username}>
+                            {st.username} {st.sheetNumber ? `(#${st.sheetNumber})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="flex-1 flex items-center gap-2 relative">
+                      <button
+                        type="button"
+                        onClick={() => setShowPrivateEmojiPicker(!showPrivateEmojiPicker)}
+                        title="إدراج أيقونات سريعة"
+                        className={`p-2 rounded-xl border transition-all cursor-pointer shrink-0 ${
+                          showPrivateEmojiPicker
+                            ? 'bg-amber-500/20 border-amber-400 text-amber-300'
+                            : 'bg-slate-950 border-slate-750 text-slate-400 hover:text-amber-400'
+                        }`}
+                      >
+                        <Smile className="w-4 h-4" />
                       </button>
-                    ))}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
+
+                      <input
+                        type="text"
+                        value={teacherPrivateText}
+                        onChange={(e) => setTeacherPrivateText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleSendPrivateToStudent();
+                        }}
+                        placeholder={
+                          selectedStudentTarget
+                            ? `اكتب رسالة خاصة لـ (${selectedStudentTarget})...`
+                            : 'اختر مشتركاً أولاً لكتابة رسالة خاصة له...'
+                        }
+                        className="flex-1 px-3 py-2 bg-slate-950 border border-slate-750 focus:border-amber-400 rounded-xl text-slate-100 text-xs font-bold outline-none placeholder:text-slate-500"
+                        autoFocus
+                      />
+
+                      <button
+                        type="button"
+                        onClick={handleSendPrivateToStudent}
+                        disabled={!teacherPrivateText.trim() || !selectedStudentTarget || isSendingPrivate}
+                        className="px-3.5 py-2 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-slate-950 font-black rounded-xl text-xs flex items-center gap-1.5 shadow-md disabled:opacity-40 cursor-pointer active:scale-95 transition-all shrink-0"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        <span>إرسال خاص 🔒</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <AnimatePresence>
+                    {showPrivateEmojiPicker && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="p-2 bg-slate-950 border border-slate-800 rounded-xl flex flex-wrap items-center gap-1.5 overflow-hidden"
+                      >
+                        <span className="text-[10px] text-slate-400 font-bold ml-1">أيقونات:</span>
+                        {COMMON_EMOJIS.map((em, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => setTeacherPrivateText(prev => prev ? `${prev} ${em}` : em)}
+                            className="px-2 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-800 hover:border-slate-700 text-xs font-bold transition-all cursor-pointer"
+                          >
+                            {em}
+                          </button>
+                        ))}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         )}
 
@@ -748,36 +784,6 @@ export default function LiveChatModal({
               </button>
             </div>
 
-            {/* Answer Visibility Mode: Private vs Public */}
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] text-slate-400 font-bold">نوع الإجابة:</span>
-              <button
-                type="button"
-                onClick={() => setReplyType('private')}
-                className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer border ${
-                  replyType === 'private'
-                    ? 'bg-amber-600 text-white border-amber-400 shadow-md'
-                    : 'bg-slate-900 text-slate-400 hover:text-slate-200 border-slate-800'
-                }`}
-              >
-                <Lock className="w-3.5 h-3.5" />
-                <span>إجابة خاصة (للسائل فقط) 🔒</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setReplyType('public')}
-                className={`flex-1 py-1.5 px-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer border ${
-                  replyType === 'public'
-                    ? 'bg-emerald-600 text-white border-emerald-400 shadow-md'
-                    : 'bg-slate-900 text-slate-400 hover:text-slate-200 border-slate-800'
-                }`}
-              >
-                <Globe className="w-3.5 h-3.5" />
-                <span>إجابة عامة (على الشاشة وللجميع) 🌐</span>
-              </button>
-            </div>
-
             <div className="flex items-center gap-2">
               <input
                 type="text"
@@ -786,7 +792,7 @@ export default function LiveChatModal({
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') handleSendReply();
                 }}
-                placeholder={replyType === 'private' ? 'اكتب إجابتك الخاصة للطالب...' : 'اكتب إجابتك العامة التي ستظهر للجميع...'}
+                placeholder="اكتب ردك على الطالب هنا..."
                 className="flex-1 px-3.5 py-2 bg-slate-900 border border-slate-750 focus:border-indigo-400 rounded-xl text-slate-100 text-xs font-bold outline-none"
                 autoFocus
               />

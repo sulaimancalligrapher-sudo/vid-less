@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { User, FileSpreadsheet, KeyRound, AlertCircle, Loader2, QrCode, Camera, X, CheckCircle2 } from 'lucide-react';
+import { User, FileSpreadsheet, KeyRound, AlertCircle, Loader2, QrCode, Camera, X, CheckCircle2, Image as ImageIcon, Upload } from 'lucide-react';
 import { Html5Qrcode } from 'html5-qrcode';
 import { loginStudent, formatDriveImageUrl } from '../api';
 import { useLanguage } from '../translations';
@@ -172,6 +172,30 @@ export default function StudentLogin({
     }
   };
 
+  const handleFileUploadScan = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setScannerError(null);
+      let scanner = html5QrcodeRef.current;
+      if (!scanner) {
+        scanner = new Html5Qrcode('qr-reader', {
+          experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+          verbose: false,
+        });
+        html5QrcodeRef.current = scanner;
+      }
+      const decodedText = await scanner.scanFile(file, true);
+      if (decodedText) {
+        handleScanSuccess(decodedText);
+      }
+    } catch (err: any) {
+      console.error('File QR scan error:', err);
+      setScannerError('لم يتم العثور على رمز QR واضح في الصورة المختارة. يرجى التأكد من وضوح الصورة وتجربة أخرى.');
+    }
+  };
+
   const startScanner = () => {
     setScannerError(null);
     setQrSuccessMsg(null);
@@ -183,29 +207,72 @@ export default function StudentLogin({
       if (!qrElem) return;
 
       try {
-        const html5QrCode = new Html5Qrcode('qr-reader');
+        if (html5QrcodeRef.current) {
+          try {
+            await html5QrcodeRef.current.stop();
+            await html5QrcodeRef.current.clear();
+          } catch {}
+          html5QrcodeRef.current = null;
+        }
+
+        const html5QrCode = new Html5Qrcode('qr-reader', {
+          experimentalFeatures: {
+            useBarCodeDetectorIfSupported: true,
+          },
+          verbose: false,
+        });
         html5QrcodeRef.current = html5QrCode;
 
-        const config = { fps: 10, qrbox: { width: 220, height: 220 } };
+        // Dynamic responsive qrbox for mobile and tablet screens
+        const config = {
+          fps: 15,
+          qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
+            const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+            const size = Math.max(160, Math.floor(minEdge * 0.8));
+            return { width: size, height: size };
+          },
+          aspectRatio: 1.0,
+        };
+
+        // Select camera: prioritize rear / environment camera on mobile/tablets
+        let cameraIdOrConfig: any = { facingMode: 'environment' };
+        try {
+          const cameras = await Html5Qrcode.getCameras();
+          if (cameras && cameras.length > 0) {
+            const backCam = cameras.find(c => /back|rear|environment|خلف/i.test(c.label)) || cameras[cameras.length - 1];
+            if (backCam) {
+              cameraIdOrConfig = { deviceId: { exact: backCam.id } };
+            }
+          }
+        } catch {}
 
         try {
           await html5QrCode.start(
-            { facingMode: 'environment' },
+            cameraIdOrConfig,
             config,
             (decodedText) => handleScanSuccess(decodedText),
             () => {}
           );
-        } catch (camErr) {
-          await html5QrCode.start(
-            { facingMode: 'user' },
-            config,
-            (decodedText) => handleScanSuccess(decodedText),
-            () => {}
-          );
+        } catch (e) {
+          try {
+            await html5QrCode.start(
+              { facingMode: 'environment' },
+              config,
+              (decodedText) => handleScanSuccess(decodedText),
+              () => {}
+            );
+          } catch (e2) {
+            await html5QrCode.start(
+              { facingMode: 'user' },
+              config,
+              (decodedText) => handleScanSuccess(decodedText),
+              () => {}
+            );
+          }
         }
       } catch (err: any) {
         console.error('Camera QR start error:', err);
-        setScannerError('تعذر فتح الكاميرا لمسح الكيو ار. يرجى السماح باستخدام الكاميرا في إعدادات المتصفح.');
+        setScannerError('تعذر فتح الكاميرا لمسح الكيو ار. يرجى السماح باستخدام الكاميرا في إعدادات المتصفح أو استخدام خيار تحميل صورة الرمز أدناه.');
       }
     }, 250);
   };
@@ -364,8 +431,23 @@ export default function StudentLogin({
                   <div id="qr-reader" className="w-full h-full" />
                 </div>
 
+                {/* Alternate option: upload or snap photo from mobile gallery */}
+                <div className="mt-3">
+                  <label className="flex items-center justify-center gap-2 py-2.5 px-3 bg-slate-800 hover:bg-slate-750 border border-slate-700 hover:border-amber-500/40 text-amber-300 font-bold rounded-xl text-xs cursor-pointer transition-all">
+                    <ImageIcon className="w-4 h-4 text-amber-400" />
+                    <span>أو اختر صورة الكيو ار من المعرض 🖼️</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={handleFileUploadScan}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+
                 {scannerError && (
-                  <div className="mt-4 p-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs rounded-xl flex items-center gap-2 text-right">
+                  <div className="mt-3 p-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs rounded-xl flex items-center gap-2 text-right">
                     <AlertCircle className="w-4 h-4 shrink-0" />
                     <span>{scannerError}</span>
                   </div>
@@ -373,7 +455,7 @@ export default function StudentLogin({
 
                 <button
                   onClick={stopScanner}
-                  className="mt-4 w-full py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-2xl text-xs transition-all cursor-pointer"
+                  className="mt-3 w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-2xl text-xs transition-all cursor-pointer"
                 >
                   إلغاء مسح الكاميرا
                 </button>

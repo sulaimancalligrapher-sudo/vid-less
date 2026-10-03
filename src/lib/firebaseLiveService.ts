@@ -906,26 +906,15 @@ export async function sendTeacherBroadcastMessage(payload: {
 }): Promise<{ success: boolean; messageId: string }> {
   try {
     const isPrivate = Boolean(payload.recipientStudent && payload.recipientStudent.trim());
+    const cleanText = payload.text.trim();
     const newMessage: LiveStudentMessage = {
       id: `teach_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      senderName: 'الأستاذ 👨‍🏫',
+      senderName: isPrivate ? (payload.recipientStudent?.trim() || 'المشترك') : 'الأستاذ 👨‍🏫',
       sheetNumber: payload.recipientSheet?.trim() || '',
       type: 'question',
-      text: payload.text.trim(),
+      text: isPrivate ? `رسالة خاصة من الأستاذ: ${cleanText}` : cleanText,
       createdAt: Date.now(),
-      reply: {
-        text: payload.text.trim(),
-        type: isPrivate ? 'private' : 'public',
-        repliedAt: Date.now(),
-        repliedBy: 'الأستاذ',
-      },
     };
-
-    // If private to a student, set senderName as the student so it routes to their private feed
-    if (isPrivate && payload.recipientStudent) {
-      newMessage.senderName = payload.recipientStudent.trim();
-      newMessage.text = `رسالة خاصة من الأستاذ: ${payload.text.trim()}`;
-    }
 
     const currentMessages = cachedState.messages || [];
     const updatedMessages = [...currentMessages.slice(-99), newMessage];

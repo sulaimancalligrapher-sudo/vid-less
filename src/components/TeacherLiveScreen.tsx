@@ -195,7 +195,7 @@ export default function TeacherLiveScreen({ onBack }: TeacherLiveScreenProps) {
         const words = await fetchLessons('1', 'teacher');
         if (Array.isArray(words) && words.length > 0) {
           setLessons(words);
-          setSelectedLesson(words[0]);
+          setSelectedLesson(null);
         }
       } catch (e) {
         console.error('Failed to load lessons for teacher:', e);
@@ -510,10 +510,18 @@ export default function TeacherLiveScreen({ onBack }: TeacherLiveScreenProps) {
                   </div>
                 ) : (
                   <select
-                    value={selectedLesson ? lessons.indexOf(selectedLesson) : 0}
-                    onChange={(e) => setSelectedLesson(lessons[parseInt(e.target.value)])}
+                    value={selectedLesson ? lessons.indexOf(selectedLesson) : ''}
+                    onChange={(e) => {
+                      const idx = parseInt(e.target.value);
+                      if (!isNaN(idx) && lessons[idx]) {
+                        setSelectedLesson(lessons[idx]);
+                      } else {
+                        setSelectedLesson(null);
+                      }
+                    }}
                     className="w-full px-4 py-3 bg-slate-950 border border-slate-800 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 text-slate-200 rounded-xl outline-none transition-all text-sm font-semibold cursor-pointer"
                   >
+                    <option value="">-- اختر الدرس للبدء --</option>
                     {lessons.map((lesson, idx) => (
                       <option key={idx} value={idx}>
                         {lesson.word || `الدرس رقم ${idx + 1}`} ({lesson.questions?.length || 0} أسئلة)
