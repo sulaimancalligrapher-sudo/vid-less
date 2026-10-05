@@ -591,6 +591,7 @@ export async function resumeLiveVideo(): Promise<{ success: boolean; state?: Liv
 export async function finishLiveSession(): Promise<{ success: boolean; state?: LiveSessionState }> {
   try {
     const update: Partial<LiveSessionState> = {
+      isProgramActive: false,
       status: 'finished',
       currentQuestion: null,
       currentQuestionIndex: null,
@@ -598,10 +599,10 @@ export async function finishLiveSession(): Promise<{ success: boolean; state?: L
       allSessionAnswers: {},
     };
 
-    await updateDoc(LIVE_DOC_REF, {
+    await setDoc(LIVE_DOC_REF, {
       ...update,
       updatedAt: serverTimestamp(),
-    });
+    }, { merge: true });
 
     cachedState = { ...cachedState, ...update };
     return { success: true, state: cachedState };

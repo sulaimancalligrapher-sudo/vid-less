@@ -92,11 +92,11 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
     const unsubscribe = subscribeToLiveSession(
       (state) => {
         setConnected(true);
-        if (state.status === 'program_ended') {
+        if (state.status === 'program_ended' || state.status === 'finished') {
           setIsJoined(false);
           setIsPinVerified(false);
           setSubmittedAnswer(null);
-          setJoinError('تم إنهاء البرنامج والحصة التفاعلية بنجاح 🎓 شكراً لتفاعلكم!');
+          setJoinError('تم إنهاء الحصة المباشرة بنجاح 🎓 شكراً لتفاعلكم!');
           sessionStorage.removeItem('liveStudentUsername');
           sessionStorage.removeItem('liveStudentSheet');
           sessionStorage.removeItem('liveStudentPin');

@@ -816,6 +816,10 @@ export default function App() {
               setIsAdminPanelOpen(false);
               navigateToPage('live-teacher');
             }}
+            onOpenLiveDirectDisplay={() => {
+              setIsAdminPanelOpen(false);
+              navigateToPage('live-direct-display');
+            }}
           />
         )}
 

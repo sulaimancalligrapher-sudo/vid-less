@@ -234,7 +234,6 @@ export default function LiveDirectManager({
 
   // Reset Session
   const handleResetSession = async () => {
-    if (!window.confirm('هل أنت متأكد من تصفير ذاكرة الحصة وإعادة ضبط جميع الاتصالات؟')) return;
     setIsResettingSession(true);
     try {
       await resetLiveSession();
@@ -296,6 +295,51 @@ export default function LiveDirectManager({
     }
   };
 
+  // Helper to format answers as 'صح' / 'خطأ' / 'نص' to match Answers-T structure
+  const formatAnswersForAnswersLive = (
+    answersMap: Record<number, string>,
+    targetQuestions?: LiveDirectQuestionItem[]
+  ): Record<number, string> => {
+    const formatted: Record<number, string> = {};
+    if (targetQuestions && targetQuestions.length > 0) {
+      targetQuestions.forEach((q, idx) => {
+        const rawAns = answersMap[idx];
+        if (rawAns !== undefined && rawAns !== null && String(rawAns).trim() !== '') {
+          const strAns = String(rawAns).trim();
+          if (q.isTextAnswer) {
+            formatted[idx] = strAns;
+          } else {
+            const correct = String(q.correctAnswer || '').trim().toLowerCase();
+            let isCorrect = false;
+            if (strAns.toLowerCase() === correct) {
+              isCorrect = true;
+            } else {
+              const optNum = parseInt(strAns, 10);
+              if (!isNaN(optNum) && q.options && q.options[optNum - 1]) {
+                if (String(q.options[optNum - 1]).trim().toLowerCase() === correct || String(optNum) === correct) {
+                  isCorrect = true;
+                }
+              } else if (q.options) {
+                const foundIdx = q.options.findIndex(o => o.trim().toLowerCase() === strAns.toLowerCase());
+                if (foundIdx >= 0 && String(foundIdx + 1) === correct) {
+                  isCorrect = true;
+                }
+              }
+            }
+            formatted[idx] = isCorrect ? 'صح' : 'خطأ';
+          }
+        } else {
+          formatted[idx] = '';
+        }
+      });
+    } else {
+      Object.entries(answersMap).forEach(([idx, val]) => {
+        formatted[Number(idx)] = String(val);
+      });
+    }
+    return formatted;
+  };
+
   const handleConfirmEndProgram = async () => {
     setShowEndConfirmModal(false);
     setIsTogglingProgram(true);
@@ -306,7 +350,7 @@ export default function LiveDirectManager({
           const timestamp = new Date().toLocaleString('ar-SA');
           const title = sessionState.lessonTitle || selectedLessonTitle || 'حصة تدريبية مباشرة';
           const recordsToSave: LiveDirectAnswerRecord[] = [];
-          const currentLesson = lessons.find(l => l.title === title);
+          const currentLesson = lessons.find(l => l.title === title) || activeLesson;
 
           (sessionState.connectedStudents || []).forEach(student => {
             const u = String(student.username || '').trim();
@@ -314,39 +358,21 @@ export default function LiveDirectManager({
             const ansMap = sessionState.allSessionAnswers?.[u] || {};
             
             if (Object.keys(ansMap).length > 0) {
-              let scoreCount = 0;
-              let gradedCount = 0;
-
-              if (currentLesson?.questions) {
-                currentLesson.questions.forEach((q, qIdx) => {
-                  const studentAns = ansMap[qIdx];
-                  if (studentAns !== undefined && q.correctAnswer) {
-                    gradedCount++;
-                    if (String(studentAns).trim().toLowerCase() === String(q.correctAnswer).trim().toLowerCase()) {
-                      scoreCount++;
-                    }
-                  }
-                });
-              }
-
-              const totalScore = gradedCount > 0 ? `${scoreCount} / ${gradedCount}` : '';
-              const percentage = gradedCount > 0 ? Math.round((scoreCount / gradedCount) * 100) : undefined;
-
+              const formattedAnswers = formatAnswersForAnswersLive(ansMap, currentLesson?.questions);
               recordsToSave.push({
                 timestamp,
                 sheetNumber: sNum,
                 username: u,
                 studentName: u,
                 lessonTitle: title,
-                answers: ansMap,
-                totalScore,
-                percentage,
+                answers: formattedAnswers,
               });
             }
           });
 
           if (recordsToSave.length > 0) {
             await recordLiveAnswersBatchDirect(recordsToSave);
+            showNotice(`تم توثيق إجابات ${recordsToSave.length} طالب في ورقة Answers-Live بنجاح 💾`, 'success');
           }
         } catch (saveErr) {
           console.warn('Auto-save answers on end session warning:', saveErr);
@@ -354,8 +380,9 @@ export default function LiveDirectManager({
       }
 
       await endLiveProgram();
-      showNotice('تم إنهاء الحصة المباشرة وإغلاق القاعة بنجاح 🛑', 'info');
-      loadAnswers();
+      await finishLiveSession();
+      showNotice('تم إنهاء الحصة المباشرة وتوثيق النتائج وإغلاق القاعة وتحديث الشاشة بنجاح 🛑', 'success');
+      await loadAnswers();
     } catch (e: any) {
       console.error('Failed to end live program:', e);
       showNotice('حدث خطأ أثناء إنهاء الحصة: ' + (e?.message || 'خطأ في الاتصال'), 'error');
@@ -433,49 +460,8 @@ export default function LiveDirectManager({
   };
 
   // Finish session and save to Answers-Live
-  const handleFinishAndSave = async () => {
-    if (!window.confirm('هل تريد إنهاء الحصة وتسجيل إجابات ودرجات الطلاب في ورقة Answers-Live؟')) return;
-    setIsFinishingSession(true);
-    try {
-      const state = await getLiveSessionState() || sessionState;
-      if (state && state.allSessionAnswers && Object.keys(state.allSessionAnswers).length > 0) {
-        const recordsToSave: LiveDirectAnswerRecord[] = [];
-        const dateStr = new Date().toLocaleString('ar-EG', {
-          year: 'numeric',
-          month: '2-digit',
-          day: '2-digit',
-          hour: '2-digit',
-          minute: '2-digit',
-        });
-
-        Object.entries(state.allSessionAnswers).forEach(([userName, studentAnswers]) => {
-          const studentObj = (state.connectedStudents || []).find(
-            s => s.username.toLowerCase() === userName.toLowerCase()
-          );
-          recordsToSave.push({
-            timestamp: dateStr,
-            username: userName,
-            sheetNumber: studentObj?.sheetNumber || '',
-            lessonTitle: state.lessonTitle || selectedLessonTitle || 'حصة مباشرة',
-            answers: studentAnswers,
-          });
-        });
-
-        if (recordsToSave.length > 0) {
-          await recordLiveAnswersBatchDirect(recordsToSave);
-          await loadAnswers();
-          showNotice(`تم توثيق إجابات ${recordsToSave.length} طالب في ورقة Answers-Live بنجاح 💾`, 'success');
-        }
-      }
-
-      await finishLiveSession();
-      showNotice('تم إنهاء الحصة بنجاح 🏁', 'success');
-    } catch (e) {
-      console.error('Failed to finish session and save:', e);
-      showNotice('حدث خطأ أثناء حفظ الإجابات في الشيت', 'error');
-    } finally {
-      setIsFinishingSession(false);
-    }
+  const handleFinishAndSave = () => {
+    setShowEndConfirmModal(true);
   };
 
   // Editor: Open New Lesson
@@ -499,7 +485,7 @@ export default function LiveDirectManager({
   // Editor: Save Lesson
   const handleSaveLessonForm = async () => {
     if (!editingLesson || !editingLesson.title.trim()) {
-      alert('يرجى كتابة عنوان أو موضوع الحصة');
+      showNotice('يرجى كتابة عنوان أو موضوع الحصة', 'error');
       return;
     }
 

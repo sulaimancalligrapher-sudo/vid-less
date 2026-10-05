@@ -425,6 +425,8 @@ function doPost(e) {
       response = batchRecordLiveAnswersT(payload.records);
     } else if (action === 'saveLiveLessonDirect') {
       response = saveLiveLessonDirect(payload.lesson || payload);
+    } else if (action === 'saveLiveAnswerDirect') {
+      response = saveLiveAnswerDirect(payload);
     } else if (action === 'batchRecordLiveAnswersDirect') {
       response = batchRecordLiveAnswersDirect(payload.records || []);
     } else if (action === 'setupLiveDirectSheets') {
@@ -3133,11 +3135,13 @@ function getOrCreateLiveAnswersDirectSheet() {
   var sheet = ss.getSheetByName('Answers-Live');
   if (!sheet) {
     sheet = ss.insertSheet('Answers-Live');
-    // هيكل ورقة Answers-Live:
-    // A: تاريخ وتوقيت الإجابة | B: رقم المشترك | C: اسم المشترك | D: موضوع الحصة المباشرة | E: إجمالي الدرجة | F: النسبة %
-    var headers = ['تاريخ وتوقيت الإجابة', 'رقم المشترك', 'اسم المشترك', 'موضوع الحصة المباشرة', 'إجمالي الدرجة', 'النسبة %'];
-    for (var i = 1; i <= 25; i++) {
-      headers.push('إجابة س' + i);
+    // هيكل ورقة Answers-Live الجديد المتطابق تماماً مع Answers-T:
+    // الأعمدة الأربعة الأساسية A:D:
+    // A: تاريخ و وقت | B: الرقم | C: اسم المستخدم | D: الموضوع
+    // وباقي الأعمدة: النتائج (صح / خطأ / نص)
+    var headers = ['تاريخ و وقت', 'الرقم', 'اسم المستخدم', 'الموضوع'];
+    for (var i = 1; i <= 30; i++) {
+      headers.push('س' + i);
     }
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#ecfdf5');
@@ -3162,9 +3166,18 @@ function setupLiveDirectSheets() {
     qSheet.setFrozenRows(1);
 
     var aSheet = getOrCreateLiveAnswersDirectSheet();
+    // تحديث وضبط ترويسات ورقة Answers-Live بالهيكل الجديد المتطابق مع Answers-T (A:D الأساسية، ثم النتائج)
+    var headersA = ['تاريخ و وقت', 'الرقم', 'اسم المستخدم', 'الموضوع'];
+    for (var j = 1; j <= 30; j++) {
+      headersA.push('س' + j);
+    }
+    aSheet.getRange(1, 1, 1, headersA.length).setValues([headersA]);
+    aSheet.getRange(1, 1, 1, headersA.length).setFontWeight('bold').setBackground('#ecfdf5');
+    aSheet.setFrozenRows(1);
+
     return { 
       success: true, 
-      message: 'تم تحديث وتهيئة ورقة (Questions-Live) بالهيكل الجديد (A: الموضوع، و4 أعمدة لكل سؤال: صورة، نص، خيارات، إجابة) وورقة (Answers-Live) بنجاح!' 
+      message: 'تم تحديث وتهيئة ورقة (Questions-Live) وورقة (Answers-Live) بالهيكل المطابق تماماً بنجاح!' 
     };
   } catch (err) {
     return { success: false, message: err.message };
@@ -3335,15 +3348,18 @@ function getLiveAnswersDirect() {
     var lastRow = sheet.getLastRow();
     if (lastRow <= 1) return { success: true, data: [] };
     
-    var lastCol = Math.max(sheet.getLastColumn(), 26);
+    var lastCol = sheet.getLastColumn();
+    if (lastCol < 4) return { success: true, data: [] };
+    
     var rows = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
     var list = [];
     for (var r = 0; r < rows.length; r++) {
       var row = rows[r];
       var answersMap = {};
-      for (var a = 0; a < (lastCol - 6); a++) {
-        var val = String(row[6 + a] !== undefined && row[6 + a] !== null ? row[6 + a] : '').trim();
-        if (val) answersMap[a] = val;
+      // الأعمدة من E فصاعداً (index 4) هي نتائج الأسئلة (صح / خطأ / نص)
+      for (var a = 4; a < row.length; a++) {
+        var val = String(row[a] !== undefined && row[a] !== null ? row[a] : '').trim();
+        if (val) answersMap[a - 4] = val;
       }
       list.push({
         rowIndex: r + 2,
@@ -3352,8 +3368,6 @@ function getLiveAnswersDirect() {
         username: String(row[2] || ''),
         studentName: String(row[2] || ''),
         lessonTitle: String(row[3] || ''),
-        totalScore: String(row[4] || ''),
-        percentage: parseFloat(row[5]) || 0,
         answers: answersMap
       });
     }
@@ -3377,8 +3391,6 @@ function batchRecordLiveAnswersDirect(records) {
       var recUsername = String(rec.username || rec.studentName || '').trim();
       var recLesson = String(rec.lessonTitle || '').trim();
       var ansMap = rec.answers || {};
-      var totalScore = rec.totalScore !== undefined ? String(rec.totalScore) : '';
-      var percentage = rec.percentage !== undefined ? rec.percentage : '';
       
       var normSheet = normalizeLiveKey(recSheetNum);
       var normUser = normalizeLiveKey(recUsername);
@@ -3409,16 +3421,29 @@ function batchRecordLiveAnswersDirect(records) {
       
       var finalTimestamp = rec.timestamp ? String(rec.timestamp) : existingTimestamp || new Date().toLocaleString('ar-SA');
       
+      // الأعمدة الأربعة الأساسية A:D (تاريخ و وقت | الرقم | اسم المستخدم | الموضوع):
       var rowValues = [
         finalTimestamp,
         recSheetNum,
         recUsername,
-        recLesson,
-        totalScore,
-        percentage
+        recLesson
       ];
-      for (var a = 0; a < 20; a++) {
-        rowValues.push(ansMap[a] !== undefined ? String(ansMap[a]) : '');
+      
+      // باقي الأعمدة من E فصاعداً: النتائج صح / خطأ / نص ديناميكياً بدون حد لعدد الأسئلة:
+      var maxAnswers = 30;
+      if (ansMap) {
+        var keys = Object.keys(ansMap).map(function(k) { return parseInt(k, 10); }).filter(function(n) { return !isNaN(n); });
+        if (keys.length > 0) {
+          maxAnswers = Math.max(30, Math.max.apply(null, keys) + 1);
+        }
+      }
+      for (var a = 0; a < maxAnswers; a++) {
+        rowValues.push(ansMap[a] !== undefined && ansMap[a] !== null ? String(ansMap[a]) : '');
+      }
+      
+      // التوسيع الديناميكي لأعمدة الشيت إذا زاد عدد الأسئلة عن الأعمدة المتاحة
+      if (sheet.getMaxColumns() < rowValues.length) {
+        sheet.insertColumnsAfter(sheet.getMaxColumns(), rowValues.length - sheet.getMaxColumns());
       }
       
       if (foundRow > 1) {
@@ -3431,6 +3456,74 @@ function batchRecordLiveAnswersDirect(records) {
     }
     
     return { success: true, count: records.length };
+  } catch (err) {
+    return { success: false, message: err.message };
+  }
+}
+
+function saveLiveAnswerDirect(payload) {
+  try {
+    if (!payload) return { success: false, message: 'بيانات مفقودة' };
+    var sheet = getOrCreateLiveAnswersDirectSheet();
+    var sheetNum = String(payload.sheetNumber || '').trim();
+    var username = String(payload.username || payload.studentName || '').trim();
+    var lessonTitle = String(payload.lessonTitle || '').trim();
+    
+    var normSheet = normalizeLiveKey(sheetNum);
+    var normUser = normalizeLiveKey(username);
+    var normLesson = normalizeLiveKey(lessonTitle);
+    
+    var result = '';
+    if (payload.isCorrect === null || payload.isCorrect === undefined) {
+      result = String(payload.answer || '').trim();
+    } else {
+      result = payload.isCorrect ? 'صح' : 'خطأ';
+    }
+    
+    var qIndex = payload.questionIndex !== undefined ? parseInt(payload.questionIndex, 10) : 0;
+    var targetCol = 5 + qIndex; // Column E = 5 (س1)
+    
+    if (sheet.getMaxColumns() < targetCol) {
+      sheet.insertColumnsAfter(sheet.getMaxColumns(), targetCol - sheet.getMaxColumns());
+    }
+    
+    var lastRow = sheet.getLastRow();
+    var targetRow = 0;
+    if (lastRow > 1) {
+      var data = sheet.getRange(2, 1, lastRow - 1, 4).getValues();
+      for (var r = 0; r < data.length; r++) {
+        var rowB = normalizeLiveKey(data[r][1]);
+        var rowC = normalizeLiveKey(data[r][2]);
+        var rowD = normalizeLiveKey(data[r][3]);
+        
+        var matchLesson = (rowD === normLesson);
+        var matchStudent = (normSheet && rowB && normSheet === rowB) || (normUser && rowC && normUser === rowC);
+        
+        if (matchLesson && matchStudent) {
+          targetRow = r + 2;
+          break;
+        }
+      }
+    }
+    
+    var finalTimestamp = payload.timestamp || new Date().toLocaleString('ar-SA');
+    if (targetRow > 1) {
+      sheet.getRange(targetRow, 1).setValue(finalTimestamp);
+      sheet.getRange(targetRow, targetCol).setValue(result);
+    } else {
+      var newRow = [
+        finalTimestamp,
+        sheetNum,
+        username,
+        lessonTitle
+      ];
+      for (var q = 0; q < Math.max(15, qIndex + 1); q++) {
+        newRow.push(q === qIndex ? result : '');
+      }
+      sheet.appendRow(newRow);
+    }
+    
+    return { success: true };
   } catch (err) {
     return { success: false, message: err.message };
   }

@@ -76,14 +76,31 @@ export default function LiveDirectDisplayRoom({
     } catch {}
   };
 
-  // Connect to Live Session via Firebase WebSockets
+  // Connect to Live Session via Firebase WebSockets with instant initial fetch + polling fallback
   useEffect(() => {
+    let isMounted = true;
+    const syncState = () => {
+      getLiveSessionState().then((state) => {
+        if (state && isMounted) setSessionState(state);
+      }).catch(() => {});
+    };
+
+    syncState();
+
     const unsubscribe = subscribeToLiveSession((state) => {
-      if (state) {
+      if (state && isMounted) {
         setSessionState(state);
       }
     });
-    return () => unsubscribe();
+
+    // Fallback sync every 2.5 seconds to guarantee 100% synchronization even during network stutters
+    const interval = setInterval(syncState, 2500);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+      unsubscribe();
+    };
   }, []);
 
   // Countdown timer when a question is active
@@ -165,9 +182,21 @@ export default function LiveDirectDisplayRoom({
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-rose-500/20 border border-rose-500/30 text-rose-400 text-[10px] font-bold tracking-wider uppercase animate-pulse">
-                <Radio className="w-3 h-3 text-rose-500" />
-                <span>شرح مباشر Live</span>
+              <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase ${
+                (sessionState?.status === 'finished' || sessionState?.status === 'program_ended')
+                  ? 'bg-slate-800 border border-slate-700 text-slate-400'
+                  : sessionState?.isProgramActive
+                  ? 'bg-rose-500/20 border border-rose-500/30 text-rose-400 animate-pulse'
+                  : 'bg-amber-500/20 border border-amber-500/30 text-amber-400'
+              }`}>
+                <Radio className="w-3 h-3" />
+                <span>
+                  {(sessionState?.status === 'finished' || sessionState?.status === 'program_ended')
+                    ? 'الحصة منتهية 🏁'
+                    : sessionState?.isProgramActive
+                    ? 'شرح مباشر Live'
+                    : 'في الانتظار ⏳'}
+                </span>
               </span>
               <h1 className="text-sm sm:text-base font-black text-slate-100 truncate max-w-xs sm:max-w-md">
                 {sessionState?.lessonTitle || 'حصة تفاعلية حية'}
@@ -244,9 +273,13 @@ export default function LiveDirectDisplayRoom({
       {/* Main Presentation Stage */}
       <main className="flex-1 flex flex-col items-center justify-center p-4 sm:p-8 max-w-6xl mx-auto w-full">
         {/* ========================================================================= */}
-        {/* SCENARIO 1: EXPLANATION MODE (الأستاذ يشرح صوتياً/حضورياً) */}
+        {/* SCENARIO 1: EXPLANATION MODE / WAITING MODE (الشرح أو الانتظار) */}
         {/* ========================================================================= */}
-        {(!sessionState || sessionState.status === 'idle' || sessionState.status === 'waiting' || sessionState.status === 'playing') && (
+        {(!sessionState || 
+          (sessionState.status !== 'question_active' && 
+           sessionState.status !== 'revealed' && 
+           sessionState.status !== 'finished' && 
+           sessionState.status !== 'program_ended')) && (
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -454,9 +487,9 @@ export default function LiveDirectDisplayRoom({
         )}
 
         {/* ========================================================================= */}
-        {/* SCENARIO 3: FINISHED SESSION MODE */}
+        {/* SCENARIO 3: FINISHED SESSION / PROGRAM ENDED MODE */}
         {/* ========================================================================= */}
-        {sessionState?.status === 'finished' && (
+        {(sessionState?.status === 'finished' || sessionState?.status === 'program_ended') && (
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
