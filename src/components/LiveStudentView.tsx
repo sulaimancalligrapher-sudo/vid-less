@@ -71,6 +71,7 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
   const [currentQuestionKey, setCurrentQuestionKey] = useState<string | null>(null);
   const [timeLeft, setTimeLeft] = useState<number>(30);
   const [joinError, setJoinError] = useState<string | null>(null);
+  const joinTimeRef = useRef<number>(0);
 
   // Auto-join only if valid credentials AND pin are present in URL
   useEffect(() => {
@@ -113,12 +114,12 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
           return;
         }
 
-        // Check if student is still enrolled in connected students
+        // Check if student is still enrolled in connected students (with grace period for initial join)
         const currentCleanUser = username.trim().toLowerCase();
         const isStillEnrolled = (state.connectedStudents || []).some(
           s => String(s.username || '').trim().toLowerCase() === currentCleanUser && s.pinVerified
         );
-        if (!isStillEnrolled && state.status !== 'idle' && state.isProgramActive) {
+        if (!isStillEnrolled && state.status !== 'idle' && state.isProgramActive && (Date.now() - joinTimeRef.current > 8000)) {
           setIsJoined(false);
           setIsPinVerified(false);
           setJoinError('يرجى إعادة تسجيل الدخول برمز الحضور الصحيح.');
@@ -514,6 +515,7 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
 
       const res = await joinLiveSession(cleanUser, cleanSheet, cleanPin || undefined);
       if (res.success && res.state && res.pinVerified) {
+        joinTimeRef.current = Date.now();
         setSessionState(res.state);
         setIsJoined(true);
         setIsPinVerified(true);
@@ -537,8 +539,10 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
         setIsPinVerified(false);
         setConnected(false);
         setJoinError(res?.error || 'رمز الدخول غير صحيح! يرجى إدخال الرمز المعروض على شاشة الفصل.');
-        sessionStorage.removeItem('liveStudentPin');
-        localStorage.removeItem('liveStudentPin');
+        if (res?.pinVerified === false) {
+          sessionStorage.removeItem('liveStudentPin');
+          localStorage.removeItem('liveStudentPin');
+        }
       }
     } catch (err: any) {
       setIsJoined(false);

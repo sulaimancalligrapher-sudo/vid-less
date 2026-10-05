@@ -253,10 +253,13 @@ export async function joinLiveSession(
       return { success: false, error: 'تعذر الاتصال بقاعدة بيانات الحصة المباشرة.' };
     }
 
-    if (!currentState.isProgramActive) {
+    const isActive = Boolean(currentState.isProgramActive) || 
+      (currentState.status !== 'program_ended' && currentState.status !== 'idle' && Boolean(currentState.lessonTitle));
+
+    if (!isActive) {
       return { 
         success: false, 
-        error: 'البرنامج المباشر مغلق حالياً من قِبل المعلم. يرجى الانتظار حتى يبدأ المعلم البرنامج.' 
+        error: 'الحصة المباشرة مغلقة حالياً من قِبل المعلم. يرجى الانتظار حتى يبدأ المعلم الحصة.' 
       };
     }
 
@@ -357,14 +360,19 @@ export async function initLiveSession(payload: {
   showResult?: 'نعم' | 'لا';
 }): Promise<{ success: boolean; state?: LiveSessionState }> {
   try {
+    const isDirect = payload.mode === 'direct' || !payload.videoUrl;
+    const pin = cachedState.sessionPin || generatePinCode();
     const update: Partial<LiveSessionState> = {
+      sessionId: cachedState.sessionId || ('live-' + Date.now()),
+      sessionPin: pin,
+      isProgramActive: true,
       lessonTitle: payload.lessonTitle,
       videoUrl: payload.videoUrl || '',
-      mode: payload.mode || (payload.videoUrl ? 'video' : 'direct'),
+      mode: isDirect ? 'direct' : 'video',
       explanationText: payload.explanationText || '',
       timeLimit: payload.timeLimit ?? 30,
       showResult: payload.showResult ?? 'نعم',
-      status: 'waiting',
+      status: isDirect ? 'playing' : 'waiting',
       currentQuestionIndex: null,
       currentQuestion: null,
       questionTriggeredAt: null,

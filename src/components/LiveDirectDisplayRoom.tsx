@@ -260,15 +260,21 @@ export default function LiveDirectDisplayRoom({
             </div>
 
             <div className="space-y-3 max-w-2xl mx-auto">
-              <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-300 font-bold text-xs sm:text-sm">
+              <span className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full font-bold text-xs sm:text-sm border ${
+                sessionState?.isProgramActive
+                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+                  : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+              }`}>
                 <Sparkles className="w-4 h-4 text-amber-400" />
-                <span>الأستاذ يشرح الآن 🎙️</span>
+                <span>{sessionState?.isProgramActive ? 'الأستاذ يشرح الآن 🎙️' : 'في انتظار بدء المعلم للحصة المباشرة ⏳'}</span>
               </span>
               <h2 className="text-2xl sm:text-4xl md:text-5xl font-black text-slate-100 tracking-tight leading-tight">
-                {sessionState?.lessonTitle || 'حصة تدريبية تفاعلية حية'}
+                {sessionState?.lessonTitle || (sessionState?.isProgramActive ? 'حصة تدريبية تفاعلية حية' : 'القاعة المباشرة')}
               </h2>
               <p className="text-sm sm:text-base text-slate-400 leading-relaxed max-w-lg mx-auto">
-                استمع بتركيز للشرح والملاحظات • سيتم طرح الأسئلة التفاعلية على هذه الشاشة وفي هواتفكم في أي لحظة.
+                {sessionState?.isProgramActive
+                  ? 'استمع بتركيز للشرح والملاحظات • سيتم طرح الأسئلة التفاعلية على هذه الشاشة وفي هواتفكم في أي لحظة.'
+                  : 'بمجرد أن يبدأ المعلم الحصة من لوحة التحكم، ستفتح القاعة وتظهر الأسئلة التفاعلية لحظياً.'}
               </p>
             </div>
 

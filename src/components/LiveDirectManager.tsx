@@ -35,6 +35,8 @@ import {
   Send,
   Radio,
   Share2,
+  Power,
+  ShieldAlert,
 } from 'lucide-react';
 import {
   LiveDirectLessonRow,
@@ -63,6 +65,8 @@ import {
   toggleShowChatInRoom,
   formatSecondsToTime,
   setupLiveDirectSheetsApi,
+  startLiveProgram,
+  endLiveProgram,
 } from '../api';
 import LiveChatModal from './LiveChatModal';
 
@@ -94,9 +98,14 @@ export default function LiveDirectManager({
   const [isRegeneratingPin, setIsRegeneratingPin] = useState(false);
   const [isResettingSession, setIsResettingSession] = useState(false);
   const [isFinishingSession, setIsFinishingSession] = useState(false);
+  const [isTogglingProgram, setIsTogglingProgram] = useState(false);
+  const [showEndConfirmModal, setShowEndConfirmModal] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
   const [showChatModal, setShowChatModal] = useState(false);
   const [notice, setNotice] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
+
+  // Program active state
+  const isProgramRunning = Boolean(sessionState?.isProgramActive);
 
   // Lesson Editor Modal State
   const [isEditorOpen, setIsEditorOpen] = useState(false);
@@ -252,6 +261,104 @@ export default function LiveDirectManager({
     }
   };
 
+  // Program Lifecycle: Start (generates PIN, opens room) / End (expels students, ends session)
+  const handleToggleProgram = async () => {
+    if (isProgramRunning) {
+      setShowEndConfirmModal(true);
+      return;
+    }
+
+    setIsTogglingProgram(true);
+    try {
+      const res = await startLiveProgram();
+      if (res.success && res.pin) {
+        if (selectedLessonTitle) {
+          await initLiveSession({
+            lessonTitle: selectedLessonTitle,
+            mode: 'direct',
+            explanationText: `موضوع الحصة: ${selectedLessonTitle}`,
+            timeLimit: 30,
+            showResult: 'نعم',
+          });
+        }
+        showNotice(`تم بدء الحصة المباشرة بنجاح! رمز الحضور للطلاب هو (${res.pin}) 🚀`, 'success');
+      }
+    } catch (e: any) {
+      console.error('Failed to start live session:', e);
+      showNotice('تعذر بدء الحصة: ' + (e?.message || 'خطأ في الاتصال'), 'error');
+    } finally {
+      setIsTogglingProgram(false);
+    }
+  };
+
+  const handleConfirmEndProgram = async () => {
+    setShowEndConfirmModal(false);
+    setIsTogglingProgram(true);
+    try {
+      // Auto-save student answers if any were recorded
+      if (sessionState?.allSessionAnswers && Object.keys(sessionState.allSessionAnswers).length > 0) {
+        try {
+          const timestamp = new Date().toLocaleString('ar-SA');
+          const title = sessionState.lessonTitle || selectedLessonTitle || 'حصة تدريبية مباشرة';
+          const recordsToSave: LiveDirectAnswerRecord[] = [];
+          const currentLesson = lessons.find(l => l.title === title);
+
+          (sessionState.connectedStudents || []).forEach(student => {
+            const u = String(student.username || '').trim();
+            const sNum = String(student.sheetNumber || '').trim();
+            const ansMap = sessionState.allSessionAnswers?.[u] || {};
+            
+            if (Object.keys(ansMap).length > 0) {
+              let scoreCount = 0;
+              let gradedCount = 0;
+
+              if (currentLesson?.questions) {
+                currentLesson.questions.forEach((q, qIdx) => {
+                  const studentAns = ansMap[qIdx];
+                  if (studentAns !== undefined && q.correctAnswer) {
+                    gradedCount++;
+                    if (String(studentAns).trim().toLowerCase() === String(q.correctAnswer).trim().toLowerCase()) {
+                      scoreCount++;
+                    }
+                  }
+                });
+              }
+
+              const totalScore = gradedCount > 0 ? `${scoreCount} / ${gradedCount}` : '';
+              const percentage = gradedCount > 0 ? Math.round((scoreCount / gradedCount) * 100) : undefined;
+
+              recordsToSave.push({
+                timestamp,
+                sheetNumber: sNum,
+                username: u,
+                studentName: u,
+                lessonTitle: title,
+                answers: ansMap,
+                totalScore,
+                percentage,
+              });
+            }
+          });
+
+          if (recordsToSave.length > 0) {
+            await recordLiveAnswersBatchDirect(recordsToSave);
+          }
+        } catch (saveErr) {
+          console.warn('Auto-save answers on end session warning:', saveErr);
+        }
+      }
+
+      await endLiveProgram();
+      showNotice('تم إنهاء الحصة المباشرة وإغلاق القاعة بنجاح 🛑', 'info');
+      loadAnswers();
+    } catch (e: any) {
+      console.error('Failed to end live program:', e);
+      showNotice('حدث خطأ أثناء إنهاء الحصة: ' + (e?.message || 'خطأ في الاتصال'), 'error');
+    } finally {
+      setIsTogglingProgram(false);
+    }
+  };
+
   // Select lesson in teaching control
   const handleSelectLesson = async (title: string) => {
     setSelectedLessonTitle(title);
@@ -266,7 +373,7 @@ export default function LiveDirectManager({
         timeLimit: 30,
         showResult: 'نعم',
       });
-      showNotice(`تم تفعيل موضوع الحصة: ${title} في وضع Live المباشر 🎙️`, 'success');
+      showNotice(`تم تفعيل موضوع الحصة: ${title} في وضع Live المباشر 🎙️ والقاعة مفتوحة للطلاب!`, 'success');
     } catch (e) {
       console.error('Failed to init direct live session:', e);
     }
@@ -437,6 +544,28 @@ export default function LiveDirectManager({
 
         {/* Global Action Buttons */}
         <div className="flex items-center gap-2 flex-wrap">
+          {/* Start / End Live Program Button */}
+          <button
+            type="button"
+            onClick={handleToggleProgram}
+            disabled={isTogglingProgram}
+            className={`px-4 py-2.5 rounded-xl text-xs font-black flex items-center gap-2 shadow-lg transition-all cursor-pointer active:scale-95 disabled:opacity-50 ${
+              isProgramRunning
+                ? 'bg-gradient-to-r from-rose-600 to-red-700 hover:from-rose-500 hover:to-red-600 text-white shadow-rose-900/30 ring-2 ring-rose-500/50'
+                : 'bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white shadow-emerald-900/30 ring-2 ring-emerald-500/50 animate-pulse'
+            }`}
+            title={isProgramRunning ? 'إنهاء الحصة المباشرة وإخراج المشتركين' : 'بدء الحصة المباشرة وتفعيل دخول الطلاب'}
+          >
+            <Power className={`w-4 h-4 ${isTogglingProgram ? 'animate-spin' : ''}`} />
+            <span>
+              {isTogglingProgram
+                ? 'جارٍ التنفيذ...'
+                : isProgramRunning
+                ? 'إنهاء الحصة المباشرة 🛑'
+                : 'بدء الحصة المباشرة 🚀'}
+            </span>
+          </button>
+
           {/* Display screen launch */}
           <button
             type="button"
@@ -562,6 +691,75 @@ export default function LiveDirectManager({
       {/* ========================================================================= */}
       {activeTab === 'teaching' && (
         <div className="space-y-4">
+          {/* Program Lifecycle Status Banner */}
+          {!isProgramRunning ? (
+            <div className="p-4 bg-gradient-to-r from-rose-950/70 via-slate-900 to-rose-950/70 border-2 border-rose-500/40 rounded-3xl flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-xl">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0 border border-rose-500/30">
+                  <Power className="w-6 h-6 animate-pulse" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-black text-rose-200 flex items-center gap-2">
+                    <span>الحصة المباشرة متوقفة حالياً (مغلقة أمام دخول الطلاب)</span>
+                    <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping inline-block" />
+                  </h4>
+                  <p className="text-xs text-slate-300 mt-1">
+                    الطلاب لن يتمكنوا من الدخول برمز الحضور حتى تضغط على زر <b>بدء الحصة المباشرة 🚀</b> لتفعيل الجلسة وتوليد رمز الحضور (PIN).
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleToggleProgram}
+                disabled={isTogglingProgram}
+                className="w-full md:w-auto px-5 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black rounded-2xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/40 transition-all cursor-pointer active:scale-95 shrink-0"
+              >
+                <Power className={`w-4 h-4 ${isTogglingProgram ? 'animate-spin' : ''}`} />
+                <span>{isTogglingProgram ? 'جارٍ البدء...' : 'بدء الحصة المباشرة الآن 🚀'}</span>
+              </button>
+            </div>
+          ) : (
+            <div className="p-4 bg-gradient-to-r from-emerald-950/70 via-slate-900 to-emerald-950/70 border-2 border-emerald-500/40 rounded-3xl flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-xl">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/30">
+                  <span className="w-4 h-4 rounded-full bg-emerald-400 animate-ping" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h4 className="text-sm font-black text-emerald-200">
+                      الحصة المباشرة نشطة والباب مفتوح للطلاب! 🟢
+                    </h4>
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-bold font-mono">
+                      LIVE ACTIVE
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-300 mt-1">
+                    بإمكان الطلاب الآن الانضمام فورياً عبر رمز PIN: <b className="font-mono text-amber-300 text-sm px-1.5 py-0.5 bg-slate-950 rounded border border-amber-500/30">{sessionState?.sessionPin}</b> أو عبر مسح رمز QR.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 w-full md:w-auto justify-end flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => setShowQrModal(true)}
+                  className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-amber-400 border border-amber-500/30 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <QrCode className="w-4 h-4" />
+                  <span>رمز QR</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleToggleProgram}
+                  disabled={isTogglingProgram}
+                  className="px-4 py-2 bg-rose-600/30 hover:bg-rose-600 border border-rose-500/40 text-rose-200 hover:text-white font-bold rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-md"
+                >
+                  <Power className="w-4 h-4" />
+                  <span>إنهاء الحصة 🛑</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Session Overview Card */}
           <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-5 space-y-4 shadow-xl">
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1292,6 +1490,61 @@ export default function LiveDirectManager({
               </div>
               <div className="font-mono text-lg font-black text-amber-400 tracking-widest bg-slate-950 p-2 rounded-xl border border-slate-800">
                 PIN: {effectivePin || '---'}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* End Program Confirmation Modal */}
+      <AnimatePresence>
+        {showEndConfirmModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-slate-900 border border-rose-500/40 rounded-3xl p-6 max-w-md w-full text-right space-y-4 shadow-2xl relative"
+              dir="rtl"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0 border border-rose-500/30">
+                  <ShieldAlert className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-100">هل أنت متأكد من إنهاء الحصة المباشرة؟</h3>
+                  <p className="text-xs text-slate-400 mt-0.5">سيتم إغلاق الجلسة وحفظ الإجابات في ورقة Answers-Live وإخراج الطلاب.</p>
+                </div>
+              </div>
+
+              <div className="p-3.5 bg-slate-950 rounded-2xl border border-slate-800 text-xs text-slate-300 space-y-1.5">
+                <div className="flex justify-between">
+                  <span className="text-slate-400">موضوع الحصة:</span>
+                  <span className="font-bold text-amber-300">{sessionState?.lessonTitle || selectedLessonTitle || 'حصة تدريبية مباشرة'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">الطلاب المتصلون:</span>
+                  <span className="font-bold text-indigo-300">{(sessionState?.connectedStudents || []).length} طلاب</span>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowEndConfirmModal(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs cursor-pointer"
+                >
+                  إلغاء التراجع
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmEndProgram}
+                  disabled={isTogglingProgram}
+                  className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white font-black rounded-xl text-xs flex items-center gap-1.5 shadow-lg shadow-rose-900/30 cursor-pointer"
+                >
+                  <Power className="w-4 h-4" />
+                  <span>تأكيد إنهاء الحصة 🛑</span>
+                </button>
               </div>
             </motion.div>
           </div>
