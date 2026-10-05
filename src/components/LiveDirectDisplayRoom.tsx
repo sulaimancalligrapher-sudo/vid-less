@@ -32,6 +32,7 @@ import {
   clearAllStudentMessages,
   sendTeacherBroadcastMessage,
   formatSecondsToTime,
+  formatDriveImageUrl,
 } from '../api';
 import LiveChatModal from './LiveChatModal';
 
@@ -340,71 +341,115 @@ export default function LiveDirectDisplayRoom({
               </div>
             </div>
 
-            {/* Question Text Box */}
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl text-center space-y-4">
-              <h2 className="text-xl sm:text-3xl md:text-4xl font-black text-slate-100 leading-snug">
-                {currentQ.question}
-              </h2>
+            {/* Question Text & Visual Box */}
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl text-center space-y-5">
+              {/* Optional Question Image */}
+              {currentQ.image && (
+                <div className="max-w-2xl mx-auto rounded-2xl overflow-hidden border border-slate-800 shadow-xl bg-slate-950 p-1">
+                  <img
+                    src={formatDriveImageUrl(currentQ.image)}
+                    alt="صورة السؤال"
+                    className="w-full max-h-72 sm:max-h-96 object-contain rounded-xl mx-auto"
+                  />
+                </div>
+              )}
+
+              {currentQ.question && (
+                <h2 className="text-xl sm:text-3xl md:text-4xl font-black text-slate-100 leading-snug">
+                  {currentQ.question}
+                </h2>
+              )}
             </div>
 
-            {/* Options Grid (with real-time vote percentage bars) */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {options.map((opt, idx) => {
-                const optLetter = ['أ', 'ب', 'ج', 'د', 'هـ'][idx] || String(idx + 1);
-                const voteCount = optionCounts[idx] || 0;
-                const percentage = answeredCount > 0 ? Math.round((voteCount / answeredCount) * 100) : 0;
-
-                const isCorrect = sessionState.status === 'revealed' && (
-                  String(idx + 1) === String(currentQ.correctAnswer).trim() ||
-                  opt.trim().toLowerCase() === String(currentQ.correctAnswer).trim().toLowerCase()
-                );
-
-                return (
-                  <div
-                    key={idx}
-                    className={`relative overflow-hidden p-5 sm:p-6 rounded-3xl border-2 transition-all shadow-xl flex items-center justify-between ${
-                      isCorrect
-                        ? 'bg-emerald-950/70 border-emerald-400 ring-4 ring-emerald-500/30 shadow-emerald-500/20'
-                        : 'bg-slate-900/90 border-slate-800'
-                    }`}
-                  >
-                    {/* Live Vote Progress Fill Bar */}
-                    <div
-                      className={`absolute inset-y-0 right-0 transition-all duration-500 pointer-events-none ${
-                        isCorrect ? 'bg-emerald-500/20' : 'bg-indigo-600/15'
-                      }`}
-                      style={{ width: `${percentage}%` }}
-                    />
-
-                    {/* Option Text and Letter */}
-                    <div className="relative z-10 flex items-center gap-4">
-                      <span className={`w-10 h-10 sm:w-12 sm:h-12 rounded-2xl flex items-center justify-center font-black text-base sm:text-lg shadow-md shrink-0 ${
-                        isCorrect
-                          ? 'bg-emerald-500 text-slate-950'
-                          : 'bg-slate-800 text-indigo-300'
-                      }`}>
-                        {optLetter}
-                      </span>
-                      <span className="text-base sm:text-xl font-bold text-slate-100">
-                        {opt}
-                      </span>
-                    </div>
-
-                    {/* Stats & Badge */}
-                    <div className="relative z-10 flex items-center gap-2 font-mono">
-                      {isCorrect && (
-                        <span className="px-2.5 py-1 rounded-xl bg-emerald-500/30 text-emerald-300 text-xs font-bold">
-                          صحيحة ✓
-                        </span>
-                      )}
-                      <span className="text-sm sm:text-base font-bold text-slate-300">
-                        {voteCount} ({percentage}%)
-                      </span>
-                    </div>
+            {/* Sub-case A: Written Text Answer Question */}
+            {currentQ.isTextAnswer || options.length === 0 ? (
+              <div className="space-y-4 max-w-2xl mx-auto">
+                <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 text-center space-y-3 shadow-xl">
+                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-300 text-xs font-bold border border-indigo-500/30">
+                    <Sparkles className="w-4 h-4 text-indigo-400" />
+                    <span>سؤال إجابة نصية / كتابية ✍️</span>
                   </div>
-                );
-              })}
-            </div>
+                  <p className="text-slate-400 text-sm">
+                    الطلاب يقومون بكتابة وإرسال إجاباتهم مباشرة من أجهزتهم الآن ({answeredCount} إجابة تم استلامها).
+                  </p>
+                </div>
+
+                {/* If revealed and correct answer provided */}
+                {sessionState.status === 'revealed' && currentQ.correctAnswer && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="bg-emerald-950/70 border-2 border-emerald-500/60 rounded-3xl p-6 text-center space-y-2 shadow-2xl ring-4 ring-emerald-500/20"
+                  >
+                    <span className="text-xs font-black text-emerald-400 tracking-wider">
+                      الإجابة النموذجية الصحيحة:
+                    </span>
+                    <p className="text-xl sm:text-3xl font-black text-emerald-200">
+                      {currentQ.correctAnswer}
+                    </p>
+                  </motion.div>
+                )}
+              </div>
+            ) : (
+              /* Sub-case B: Multiple Choice Options Grid (with real-time vote percentage bars) */
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {options.map((opt, idx) => {
+                  const optLetter = ['أ', 'ب', 'ج', 'د', 'هـ'][idx] || String(idx + 1);
+                  const voteCount = optionCounts[idx] || 0;
+                  const percentage = answeredCount > 0 ? Math.round((voteCount / answeredCount) * 100) : 0;
+
+                  const isCorrect = sessionState.status === 'revealed' && (
+                    String(idx + 1) === String(currentQ.correctAnswer).trim() ||
+                    opt.trim().toLowerCase() === String(currentQ.correctAnswer).trim().toLowerCase()
+                  );
+
+                  return (
+                    <div
+                      key={idx}
+                      className={`relative overflow-hidden p-5 sm:p-6 rounded-3xl border-2 transition-all shadow-xl flex items-center justify-between ${
+                        isCorrect
+                          ? 'bg-emerald-950/70 border-emerald-400 ring-4 ring-emerald-500/30 shadow-emerald-500/20'
+                          : 'bg-slate-900/90 border-slate-800'
+                      }`}
+                    >
+                      {/* Live Vote Progress Fill Bar */}
+                      <div
+                        className={`absolute inset-y-0 right-0 transition-all duration-500 pointer-events-none ${
+                          isCorrect ? 'bg-emerald-500/20' : 'bg-indigo-600/15'
+                        }`}
+                        style={{ width: `${percentage}%` }}
+                      />
+
+                      {/* Option Text and Letter */}
+                      <div className="relative z-10 flex items-center gap-4">
+                        <span className={`w-10 h-10 sm:w-12 sm:h-12 rounded-2xl flex items-center justify-center font-black text-base sm:text-lg shadow-md shrink-0 ${
+                          isCorrect
+                            ? 'bg-emerald-500 text-slate-950'
+                            : 'bg-slate-800 text-indigo-300'
+                        }`}>
+                          {optLetter}
+                        </span>
+                        <span className="text-base sm:text-xl font-bold text-slate-100">
+                          {opt}
+                        </span>
+                      </div>
+
+                      {/* Stats & Badge */}
+                      <div className="relative z-10 flex items-center gap-2 font-mono">
+                        {isCorrect && (
+                          <span className="px-2.5 py-1 rounded-xl bg-emerald-500/30 text-emerald-300 text-xs font-bold">
+                            صحيحة ✓
+                          </span>
+                        )}
+                        <span className="text-sm sm:text-base font-bold text-slate-300">
+                          {voteCount} ({percentage}%)
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </motion.div>
         )}
 

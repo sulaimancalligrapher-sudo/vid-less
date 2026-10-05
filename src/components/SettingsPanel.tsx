@@ -3107,16 +3107,19 @@ function getOrCreateLiveQuestionsDirectSheet() {
   var sheet = ss.getSheetByName('Questions-Live');
   if (!sheet) {
     sheet = ss.insertSheet('Questions-Live');
-    // هيكل ورقة Questions-Live:
-    // A: موضوع المحاضرة / الحصة المباشرة | B: وصف أو نبذة
-    // ثم 5 أعمدة لكل سؤال (C:G, H:L, M:Q...)
-    var headers = ['موضوع المحاضرة / الحصة المباشرة', 'وصف المحاضرة'];
-    for (var i = 1; i <= 20; i++) {
-      headers.push('نص س' + i);            // العمود C, H, M...
-      headers.push('نوع/خيارات س' + i);    // العمود D, I, N... (خيارات مفصولة بفاصلة أو 'نص')
-      headers.push('طريقة إجابة س' + i);   // العمود E, J, O... (رقم خيار 1,2.. أو نص الإجابة أو فارغ للحرة)
-      headers.push('المهلة بالثواني س' + i); // العمود F, K, P... (افتراضي 30)
-      headers.push('رابط صورة س' + i);      // العمود G, L, Q...
+    // هيكل ورقة Questions-Live الجديد:
+    // العامود الأول A: موضوع الحصة المباشرة
+    // ثم 4 أعمدة لكل سؤال (B:E للسؤال 1، F:I للسؤال 2، J:M للسؤال 3...):
+    // 1. رابط صورة السؤال (مرن: يوجد أو لا يوجد أو فارغ)
+    // 2. نص السؤال
+    // 3. خيارات الإجابة / كلمة 'نص'
+    // 4. رقم الإجابة / نص الإجابة / فارغ للإجابة الحرة
+    var headers = ['الموضوع'];
+    for (var i = 1; i <= 25; i++) {
+      headers.push('رابط صورة س' + i);      // العمود B, F, J...
+      headers.push('نص س' + i);            // العمود C, G, K...
+      headers.push('خيارات الإجابة / نص س' + i); // العمود D, H, L...
+      headers.push('طريقة إجابة س' + i);   // العمود E, I, M...
     }
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#fef3c7');
@@ -3133,7 +3136,7 @@ function getOrCreateLiveAnswersDirectSheet() {
     // هيكل ورقة Answers-Live:
     // A: تاريخ وتوقيت الإجابة | B: رقم المشترك | C: اسم المشترك | D: موضوع الحصة المباشرة | E: إجمالي الدرجة | F: النسبة %
     var headers = ['تاريخ وتوقيت الإجابة', 'رقم المشترك', 'اسم المشترك', 'موضوع الحصة المباشرة', 'إجمالي الدرجة', 'النسبة %'];
-    for (var i = 1; i <= 20; i++) {
+    for (var i = 1; i <= 25; i++) {
       headers.push('إجابة س' + i);
     }
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
@@ -3146,10 +3149,22 @@ function getOrCreateLiveAnswersDirectSheet() {
 function setupLiveDirectSheets() {
   try {
     var qSheet = getOrCreateLiveQuestionsDirectSheet();
+    // تحديث وضبط ترويسات ورقة Questions-Live بالهيكل الجديد (A: الموضوع، و4 أعمدة لكل سؤال B:E، F:I...)
+    var headers = ['الموضوع'];
+    for (var i = 1; i <= 25; i++) {
+      headers.push('رابط صورة س' + i);      // B, F, J...
+      headers.push('نص س' + i);            // C, G, K...
+      headers.push('خيارات الإجابة / نص س' + i); // D, H, L...
+      headers.push('طريقة إجابة س' + i);   // E, I, M...
+    }
+    qSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    qSheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#fef3c7');
+    qSheet.setFrozenRows(1);
+
     var aSheet = getOrCreateLiveAnswersDirectSheet();
     return { 
       success: true, 
-      message: 'تم إنشاء وتهيئة أوراق (Questions-Live) و (Answers-Live) بنجاح وبكافة الترويسات المطلوبة!' 
+      message: 'تم تحديث وتهيئة ورقة (Questions-Live) بالهيكل الجديد (A: الموضوع، و4 أعمدة لكل سؤال: صورة، نص، خيارات، إجابة) وورقة (Answers-Live) بنجاح!' 
     };
   } catch (err) {
     return { success: false, message: err.message };
@@ -3173,23 +3188,49 @@ function getLiveQuestionsDirect() {
       var title = String(row[0] || '').trim();
       if (!title) continue;
       
-      var description = String(row[1] || '').trim();
       var questions = [];
       var qIndex = 0;
       
-      for (var col = 2; col < row.length; col += 5) {
-        var qTextRaw = row[col];
-        var qTypeOrOptionsRaw = row[col + 1];
-        var qCorrectAnswerRaw = row[col + 2];
-        var qTimeLimitRaw = row[col + 3];
-        var qImageRaw = row[col + 4];
+      // الهيكل الجديد لورقة Questions-Live:
+      // الأعمدة تبدأ من B (index 1)، وكل سؤال يأخذ 4 أعمدة بالضبط:
+      // col + 0: رابط صورة السؤال (مرن: يوجد أو لا يوجد أو فارغ)
+      // col + 1: نص السؤال
+      // col + 2: خيارات الإجابة / كلمة 'نص'
+      // col + 3: رقم الإجابة / نص الإجابة / فارغ للإجابة الحرة
+      for (var col = 1; col < row.length; col += 4) {
+        var rawCol0 = row[col];     // رابط الصورة (مرن)
+        var rawCol1 = row[col + 1]; // نص السؤال
+        var rawCol2 = row[col + 2]; // خيارات أو كلمة 'نص'
+        var rawCol3 = row[col + 3]; // الإجابة الصحيحة أو فراغ
         
-        var qText = String(qTextRaw || '').trim();
-        var qImage = formatDriveImageUrl(String(qImageRaw || '').trim());
-        var typeOrOptsStr = String(qTypeOrOptionsRaw || '').trim();
-        var correctAnswer = String(qCorrectAnswerRaw !== undefined && qCorrectAnswerRaw !== null ? qCorrectAnswerRaw : '').trim();
-        var timeLimit = parseInt(qTimeLimitRaw, 10) || 30;
+        var qImageStr = String(rawCol0 || '').trim();
+        var qTextStr = String(rawCol1 || '').trim();
+        var typeOrOptsStr = String(rawCol2 || '').trim();
+        var correctAnswer = String(rawCol3 !== undefined && rawCol3 !== null ? rawCol3 : '').trim();
         
+        var qImage = '';
+        var qText = qTextStr;
+        
+        // مرونة ذكية للتعامل مع رابط الصورة سواء وجد أو ترك فارغاً
+        if (qImageStr) {
+          var isImgUrl = qImageStr.indexOf('http://') === 0 || 
+                         qImageStr.indexOf('https://') === 0 || 
+                         qImageStr.indexOf('drive.google.com') !== -1 ||
+                         qImageStr.indexOf('.png') !== -1 ||
+                         qImageStr.indexOf('.jpg') !== -1 ||
+                         qImageStr.indexOf('.jpeg') !== -1 ||
+                         qImageStr.indexOf('.webp') !== -1;
+          if (isImgUrl) {
+            qImage = formatDriveImageUrl(qImageStr);
+          } else if (!qTextStr) {
+            // في حال تم وضع نص السؤال في الخلية الأولى دون ترك عمود للصورة
+            qText = qImageStr;
+          } else {
+            qImage = formatDriveImageUrl(qImageStr);
+          }
+        }
+        
+        // التحقق من وجود سؤال أو صورة أو خيارات
         if (qText !== '' || qImage !== '' || typeOrOptsStr !== '') {
           var options = [];
           var isTextAnswer = false;
@@ -3208,7 +3249,7 @@ function getLiveQuestionsDirect() {
             options: options,
             isTextAnswer: isTextAnswer,
             correctAnswer: correctAnswer,
-            timeLimit: timeLimit,
+            timeLimit: 30, // افتراضي ويتحكم المعلم بلحظة الطرح
             image: qImage
           });
           qIndex++;
@@ -3218,7 +3259,6 @@ function getLiveQuestionsDirect() {
       list.push({
         rowIndex: r + 2,
         title: title,
-        description: description,
         questions: questions
       });
     }
@@ -3233,27 +3273,31 @@ function saveLiveLessonDirect(lesson) {
     if (!lesson || !lesson.title) return { success: false, message: 'موضوع المحاضرة مطلوب' };
     var sheet = getOrCreateLiveQuestionsDirectSheet();
     
+    // العامود الأول A للموضوع فقط:
     var rowValues = [
-      lesson.title,
-      lesson.description || ''
+      lesson.title
     ];
     
+    // بعده كل سؤال 4 أعمدة (رابط صورة، نص السؤال، خيارات/نص، طريقة الإجابة):
     var qs = lesson.questions || [];
     var totalQuestionsCount = Math.max(15, qs.length);
     for (var i = 0; i < totalQuestionsCount; i++) {
       var q = qs[i];
       if (q && (q.question || q.image || (q.options && q.options.length))) {
+        // 1. رابط الصورة (مرن)
+        rowValues.push(q.image || '');
+        // 2. نص السؤال
         rowValues.push(q.question || '');
+        // 3. خيارات الإجابة أو كلمة 'نص'
         if (q.isTextAnswer) {
           rowValues.push('نص');
         } else {
           rowValues.push((q.options || []).join(', '));
         }
+        // 4. رقم الإجابة / نص الإجابة / فراغ
         rowValues.push(q.correctAnswer || '');
-        rowValues.push(q.timeLimit || 30);
-        rowValues.push(q.image || '');
       } else {
-        rowValues.push('', '', '', '', '');
+        rowValues.push('', '', '', '');
       }
     }
     
@@ -3279,7 +3323,7 @@ function saveLiveLessonDirect(lesson) {
       sheet.appendRow(rowValues);
     }
     
-    return { success: true, message: 'تم حفظ موضوع وأسئلة الحصة المباشرة في ورقة Questions-Live بنجاح' };
+    return { success: true, message: 'تم حفظ موضوع وأسئلة الحصة المباشرة في ورقة Questions-Live بالهيكل الجديد بنجاح' };
   } catch (err) {
     return { success: false, message: err.message };
   }

@@ -37,6 +37,7 @@ import {
   Share2,
   Power,
   ShieldAlert,
+  Image as ImageIcon,
 } from 'lucide-react';
 import {
   LiveDirectLessonRow,
@@ -64,6 +65,7 @@ import {
   sendTeacherBroadcastMessage,
   toggleShowChatInRoom,
   formatSecondsToTime,
+  formatDriveImageUrl,
   setupLiveDirectSheetsApi,
   startLiveProgram,
   endLiveProgram,
@@ -111,6 +113,9 @@ export default function LiveDirectManager({
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [editingLesson, setEditingLesson] = useState<LiveDirectLessonRow | null>(null);
   const [isSavingLesson, setIsSavingLesson] = useState(false);
+
+  // Dynamic on-the-fly teacher timer when launching questions (default 30s)
+  const [launchTimerDuration, setLaunchTimerDuration] = useState<number>(30);
 
   // Teaching Active Question preview
   const [previewQuestionIndex, setPreviewQuestionIndex] = useState<number>(0);
@@ -379,22 +384,23 @@ export default function LiveDirectManager({
     }
   };
 
-  // Launch Question Live
-  const handleLaunchQuestion = async (q: LiveDirectQuestionItem, idx: number) => {
+  // Launch Question Live with flexible teacher timer
+  const handleLaunchQuestion = async (q: LiveDirectQuestionItem, idx: number, customLimit?: number) => {
     if (!activeLesson) return;
     try {
+      const timeToUse = customLimit !== undefined ? customLimit : launchTimerDuration;
       await triggerLiveQuestion({
         questionIndex: idx,
         question: {
           index: idx,
           time: 0,
           question: q.question,
-          options: q.options,
+          options: q.options || [],
           correctAnswer: q.correctAnswer,
           image: q.image,
           isTextAnswer: q.isTextAnswer,
         },
-        timeLimit: q.timeLimit || 30,
+        timeLimit: timeToUse,
         showResult: 'نعم',
       });
       showNotice(`تم طرح السؤال (${idx + 1}) لجميع الطلاب والشاشة فورياً 🚀`, 'success');
@@ -927,7 +933,12 @@ export default function LiveDirectManager({
                       }`}
                     >
                       <span>س{idx + 1}</span>
-                      <span className="text-[10px] opacity-75">({q.timeLimit || 30}ث)</span>
+                      {q.image && (
+                        <span className="text-[10px] bg-amber-400/20 text-amber-300 px-1 rounded">🖼️</span>
+                      )}
+                      {q.isTextAnswer && (
+                        <span className="text-[10px] bg-indigo-400/20 text-indigo-300 px-1 rounded">✍️</span>
+                      )}
                     </button>
                   );
                 })}
@@ -935,61 +946,120 @@ export default function LiveDirectManager({
 
               {/* Selected Question Preview & Launch Box */}
               {activeLesson.questions[previewQuestionIndex] && (
-                <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 space-y-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <span className="px-2 py-0.5 rounded-lg bg-indigo-500/20 text-indigo-300 font-bold text-xs">
+                <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 space-y-4">
+                  {/* Top Header of Preview */}
+                  <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                    <div className="space-y-1.5 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="px-2.5 py-0.5 rounded-lg bg-indigo-500/20 text-indigo-300 font-bold text-xs">
                           معاينة السؤال {previewQuestionIndex + 1}
                         </span>
-                        <span className="text-xs text-slate-400 font-mono">
-                          المدة: {activeLesson.questions[previewQuestionIndex].timeLimit || 30} ثانية
-                        </span>
+                        {activeLesson.questions[previewQuestionIndex].isTextAnswer ? (
+                          <span className="px-2 py-0.5 rounded-lg bg-purple-500/20 text-purple-300 text-xs font-bold flex items-center gap-1">
+                            ✍️ إجابة كتابية / نصية
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-lg bg-emerald-500/20 text-emerald-300 text-xs font-bold">
+                            🔘 خيارات متعددة ({(activeLesson.questions[previewQuestionIndex].options || []).length})
+                          </span>
+                        )}
                       </div>
-                      <h4 className="text-base font-bold text-slate-100 leading-relaxed">
-                        {activeLesson.questions[previewQuestionIndex].question}
-                      </h4>
+
+                      {/* Question Text */}
+                      {activeLesson.questions[previewQuestionIndex].question && (
+                        <h4 className="text-base font-bold text-slate-100 leading-relaxed pt-1">
+                          {activeLesson.questions[previewQuestionIndex].question}
+                        </h4>
+                      )}
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => handleLaunchQuestion(activeLesson.questions[previewQuestionIndex], previewQuestionIndex)}
-                      className="px-5 py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-amber-500/20 transition-all cursor-pointer active:scale-95 shrink-0"
-                    >
-                      <Play className="w-4 h-4 fill-slate-950" />
-                      <span>طرح هذا السؤال الآن 🚀</span>
-                    </button>
+                    {/* Launch Controls */}
+                    <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
+                      {/* Teacher Live Timer Selector */}
+                      <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 px-2.5 py-2 rounded-xl">
+                        <Clock className="w-3.5 h-3.5 text-amber-400" />
+                        <span className="text-[11px] text-slate-400 font-bold">المهلة:</span>
+                        <select
+                          value={launchTimerDuration}
+                          onChange={(e) => setLaunchTimerDuration(parseInt(e.target.value, 10) || 30)}
+                          className="bg-slate-950 border border-slate-700 text-amber-300 text-xs font-bold font-mono px-2 py-1 rounded-lg outline-none cursor-pointer"
+                        >
+                          <option value={15}>15 ثانية</option>
+                          <option value={30}>30 ثانية</option>
+                          <option value={45}>45 ثانية</option>
+                          <option value={60}>60 ثانية</option>
+                          <option value={90}>90 ثانية</option>
+                          <option value={120}>دقيقتان</option>
+                          <option value={9999}>مفتوح بدون وقت</option>
+                        </select>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleLaunchQuestion(activeLesson.questions[previewQuestionIndex], previewQuestionIndex, launchTimerDuration)}
+                        className="px-5 py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-amber-500/20 transition-all cursor-pointer active:scale-95"
+                      >
+                        <Play className="w-4 h-4 fill-slate-950" />
+                        <span>طرح السؤال للطلاب الآن 🚀</span>
+                      </button>
+                    </div>
                   </div>
 
-                  {/* Options List */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2">
-                    {activeLesson.questions[previewQuestionIndex].options.map((opt, optIdx) => {
-                      const isCorrect = String(optIdx + 1) === String(activeLesson.questions[previewQuestionIndex].correctAnswer).trim() ||
-                                        opt.trim().toLowerCase() === String(activeLesson.questions[previewQuestionIndex].correctAnswer).trim().toLowerCase();
-                      return (
-                        <div
-                          key={optIdx}
-                          className={`p-2.5 rounded-xl border text-xs font-bold flex items-center justify-between ${
-                            isCorrect
-                              ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-200'
-                              : 'bg-slate-900 border-slate-800 text-slate-300'
-                          }`}
-                        >
-                          <span className="flex items-center gap-2">
-                            <span className="w-5 h-5 rounded-lg bg-slate-800 text-slate-400 flex items-center justify-center text-[10px] font-mono">
-                              {optIdx + 1}
-                            </span>
-                            <span>{opt}</span>
-                          </span>
-                          {isCorrect && (
-                            <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 text-[10px]">
-                              الإجابة الصحيحة ✓
-                            </span>
-                          )}
+                  {/* Question Image Preview if present */}
+                  {activeLesson.questions[previewQuestionIndex].image && (
+                    <div className="max-w-md max-h-56 rounded-2xl overflow-hidden border border-slate-800 bg-slate-900 p-1.5">
+                      <img
+                        src={formatDriveImageUrl(activeLesson.questions[previewQuestionIndex].image)}
+                        alt="توضيح السؤال"
+                        className="w-full max-h-52 object-contain rounded-xl mx-auto"
+                      />
+                    </div>
+                  )}
+
+                  {/* Multiple Choice Options List or Text Answer Info */}
+                  {activeLesson.questions[previewQuestionIndex].isTextAnswer ? (
+                    <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3.5 space-y-1 text-xs">
+                      <div className="text-slate-400 font-bold">طريقة الإجابة: نصية كتابية</div>
+                      {activeLesson.questions[previewQuestionIndex].correctAnswer ? (
+                        <div className="text-emerald-400 font-mono">
+                          الإجابة النموذجية المحددة: <span className="font-bold underline">{activeLesson.questions[previewQuestionIndex].correctAnswer}</span>
                         </div>
-                      );
-                    })}
-                  </div>
+                      ) : (
+                        <div className="text-amber-400/90">
+                          إجابة حرة مفتوحة (تقييم حر من الأستاذ)
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                      {(activeLesson.questions[previewQuestionIndex].options || []).map((opt, optIdx) => {
+                        const isCorrect = String(optIdx + 1) === String(activeLesson.questions[previewQuestionIndex].correctAnswer).trim() ||
+                                          opt.trim().toLowerCase() === String(activeLesson.questions[previewQuestionIndex].correctAnswer).trim().toLowerCase();
+                        return (
+                          <div
+                            key={optIdx}
+                            className={`p-2.5 rounded-xl border text-xs font-bold flex items-center justify-between ${
+                              isCorrect
+                                ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-200'
+                                : 'bg-slate-900 border-slate-800 text-slate-300'
+                            }`}
+                          >
+                            <span className="flex items-center gap-2">
+                              <span className="w-5 h-5 rounded-lg bg-slate-800 text-slate-400 flex items-center justify-center text-[10px] font-mono">
+                                {optIdx + 1}
+                              </span>
+                              <span>{opt}</span>
+                            </span>
+                            {isCorrect && (
+                              <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 text-[10px]">
+                                الإجابة الصحيحة ✓
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1121,7 +1191,7 @@ export default function LiveDirectManager({
                             {lesson.title}
                           </h3>
                           <div className="text-[11px] text-slate-500">
-                            {lesson.description || 'حصة إلقاء مباشر مع أسئلة تفاعلية'}
+                            حصة إلقاء وشرح مباشر مع أسئلة تفاعلية 🎙️
                           </div>
                         </div>
                       </div>
@@ -1134,9 +1204,23 @@ export default function LiveDirectManager({
                     {/* Preview first 3 questions */}
                     <div className="space-y-1.5 pt-1">
                       {lesson.questions?.slice(0, 3).map((q, qIdx) => (
-                        <div key={qIdx} className="text-xs text-slate-400 flex items-center gap-2 bg-slate-950/60 p-2 rounded-xl border border-slate-800/80">
-                          <span className="font-mono text-amber-400/80">س{qIdx + 1}:</span>
-                          <span className="truncate">{q.question}</span>
+                        <div key={qIdx} className="text-xs text-slate-400 flex items-center justify-between gap-2 bg-slate-950/60 p-2 rounded-xl border border-slate-800/80">
+                          <div className="flex items-center gap-2 truncate">
+                            <span className="font-mono text-amber-400/80 shrink-0">س{qIdx + 1}:</span>
+                            <span className="truncate">{q.question || '(سؤال بالصورة)'}</span>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            {q.image && (
+                              <span className="text-[10px] text-amber-300 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
+                                🖼️ صورة
+                              </span>
+                            )}
+                            {q.isTextAnswer && (
+                              <span className="text-[10px] text-indigo-300 bg-indigo-500/10 px-1.5 py-0.5 rounded border border-indigo-500/20">
+                                ✍️ نص
+                              </span>
+                            )}
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -1338,7 +1422,8 @@ export default function LiveDirectManager({
                           question: '',
                           options: ['خيار 1', 'خيار 2', 'خيار 3', 'خيار 4'],
                           correctAnswer: '1',
-                          timeLimit: 30,
+                          image: '',
+                          isTextAnswer: false,
                         };
                         setEditingLesson({
                           ...editingLesson,
@@ -1353,9 +1438,16 @@ export default function LiveDirectManager({
                   </div>
 
                   {editingLesson.questions.map((q, qIdx) => (
-                    <div key={qIdx} className="bg-slate-950 border border-slate-800 rounded-2xl p-3.5 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <span className="font-mono text-xs font-bold text-amber-400">سؤال {qIdx + 1}</span>
+                    <div key={qIdx} className="bg-slate-950 border border-slate-800 rounded-2xl p-4 space-y-3.5">
+                      <div className="flex items-center justify-between border-b border-slate-850 pb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-md">
+                            سؤال {qIdx + 1}
+                          </span>
+                          <span className="text-[11px] text-slate-400">
+                            (4 أعمدة في الشيت: صورة، نص، خيارات، إجابة)
+                          </span>
+                        </div>
                         {editingLesson.questions.length > 1 && (
                           <button
                             type="button"
@@ -1363,7 +1455,7 @@ export default function LiveDirectManager({
                               const updated = editingLesson.questions.filter((_, idx) => idx !== qIdx);
                               setEditingLesson({ ...editingLesson, questions: updated });
                             }}
-                            className="p-1 text-slate-500 hover:text-rose-400"
+                            className="p-1 text-slate-500 hover:text-rose-400 transition-colors"
                             title="حذف هذا السؤال"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -1371,71 +1463,144 @@ export default function LiveDirectManager({
                         )}
                       </div>
 
-                      {/* Question Text */}
-                      <input
-                        type="text"
-                        value={q.question}
-                        onChange={(e) => {
-                          const updated = [...editingLesson.questions];
-                          updated[qIdx].question = e.target.value;
-                          setEditingLesson({ ...editingLesson, questions: updated });
-                        }}
-                        placeholder="نص السؤال التفاعلي..."
-                        className="w-full px-3 py-2 bg-slate-900 border border-slate-800 focus:border-indigo-400 rounded-xl text-slate-100 text-xs font-semibold outline-none"
-                      />
-
-                      {/* Options */}
-                      <div className="grid grid-cols-2 gap-2">
-                        {q.options.map((opt, optIdx) => (
-                          <div key={optIdx} className="flex items-center gap-1.5">
-                            <span className="text-[10px] text-slate-500 font-mono">{optIdx + 1}:</span>
-                            <input
-                              type="text"
-                              value={opt}
-                              onChange={(e) => {
-                                const updated = [...editingLesson.questions];
-                                updated[qIdx].options[optIdx] = e.target.value;
-                                setEditingLesson({ ...editingLesson, questions: updated });
-                              }}
-                              className="flex-1 px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-slate-200 text-xs outline-none"
+                      {/* 1. Image URL (Column B, F, J...) */}
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <label className="text-[11px] text-slate-300 font-bold flex items-center gap-1">
+                            <ImageIcon className="w-3.5 h-3.5 text-amber-400" />
+                            <span>1. رابط صورة السؤال (مرن: اختياري - يمكن تركه فارغاً):</span>
+                          </label>
+                          {q.image && (
+                            <span className="text-[10px] text-emerald-400 font-bold">تم إرفاق صورة ✓</span>
+                          )}
+                        </div>
+                        <input
+                          type="text"
+                          value={q.image || ''}
+                          onChange={(e) => {
+                            const updated = [...editingLesson.questions];
+                            updated[qIdx].image = e.target.value;
+                            setEditingLesson({ ...editingLesson, questions: updated });
+                          }}
+                          placeholder="رابط Google Drive أو رابط مباشر للصورة..."
+                          className="w-full px-3 py-2 bg-slate-900 border border-slate-800 focus:border-amber-400 rounded-xl text-slate-200 text-xs font-mono outline-none"
+                        />
+                        {q.image && (
+                          <div className="max-h-28 max-w-sm rounded-xl overflow-hidden border border-slate-800 bg-slate-900 p-1 mt-1">
+                            <img
+                              src={formatDriveImageUrl(q.image)}
+                              alt="معاينة الصورة"
+                              className="max-h-24 object-contain rounded-lg mx-auto"
                             />
                           </div>
-                        ))}
+                        )}
                       </div>
 
-                      {/* Settings: Correct Answer & Time */}
-                      <div className="grid grid-cols-2 gap-3 pt-1">
-                        <div>
-                          <label className="block text-[11px] text-slate-400 font-bold mb-1">
-                            رقم الخيار الصحيح (1-4):
+                      {/* 2. Question Text (Column C, G, K...) */}
+                      <div className="space-y-1">
+                        <label className="text-[11px] text-slate-300 font-bold block">
+                          2. نص السؤال التفاعلي:
+                        </label>
+                        <input
+                          type="text"
+                          value={q.question}
+                          onChange={(e) => {
+                            const updated = [...editingLesson.questions];
+                            updated[qIdx].question = e.target.value;
+                            setEditingLesson({ ...editingLesson, questions: updated });
+                          }}
+                          placeholder="اكتب نص السؤال هنا..."
+                          className="w-full px-3 py-2 bg-slate-900 border border-slate-800 focus:border-indigo-400 rounded-xl text-slate-100 text-xs font-semibold outline-none"
+                        />
+                      </div>
+
+                      {/* 3. Question Options / Text Mode (Column D, H, L...) */}
+                      <div className="space-y-2 pt-1">
+                        <div className="flex items-center justify-between">
+                          <label className="text-[11px] text-slate-300 font-bold">
+                            3. نوع السؤال وخيارات الإجابة:
                           </label>
-                          <input
-                            type="text"
-                            value={q.correctAnswer}
-                            onChange={(e) => {
-                              const updated = [...editingLesson.questions];
-                              updated[qIdx].correctAnswer = e.target.value;
-                              setEditingLesson({ ...editingLesson, questions: updated });
-                            }}
-                            placeholder="مثال: 1 أو 2"
-                            className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-slate-100 text-xs font-bold outline-none"
-                          />
+                          <div className="flex items-center gap-1.5 bg-slate-900 p-0.5 rounded-lg border border-slate-800">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const updated = [...editingLesson.questions];
+                                updated[qIdx].isTextAnswer = false;
+                                if (!updated[qIdx].options || updated[qIdx].options.length === 0) {
+                                  updated[qIdx].options = ['خيار 1', 'خيار 2', 'خيار 3', 'خيار 4'];
+                                }
+                                setEditingLesson({ ...editingLesson, questions: updated });
+                              }}
+                              className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all ${
+                                !q.isTextAnswer
+                                  ? 'bg-amber-500 text-slate-950 font-black'
+                                  : 'text-slate-400 hover:text-slate-200'
+                              }`}
+                            >
+                              خيارات
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const updated = [...editingLesson.questions];
+                                updated[qIdx].isTextAnswer = true;
+                                setEditingLesson({ ...editingLesson, questions: updated });
+                              }}
+                              className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all ${
+                                q.isTextAnswer
+                                  ? 'bg-indigo-600 text-white font-black'
+                                  : 'text-slate-400 hover:text-slate-200'
+                              }`}
+                            >
+                              نص كتابي
+                            </button>
+                          </div>
                         </div>
-                        <div>
-                          <label className="block text-[11px] text-slate-400 font-bold mb-1">
-                            الوقت بالثواني:
-                          </label>
-                          <input
-                            type="number"
-                            value={q.timeLimit || 30}
-                            onChange={(e) => {
-                              const updated = [...editingLesson.questions];
-                              updated[qIdx].timeLimit = parseInt(e.target.value) || 30;
-                              setEditingLesson({ ...editingLesson, questions: updated });
-                            }}
-                            className="w-full px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-slate-100 text-xs font-bold outline-none"
-                          />
-                        </div>
+
+                        {/* Options inputs if multiple choice */}
+                        {!q.isTextAnswer ? (
+                          <div className="grid grid-cols-2 gap-2">
+                            {(q.options || []).map((opt, optIdx) => (
+                              <div key={optIdx} className="flex items-center gap-1.5">
+                                <span className="text-[10px] text-slate-500 font-mono w-4 text-center">{optIdx + 1}:</span>
+                                <input
+                                  type="text"
+                                  value={opt}
+                                  onChange={(e) => {
+                                    const updated = [...editingLesson.questions];
+                                    const opts = [...(updated[qIdx].options || [])];
+                                    opts[optIdx] = e.target.value;
+                                    updated[qIdx].options = opts;
+                                    setEditingLesson({ ...editingLesson, questions: updated });
+                                  }}
+                                  className="flex-1 px-2.5 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-slate-200 text-xs outline-none focus:border-indigo-400"
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="p-2.5 bg-indigo-950/30 border border-indigo-500/30 rounded-xl text-[11px] text-indigo-300">
+                            ✍️ سيكتب في الشيت كلمة <b>نص</b>، وسيقوم الطلاب بكتابة إجاباتهم يدوياً على أجهزتهم.
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 4. Correct Answer (Column E, I, M...) */}
+                      <div className="pt-1">
+                        <label className="block text-[11px] text-slate-300 font-bold mb-1">
+                          4. الإجابة الصحيحة أو النموذجية (رقم الخيار 1-4، أو نص الإجابة، أو اتركه فارغاً للحرة):
+                        </label>
+                        <input
+                          type="text"
+                          value={q.correctAnswer || ''}
+                          onChange={(e) => {
+                            const updated = [...editingLesson.questions];
+                            updated[qIdx].correctAnswer = e.target.value;
+                            setEditingLesson({ ...editingLesson, questions: updated });
+                          }}
+                          placeholder={q.isTextAnswer ? "اكتب الإجابة النموذجية أو اترك فارغاً للحر" : "مثال: 1 أو 2"}
+                          className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-100 text-xs font-bold outline-none focus:border-amber-400"
+                        />
                       </div>
                     </div>
                   ))}
