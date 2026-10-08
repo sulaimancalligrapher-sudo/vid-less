@@ -44,6 +44,8 @@ import {
   LiveDirectQuestionItem,
   LiveDirectAnswerRecord,
   LiveSessionState,
+  evaluateLiveAnswer,
+  normalizeArabicText,
 } from '../types';
 import {
   fetchLiveQuestionsDirect,
@@ -295,7 +297,7 @@ export default function LiveDirectManager({
     }
   };
 
-  // Helper to format answers as 'صح' / 'خطأ' / 'نص' to match Answers-T structure
+  // Helper to format answers as 'صح' / 'خطأ' / 'نص' to match Answers-T & Answers-Live structure
   const formatAnswersForAnswersLive = (
     answersMap: Record<number, string>,
     targetQuestions?: LiveDirectQuestionItem[]
@@ -309,24 +311,21 @@ export default function LiveDirectManager({
           if (q.isTextAnswer) {
             formatted[idx] = strAns;
           } else {
-            const correct = String(q.correctAnswer || '').trim().toLowerCase();
-            let isCorrect = false;
-            if (strAns.toLowerCase() === correct) {
-              isCorrect = true;
+            const norm = normalizeArabicText(strAns);
+            if (norm === 'صح' || norm === 'صحيح' || norm === '✓' || norm === 'true') {
+              formatted[idx] = 'صح';
+            } else if (norm === 'خطا' || norm === 'خاطي' || norm === '✗' || norm === 'false') {
+              formatted[idx] = 'خطأ';
             } else {
-              const optNum = parseInt(strAns, 10);
-              if (!isNaN(optNum) && q.options && q.options[optNum - 1]) {
-                if (String(q.options[optNum - 1]).trim().toLowerCase() === correct || String(optNum) === correct) {
-                  isCorrect = true;
-                }
-              } else if (q.options) {
-                const foundIdx = q.options.findIndex(o => o.trim().toLowerCase() === strAns.toLowerCase());
-                if (foundIdx >= 0 && String(foundIdx + 1) === correct) {
-                  isCorrect = true;
-                }
+              const evalRes = evaluateLiveAnswer(q, strAns);
+              if (evalRes.isCorrect === true) {
+                formatted[idx] = 'صح';
+              } else if (evalRes.isCorrect === false) {
+                formatted[idx] = 'خطأ';
+              } else {
+                formatted[idx] = strAns;
               }
             }
-            formatted[idx] = isCorrect ? 'صح' : 'خطأ';
           }
         } else {
           formatted[idx] = '';
@@ -340,54 +339,191 @@ export default function LiveDirectManager({
     return formatted;
   };
 
+  // Helper to construct complete, deduplicated student answer records from the live session
+  const buildDirectAnswerRecords = (): LiveDirectAnswerRecord[] => {
+    if (!sessionState) return [];
+    const timestamp = new Date().toLocaleString('ar-SA');
+    const title = sessionState.lessonTitle || selectedLessonTitle || 'حصة تدريبية مباشرة';
+    const currentLesson = lessons.find(l => l.title === title) || activeLesson;
+    const allAnswers = { ...(sessionState.allSessionAnswers || {}) };
+    const currentAnswers = sessionState.answersForCurrentQuestion || {};
+    const currentQIdx = sessionState.currentQuestionIndex;
+
+    // 1. Merge any answers from current active question into allAnswers
+    if (currentQIdx !== null && currentQIdx !== undefined && currentAnswers) {
+      Object.entries(currentAnswers).forEach(([studentKey, ansSub]) => {
+        if (!allAnswers[studentKey]) {
+          allAnswers[studentKey] = {};
+        }
+        const val = typeof ansSub === 'object' && ansSub !== null && 'answer' in ansSub ? ansSub.answer : ansSub;
+        if (allAnswers[studentKey][currentQIdx] === undefined && val !== undefined && val !== null && String(val).trim() !== '') {
+          allAnswers[studentKey][currentQIdx] = String(val).trim();
+        }
+      });
+    }
+
+    // 2. Build canonical student map from connectedStudents, allAnswers keys, and currentAnswers keys
+    const studentMap = new Map<string, { username: string; sheetNumber: string }>();
+
+    // From connectedStudents
+    (sessionState.connectedStudents || []).forEach(s => {
+      const u = String(s.username || '').trim();
+      const num = String(s.sheetNumber || '').trim();
+      if (u) {
+        studentMap.set(normalizeArabicText(u), { username: u, sheetNumber: num });
+      }
+    });
+
+    // Helper to extract student identity from keys like "username_sheetNumber" or "username"
+    const parseKey = (rawKey: string) => {
+      const trimmed = String(rawKey || '').trim();
+      if (!trimmed) return null;
+      let u = trimmed;
+      let num = '';
+      if (trimmed.includes('_')) {
+        const parts = trimmed.split('_');
+        u = parts[0] || '';
+        num = parts.slice(1).join('_') || '';
+      }
+      return { u, num };
+    };
+
+    // From allAnswers keys
+    Object.keys(allAnswers).forEach(rawKey => {
+      const parsed = parseKey(rawKey);
+      if (parsed && parsed.u) {
+        const key = normalizeArabicText(parsed.u);
+        const existing = studentMap.get(key);
+        if (!existing) {
+          studentMap.set(key, { username: parsed.u, sheetNumber: parsed.num });
+        } else if (!existing.sheetNumber && parsed.num) {
+          existing.sheetNumber = parsed.num;
+        }
+      }
+    });
+
+    // From currentAnswers keys
+    Object.keys(currentAnswers).forEach(rawKey => {
+      const parsed = parseKey(rawKey);
+      if (parsed && parsed.u) {
+        const key = normalizeArabicText(parsed.u);
+        const existing = studentMap.get(key);
+        if (!existing) {
+          studentMap.set(key, { username: parsed.u, sheetNumber: parsed.num });
+        } else if (!existing.sheetNumber && parsed.num) {
+          existing.sheetNumber = parsed.num;
+        }
+      }
+    });
+
+    // 3. For each unique student, aggregate answers across all variations of keys
+    const recordsToSave: LiveDirectAnswerRecord[] = [];
+
+    studentMap.forEach(({ username: u, sheetNumber: sNum }) => {
+      const keyNorm = normalizeArabicText(u);
+      const studentAnswers: Record<number, string> = {};
+
+      Object.entries(allAnswers).forEach(([rawKey, ansMap]) => {
+        const parsed = parseKey(rawKey);
+        if (parsed && normalizeArabicText(parsed.u) === keyNorm && ansMap) {
+          Object.entries(ansMap).forEach(([qIdx, ansVal]) => {
+            if (ansVal !== undefined && ansVal !== null && String(ansVal).trim() !== '') {
+              studentAnswers[Number(qIdx)] = String(ansVal).trim();
+            }
+          });
+        }
+      });
+
+      // Also ensure current question answer is captured
+      if (currentQIdx !== null && currentQIdx !== undefined) {
+        Object.entries(currentAnswers).forEach(([rawKey, ansSub]) => {
+          const parsed = parseKey(rawKey);
+          if (parsed && normalizeArabicText(parsed.u) === keyNorm) {
+            const val = typeof ansSub === 'object' && ansSub !== null && 'answer' in ansSub ? ansSub.answer : ansSub;
+            if (val !== undefined && val !== null && String(val).trim() !== '' && studentAnswers[currentQIdx] === undefined) {
+              studentAnswers[currentQIdx] = String(val).trim();
+            }
+          }
+        });
+      }
+
+      if (Object.keys(studentAnswers).length > 0) {
+        const formatted = formatAnswersForAnswersLive(studentAnswers, currentLesson?.questions);
+        recordsToSave.push({
+          timestamp,
+          sheetNumber: sNum,
+          username: u,
+          studentName: u,
+          lessonTitle: title,
+          answers: formatted,
+        });
+      }
+    });
+
+    return recordsToSave;
+  };
+
   const handleConfirmEndProgram = async () => {
     setShowEndConfirmModal(false);
     setIsTogglingProgram(true);
     try {
-      // Auto-save student answers if any were recorded
-      if (sessionState?.allSessionAnswers && Object.keys(sessionState.allSessionAnswers).length > 0) {
+      const recordsToSave = buildDirectAnswerRecords();
+      let savedCount = 0;
+
+      // Auto-save student answers to Google Sheets Answers-Live
+      if (recordsToSave.length > 0) {
         try {
-          const timestamp = new Date().toLocaleString('ar-SA');
-          const title = sessionState.lessonTitle || selectedLessonTitle || 'حصة تدريبية مباشرة';
-          const recordsToSave: LiveDirectAnswerRecord[] = [];
-          const currentLesson = lessons.find(l => l.title === title) || activeLesson;
-
-          (sessionState.connectedStudents || []).forEach(student => {
-            const u = String(student.username || '').trim();
-            const sNum = String(student.sheetNumber || '').trim();
-            const ansMap = sessionState.allSessionAnswers?.[u] || {};
-            
-            if (Object.keys(ansMap).length > 0) {
-              const formattedAnswers = formatAnswersForAnswersLive(ansMap, currentLesson?.questions);
-              recordsToSave.push({
-                timestamp,
-                sheetNumber: sNum,
-                username: u,
-                studentName: u,
-                lessonTitle: title,
-                answers: formattedAnswers,
-              });
-            }
-          });
-
-          if (recordsToSave.length > 0) {
-            await recordLiveAnswersBatchDirect(recordsToSave);
-            showNotice(`تم توثيق إجابات ${recordsToSave.length} طالب في ورقة Answers-Live بنجاح 💾`, 'success');
+          const res = await recordLiveAnswersBatchDirect(recordsToSave);
+          if (res && res.success) {
+            savedCount = res.count ?? recordsToSave.length;
+            showNotice(`تم توثيق إجابات ${savedCount} طالب في ورقة Answers-Live بنجاح 💾`, 'success');
+          } else {
+            showNotice(`تنبيه: تعذر الحفظ في Google Sheets: ${res?.message || 'تحقق من الرابط في الإعدادات'}`, 'error');
           }
-        } catch (saveErr) {
-          console.warn('Auto-save answers on end session warning:', saveErr);
+        } catch (saveErr: any) {
+          console.error('Auto-save answers on end session error:', saveErr);
+          showNotice(`فشل إرسال الإجابات إلى الشيت: ${saveErr?.message || ''}`, 'error');
         }
       }
 
       await endLiveProgram();
       await finishLiveSession();
-      showNotice('تم إنهاء الحصة المباشرة وتوثيق النتائج وإغلاق القاعة وتحديث الشاشة بنجاح 🛑', 'success');
+      if (savedCount > 0) {
+        showNotice(`تم حفظ إجابات ${savedCount} طالب وإنهاء الحصة المباشرة وتحديث الشاشة بنجاح 🛑`, 'success');
+      } else {
+        showNotice('تم إنهاء الحصة المباشرة وإغلاق القاعة وتحديث الشاشة بنجاح 🛑', 'success');
+      }
       await loadAnswers();
     } catch (e: any) {
       console.error('Failed to end live program:', e);
       showNotice('حدث خطأ أثناء إنهاء الحصة: ' + (e?.message || 'خطأ في الاتصال'), 'error');
     } finally {
       setIsTogglingProgram(false);
+    }
+  };
+
+  // Dedicated button to save answers to Answers-Live at any time without ending the room
+  const handleQuickSaveAnswers = async () => {
+    setIsFinishingSession(true);
+    try {
+      const recordsToSave = buildDirectAnswerRecords();
+      if (recordsToSave.length === 0) {
+        showNotice('لا توجد إجابات مسجلة من الطلاب لحفظها حالياً', 'info');
+        return;
+      }
+      const res = await recordLiveAnswersBatchDirect(recordsToSave);
+      if (res && res.success) {
+        const count = res.count ?? recordsToSave.length;
+        showNotice(`تم توثيق إجابات ${count} طالب في ورقة Answers-Live بنجاح دون إغلاق الحصة 💾`, 'success');
+        await loadAnswers();
+      } else {
+        showNotice(`تعذر الحفظ في الشيت: ${res?.message || 'خطأ غير معروف'}`, 'error');
+      }
+    } catch (e: any) {
+      console.error('Failed to quick save answers:', e);
+      showNotice('فشل حفظ الإجابات: ' + (e?.message || 'خطأ في الاتصال'), 'error');
+    } finally {
+      setIsFinishingSession(false);
     }
   };
 
@@ -870,12 +1006,24 @@ export default function LiveDirectManager({
 
                   <button
                     type="button"
+                    onClick={handleQuickSaveAnswers}
+                    disabled={isFinishingSession}
+                    className="px-4 py-2 bg-emerald-600/30 hover:bg-emerald-600 text-emerald-200 hover:text-white font-bold rounded-xl text-xs flex items-center gap-1.5 border border-emerald-500/40 transition-all cursor-pointer"
+                    title="حفظ وتوثيق إجابات الطلاب المسجلة في ورقة Answers-Live فوراً دون إنهاء الحصة"
+                  >
+                    <Save className="w-4 h-4" />
+                    <span>حفظ في الشيت الآن 💾</span>
+                  </button>
+
+                  <button
+                    type="button"
                     onClick={handleFinishAndSave}
                     disabled={isFinishingSession}
                     className="px-4 py-2 bg-rose-600/30 hover:bg-rose-600 text-rose-200 hover:text-white font-bold rounded-xl text-xs flex items-center gap-1.5 border border-rose-500/40 transition-all cursor-pointer"
+                    title="إنهاء الحصة وتوثيق كافة النتائج في ورقة Answers-Live وإغلاق الجلسة"
                   >
-                    <Save className="w-4 h-4" />
-                    <span>إنهاء وحفظ في الشيت 💾</span>
+                    <Power className="w-4 h-4" />
+                    <span>إنهاء وحفظ في الشيت 🛑</span>
                   </button>
                 </div>
               </div>
@@ -1677,6 +1825,21 @@ export default function LiveDirectManager({
                   <span className="text-slate-400">الطلاب المتصلون:</span>
                   <span className="font-bold text-indigo-300">{(sessionState?.connectedStudents || []).length} طلاب</span>
                 </div>
+                <div className="flex justify-between items-center pt-1 border-t border-slate-800/60">
+                  <span className="text-slate-400">النتائج المسجلة للحفظ:</span>
+                  <span className={`font-bold ${buildDirectAnswerRecords().length > 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                    {buildDirectAnswerRecords().length > 0 ? `${buildDirectAnswerRecords().length} طالب جاهز للتوثيق 💾` : 'لا توجد إجابات مسجلة'}
+                  </span>
+                </div>
+                {buildDirectAnswerRecords().length > 0 ? (
+                  <p className="text-[11px] text-emerald-400/90 font-medium bg-emerald-500/10 p-2 rounded-xl border border-emerald-500/20">
+                    ✅ سيتم توثيق إجابات {buildDirectAnswerRecords().length} طالب في ورقة <b>Answers-Live</b> تلقائياً عند التأكيد.
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-amber-400/90 font-medium bg-amber-500/10 p-2 rounded-xl border border-amber-500/20">
+                    💡 لم يتم تسجيل أي إجابات طلاب حتى الآن (تأكد من إرسال الطلاب لإجاباتهم أثناء طرح السؤال).
+                  </p>
+                )}
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2">

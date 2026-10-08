@@ -350,7 +350,7 @@ export function normalizeArabicText(str: string): string {
  * Case 3: Free text answer when Column G is empty (isCorrect: null, not evaluated as right or wrong)
  */
 export function evaluateLiveAnswer(
-  question: LiveQuestionItem,
+  question: LiveQuestionItem | LiveDirectQuestionItem,
   answer: string
 ): { isCorrect: boolean | null; correctLabel?: string } {
   const rawAnswer = String(answer || '').trim();

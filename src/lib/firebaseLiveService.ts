@@ -12,7 +12,8 @@ import {
   LiveQuestionItem, 
   LiveConnectedStudent, 
   LiveStudentAnswerSubmission,
-  LiveStudentMessage
+  LiveStudentMessage,
+  normalizeArabicText
 } from '../types';
 
 const LIVE_DOC_REF = doc(db, 'live_sessions', 'main');
@@ -362,6 +363,7 @@ export async function initLiveSession(payload: {
   try {
     const isDirect = payload.mode === 'direct' || !payload.videoUrl;
     const pin = cachedState.sessionPin || generatePinCode();
+    const isSameLesson = cachedState.lessonTitle === payload.lessonTitle;
     const update: Partial<LiveSessionState> = {
       sessionId: cachedState.sessionId || ('live-' + Date.now()),
       sessionPin: pin,
@@ -376,8 +378,8 @@ export async function initLiveSession(payload: {
       currentQuestionIndex: null,
       currentQuestion: null,
       questionTriggeredAt: null,
-      answersForCurrentQuestion: {},
-      allSessionAnswers: {},
+      answersForCurrentQuestion: isSameLesson ? (cachedState.answersForCurrentQuestion || {}) : {},
+      allSessionAnswers: isSameLesson ? (cachedState.allSessionAnswers || {}) : {},
     };
 
     await updateDoc(LIVE_DOC_REF, {
@@ -466,22 +468,42 @@ export async function submitLiveAnswer(payload: {
     const cleanUser = String(payload.username || '').trim();
     let cleanSheet = String(payload.sheetNumber || '').trim();
 
-    // Verify student is actually connected with verified PIN
-    const isEnrolledAndVerified = (state.connectedStudents || []).some(
-      (s) => String(s.username || '').trim().toLowerCase() === cleanUser.toLowerCase() && s.pinVerified
-    );
-    if (!isEnrolledAndVerified && state.sessionPin) {
-      return { success: false, error: 'غير مصرح لك بإرسال الإجابة: يرجى الانضمام برمز الحضور الصحيح أولاً.' };
+    if (!cleanUser) {
+      return { success: false, error: 'اسم الطالب مطلوب لتسجيل الإجابة.' };
     }
+
+    const normClean = normalizeArabicText(cleanUser);
 
     // If student submitted without sheetNumber, recover from connectedStudents
     if (!cleanSheet) {
       const match = (state.connectedStudents || []).find(
-        (s) => String(s.username || '').trim().toLowerCase() === cleanUser.toLowerCase()
+        (s) => normalizeArabicText(String(s.username || '')) === normClean
       );
       if (match && match.sheetNumber) {
         cleanSheet = String(match.sheetNumber).trim();
       }
+    }
+
+    // Ensure student is registered and active in connectedStudents
+    let updatedStudents = [...(state.connectedStudents || [])];
+    const matchIdx = updatedStudents.findIndex(
+      (s) => normalizeArabicText(String(s.username || '')) === normClean
+    );
+    if (matchIdx >= 0) {
+      updatedStudents[matchIdx] = {
+        ...updatedStudents[matchIdx],
+        sheetNumber: cleanSheet || updatedStudents[matchIdx].sheetNumber,
+        pinVerified: true,
+        lastPing: Date.now(),
+      };
+    } else {
+      updatedStudents.push({
+        username: cleanUser,
+        sheetNumber: cleanSheet,
+        joinedAt: Date.now(),
+        lastPing: Date.now(),
+        pinVerified: true,
+      });
     }
 
     const studentKey = cleanSheet ? `${cleanUser}_${cleanSheet}` : cleanUser;
@@ -498,7 +520,7 @@ export async function submitLiveAnswer(payload: {
     Object.keys(currentAnswers).forEach((k) => {
       const existingSub = currentAnswers[k];
       const existingUser = existingSub?.username ? String(existingSub.username).trim() : (k.includes('_') ? k.split('_')[0] : k);
-      if (existingUser.toLowerCase() === cleanUser.toLowerCase()) {
+      if (normalizeArabicText(existingUser) === normClean) {
         delete currentAnswers[k];
       }
     });
@@ -509,7 +531,7 @@ export async function submitLiveAnswer(payload: {
     // Deduplicate allSessionAnswers: merge and clean up any alternate keys
     Object.keys(allAnswers).forEach((k) => {
       const existingUser = k.includes('_') ? k.split('_')[0] : k;
-      if (existingUser.toLowerCase() === cleanUser.toLowerCase() && k !== studentKey) {
+      if (normalizeArabicText(existingUser) === normClean && k !== studentKey) {
         allAnswers[studentKey] = { ...(allAnswers[k] || {}), ...(allAnswers[studentKey] || {}) };
         delete allAnswers[k];
       }
@@ -531,18 +553,20 @@ export async function submitLiveAnswer(payload: {
     await updateDoc(LIVE_DOC_REF, {
       answersForCurrentQuestion: currentAnswers,
       allSessionAnswers: allAnswers,
+      connectedStudents: updatedStudents,
       updatedAt: serverTimestamp(),
     });
 
     cachedState = { 
       ...state, 
       answersForCurrentQuestion: currentAnswers, 
-      allSessionAnswers: allAnswers 
+      allSessionAnswers: allAnswers,
+      connectedStudents: updatedStudents,
     };
     return { success: true, state: cachedState };
   } catch (error: any) {
     console.error('Failed to submit answer in Firebase:', error);
-    throw error;
+    return { success: false, error: error?.message || 'فشل إرسال الإجابة لقاعدة البيانات' };
   }
 }
 

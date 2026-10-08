@@ -560,6 +560,7 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
 
     setSelectedOption(answerVal.trim());
     setIsSubmitting(true);
+    setJoinError(null);
 
     try {
       const currentQ = sessionState.currentQuestion;
@@ -567,7 +568,7 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
       const evalResult = currentQ ? evaluateLiveAnswer(currentQ, answerVal.trim()) : { isCorrect: null };
 
       // Submit answer directly to live hub
-      await submitLiveAnswer({
+      const res = await submitLiveAnswer({
         username: username.trim(),
         sheetNumber: sheetNumber.trim(),
         answer: answerVal.trim(),
@@ -575,9 +576,16 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
         isCorrect: evalResult.isCorrect
       });
 
-      setSubmittedAnswer(answerVal.trim());
-    } catch (err) {
+      if (res && res.success) {
+        setSubmittedAnswer(answerVal.trim());
+      } else {
+        setSelectedOption(null);
+        setJoinError(res?.error || 'تعذر تسجيل الإجابة، يرجى المحاولة مرة أخرى.');
+      }
+    } catch (err: any) {
       console.error('Error submitting answer:', err);
+      setSelectedOption(null);
+      setJoinError('حدث خطأ أثناء إرسال الإجابة: ' + (err?.message || 'تحقق من الاتصال'));
     } finally {
       setIsSubmitting(false);
     }
