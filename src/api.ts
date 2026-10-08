@@ -2035,6 +2035,7 @@ export {
   deleteStudentMessage,
   clearAllStudentMessages,
   toggleShowChatInRoom,
+  toggleShowConnectedCountInRoom,
   sendTeacherBroadcastMessage,
 } from './lib/firebaseLiveService';
 

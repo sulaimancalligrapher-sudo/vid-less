@@ -259,9 +259,7 @@ export default function App() {
   // Dedicated Fullscreen Mode: Live Direct Lecture Display (Projector / Theater Screen)
   if (pageMode === 'live-direct-display') {
     return (
-      <LiveDirectDisplayRoom
-        onBackToAdmin={() => navigateToPage('admin')}
-      />
+      <LiveDirectDisplayRoom />
     );
   }
 

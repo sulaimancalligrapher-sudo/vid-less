@@ -22,6 +22,7 @@ import {
   LiveSessionState,
   LiveQuestionItem,
   LiveConnectedStudent,
+  evaluateLiveAnswer,
 } from '../types';
 import {
   subscribeToLiveSession,
@@ -37,12 +38,10 @@ import {
 import LiveChatModal from './LiveChatModal';
 
 interface LiveDirectDisplayRoomProps {
-  onBackToAdmin?: () => void;
+  // Theater projector screen
 }
 
-export default function LiveDirectDisplayRoom({
-  onBackToAdmin,
-}: LiveDirectDisplayRoomProps) {
+export default function LiveDirectDisplayRoom({}: LiveDirectDisplayRoomProps = {}) {
   const [sessionState, setSessionState] = useState<LiveSessionState | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
@@ -210,42 +209,48 @@ export default function LiveDirectDisplayRoom({
 
         {/* Center / Right Control Badges */}
         <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-          {/* PIN Badge */}
-          {sessionState?.sessionPin && (
-            <div className="flex items-center gap-2 bg-slate-950 border border-amber-500/30 px-3 py-1.5 rounded-xl shadow-inner">
+          {/* PIN Badge (مخفي افتراضياً - يتحكم به المعلم) */}
+          {Boolean(sessionState?.showPinInRoom) && sessionState?.sessionPin && (
+            <div className="flex items-center gap-2 bg-slate-950 border border-amber-500/30 px-3 py-1.5 rounded-xl shadow-inner animate-in fade-in">
               <span className="text-[10px] text-amber-400 font-bold uppercase tracking-wider">PIN:</span>
               <span className="font-mono text-base font-black text-amber-300 tracking-widest">{sessionState.sessionPin}</span>
             </div>
           )}
 
-          {/* QR Code Button */}
-          <button
-            type="button"
-            onClick={() => setShowQrModal(true)}
-            className="p-2 bg-slate-900 hover:bg-slate-800 text-amber-400 rounded-xl transition-all cursor-pointer border border-slate-800"
-            title="عرض رمز QR للدخول"
-          >
-            <QrCode className="w-4 h-4" />
-          </button>
+          {/* QR Code Button (مخفي افتراضياً - يتحكم به المعلم) */}
+          {Boolean(sessionState?.showQrInRoom) && (
+            <button
+              type="button"
+              onClick={() => setShowQrModal(true)}
+              className="p-2 bg-slate-900 hover:bg-slate-800 text-amber-400 rounded-xl transition-all cursor-pointer border border-slate-800 animate-in fade-in"
+              title="عرض رمز QR للدخول"
+            >
+              <QrCode className="w-4 h-4" />
+            </button>
+          )}
 
-          {/* Connected Students Badge */}
-          <div className="flex items-center gap-1.5 bg-slate-950 border border-indigo-500/30 px-3 py-1.5 rounded-xl text-xs font-bold text-indigo-300">
-            <Users className="w-3.5 h-3.5 text-indigo-400" />
-            <span>{totalConnected} طالب متصل</span>
-          </div>
+          {/* Connected Students Badge (مخفي افتراضياً - يتحكم به المعلم) */}
+          {Boolean(sessionState?.showConnectedCountInRoom) && (
+            <div className="flex items-center gap-1.5 bg-slate-950 border border-indigo-500/30 px-3 py-1.5 rounded-xl text-xs font-bold text-indigo-300 animate-in fade-in">
+              <Users className="w-3.5 h-3.5 text-indigo-400" />
+              <span>{totalConnected} طالب متصل</span>
+            </div>
+          )}
 
-          {/* Chat Modal Button */}
-          <button
-            type="button"
-            onClick={() => setShowChatModal(true)}
-            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 rounded-xl text-xs font-bold flex items-center gap-1.5 border border-slate-800 transition-all cursor-pointer"
-          >
-            <MessageSquare className="w-3.5 h-3.5 text-indigo-400" />
-            <span className="hidden sm:inline">المحادثة</span>
-            <span className="px-1.5 py-0.2 rounded-full bg-slate-950 text-[10px] font-mono text-indigo-300">
-              {(sessionState?.messages || []).length}
-            </span>
-          </button>
+          {/* Chat Modal Button (مخفي افتراضياً - يتحكم به المعلم) */}
+          {Boolean(sessionState?.showChatInRoom) && (
+            <button
+              type="button"
+              onClick={() => setShowChatModal(true)}
+              className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 rounded-xl text-xs font-bold flex items-center gap-1.5 border border-slate-800 transition-all cursor-pointer animate-in fade-in"
+            >
+              <MessageSquare className="w-3.5 h-3.5 text-indigo-400" />
+              <span className="hidden sm:inline">المحادثة</span>
+              <span className="px-1.5 py-0.2 rounded-full bg-slate-950 text-[10px] font-mono text-indigo-300">
+                {(sessionState?.messages || []).length}
+              </span>
+            </button>
+          )}
 
           {/* Fullscreen Button */}
           <button
@@ -256,17 +261,6 @@ export default function LiveDirectDisplayRoom({
           >
             {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
           </button>
-
-          {/* Back to Admin (if provided) */}
-          {onBackToAdmin && (
-            <button
-              type="button"
-              onClick={onBackToAdmin}
-              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition-all cursor-pointer"
-            >
-              لوحة الإدارة
-            </button>
-          )}
         </div>
       </header>
 
@@ -310,21 +304,6 @@ export default function LiveDirectDisplayRoom({
                   ? 'استمع بتركيز للشرح والملاحظات • سيتم طرح الأسئلة التفاعلية على هذه الشاشة وفي هواتفكم في أي لحظة.'
                   : 'بمجرد أن يبدأ المعلم الحصة من لوحة التحكم، ستفتح القاعة وتظهر الأسئلة التفاعلية لحظياً.'}
               </p>
-            </div>
-
-            {/* Quick Live Stats Pill */}
-            <div className="inline-flex items-center gap-6 bg-slate-900/80 border border-slate-800 p-4 rounded-2xl shadow-xl">
-              <div className="flex items-center gap-2 text-indigo-400">
-                <Users className="w-5 h-5" />
-                <span className="text-xs font-bold">الطلاب الحاضرون:</span>
-                <span className="font-mono text-base font-black text-slate-100">{totalConnected}</span>
-              </div>
-              <div className="h-6 w-px bg-slate-800" />
-              <div className="flex items-center gap-2 text-amber-400">
-                <QrCode className="w-5 h-5" />
-                <span className="text-xs font-bold">رمز الانضمام:</span>
-                <span className="font-mono text-base font-black text-amber-300">{effectivePin || '---'}</span>
-              </div>
             </div>
           </motion.div>
         )}
@@ -445,13 +424,15 @@ export default function LiveDirectDisplayRoom({
                           : 'bg-slate-900/90 border-slate-800'
                       }`}
                     >
-                      {/* Live Vote Progress Fill Bar */}
-                      <div
-                        className={`absolute inset-y-0 right-0 transition-all duration-500 pointer-events-none ${
-                          isCorrect ? 'bg-emerald-500/20' : 'bg-indigo-600/15'
-                        }`}
-                        style={{ width: `${percentage}%` }}
-                      />
+                      {/* Live Vote Progress Fill Bar (مخفي افتراضياً - يتحكم به المعلم) */}
+                      {Boolean(sessionState.showOptionCountsInRoom) && (
+                        <div
+                          className={`absolute inset-y-0 right-0 transition-all duration-500 pointer-events-none ${
+                            isCorrect ? 'bg-emerald-500/20' : 'bg-indigo-600/15'
+                          }`}
+                          style={{ width: `${percentage}%` }}
+                        />
+                      )}
 
                       {/* Option Text and Letter */}
                       <div className="relative z-10 flex items-center gap-4">
@@ -474,13 +455,60 @@ export default function LiveDirectDisplayRoom({
                             صحيحة ✓
                           </span>
                         )}
-                        <span className="text-sm sm:text-base font-bold text-slate-300">
-                          {voteCount} ({percentage}%)
-                        </span>
+                        {Boolean(sessionState.showOptionCountsInRoom) && (
+                          <span className="text-sm sm:text-base font-bold text-slate-300 animate-in fade-in">
+                            {voteCount} ({percentage}%)
+                          </span>
+                        )}
                       </div>
                     </div>
                   );
                 })}
+              </div>
+            )}
+
+            {/* Live stream list of student submissions - controlled via Admin (مخفي افتراضياً) */}
+            {Boolean(sessionState?.showStudentTextAnswersInRoom) && (
+              <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-4 sm:p-5 max-h-64 overflow-y-auto space-y-2 mt-4 text-right shadow-xl animate-in fade-in">
+                <div className="text-xs font-bold text-slate-400 mb-2 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5 text-indigo-400">
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>إجابات الطلاب المستلمة فورياً ({Object.keys(currentAnswers).length}):</span>
+                  </span>
+                  <span className="text-[10px] text-slate-500 font-mono">تحديث فوري متزامن</span>
+                </div>
+                {Object.keys(currentAnswers).length === 0 ? (
+                  <p className="text-xs text-slate-500 py-4 text-center">في انتظار إجابات الطلاب من أجهزتهم...</p>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {Object.values(currentAnswers).map((sub, sIdx) => {
+                      const evalSub = sessionState.status === 'revealed' ? evaluateLiveAnswer(currentQ, sub.answer) : null;
+                      return (
+                        <div
+                          key={sIdx}
+                          className="p-2.5 bg-slate-950/70 border border-slate-800 rounded-xl flex items-center justify-between gap-2"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="w-6 h-6 rounded-lg bg-indigo-600/20 text-indigo-300 font-bold text-[10px] flex items-center justify-center shrink-0">
+                              {sub.sheetNumber || sIdx + 1}
+                            </span>
+                            <span className="text-xs font-bold text-slate-200 truncate">{sub.username}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <span className="text-xs font-mono font-bold text-amber-300 max-w-[130px] truncate">{sub.answer}</span>
+                            {evalSub && evalSub.isCorrect !== null && (
+                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                evalSub.isCorrect ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
+                              }`}>
+                                {evalSub.isCorrect ? '✓' : '✗'}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
           </motion.div>

@@ -66,6 +66,12 @@ import {
   clearAllStudentMessages,
   sendTeacherBroadcastMessage,
   toggleShowChatInRoom,
+  toggleShowPinInRoom,
+  toggleShowQrInRoom,
+  toggleShowConnectedCountInRoom,
+  toggleShowOptionCountsInRoom,
+  toggleShowStudentTextAnswersInRoom,
+  leaveLiveSession,
   formatSecondsToTime,
   formatDriveImageUrl,
   setupLiveDirectSheetsApi,
@@ -121,6 +127,18 @@ export default function LiveDirectManager({
 
   // Teaching Active Question preview
   const [previewQuestionIndex, setPreviewQuestionIndex] = useState<number>(0);
+
+  // Room projector visibility update states
+  const [isUpdatingPinVisibility, setIsUpdatingPinVisibility] = useState(false);
+  const [isUpdatingQrVisibility, setIsUpdatingQrVisibility] = useState(false);
+  const [isUpdatingConnectedCountVisibility, setIsUpdatingConnectedCountVisibility] = useState(false);
+  const [isUpdatingChatVisibility, setIsUpdatingChatVisibility] = useState(false);
+  const [isUpdatingOptionCountsVisibility, setIsUpdatingOptionCountsVisibility] = useState(false);
+  const [isUpdatingStudentAnswersVisibility, setIsUpdatingStudentAnswersVisibility] = useState(false);
+
+  // Student list search & Unanswered filter
+  const [studentSearch, setStudentSearch] = useState('');
+  const [filterUnansweredOnly, setFilterUnansweredOnly] = useState(false);
 
   // Notice timer
   const showNotice = (text: string, type: 'success' | 'error' | 'info' = 'success') => {
@@ -231,6 +249,96 @@ export default function LiveDirectManager({
       showNotice('فشل توليد رمز جديد', 'error');
     } finally {
       setIsRegeneratingPin(false);
+    }
+  };
+
+  // Toggle PIN display on projector display room screen
+  const handleTogglePinVisibility = async (show: boolean) => {
+    setIsUpdatingPinVisibility(true);
+    try {
+      const res = await toggleShowPinInRoom(show);
+      if (res.success && res.state) setSessionState(res.state);
+    } catch (e) {
+      console.error('Failed to toggle PIN visibility in room:', e);
+    } finally {
+      setIsUpdatingPinVisibility(false);
+    }
+  };
+
+  // Toggle QR code display on projector display room screen
+  const handleToggleQrVisibility = async (show: boolean) => {
+    setIsUpdatingQrVisibility(true);
+    try {
+      const res = await toggleShowQrInRoom(show);
+      if (res.success && res.state) setSessionState(res.state);
+    } catch (e) {
+      console.error('Failed to toggle QR visibility in room:', e);
+    } finally {
+      setIsUpdatingQrVisibility(false);
+    }
+  };
+
+  // Toggle connected students count on projector display room screen
+  const handleToggleConnectedCountVisibility = async (show: boolean) => {
+    setIsUpdatingConnectedCountVisibility(true);
+    try {
+      const res = await toggleShowConnectedCountInRoom(show);
+      if (res.success && res.state) setSessionState(res.state);
+    } catch (e) {
+      console.error('Failed to toggle connected count visibility in room:', e);
+    } finally {
+      setIsUpdatingConnectedCountVisibility(false);
+    }
+  };
+
+  // Toggle chat modal on projector display room screen
+  const handleToggleChatVisibility = async (show: boolean) => {
+    setIsUpdatingChatVisibility(true);
+    try {
+      const res = await toggleShowChatInRoom(show);
+      if (res.success && res.state) setSessionState(res.state);
+    } catch (e) {
+      console.error('Failed to toggle chat visibility in room:', e);
+    } finally {
+      setIsUpdatingChatVisibility(false);
+    }
+  };
+
+  // Toggle option vote counts on projector display room screen
+  const handleToggleOptionCountsVisibility = async (show: boolean) => {
+    setIsUpdatingOptionCountsVisibility(true);
+    try {
+      const res = await toggleShowOptionCountsInRoom(show);
+      if (res.success && res.state) setSessionState(res.state);
+    } catch (e) {
+      console.error('Failed to toggle option counts visibility:', e);
+    } finally {
+      setIsUpdatingOptionCountsVisibility(false);
+    }
+  };
+
+  // Toggle student text answers on projector display room screen
+  const handleToggleStudentAnswersVisibility = async (show: boolean) => {
+    setIsUpdatingStudentAnswersVisibility(true);
+    try {
+      const res = await toggleShowStudentTextAnswersInRoom(show);
+      if (res.success && res.state) setSessionState(res.state);
+    } catch (e) {
+      console.error('Failed to toggle student answers visibility:', e);
+    } finally {
+      setIsUpdatingStudentAnswersVisibility(false);
+    }
+  };
+
+  // Remove a student from live session
+  const handleRemoveStudent = async (username: string, sheetNumber?: string) => {
+    if (!confirm(`هل أنت متأكد من حذف الطالب "${username}" من الحصة المباشرة؟`)) return;
+    try {
+      await leaveLiveSession(username, sheetNumber);
+      showNotice(`تم إخراج الطالب ${username} من الحصة بنجاح`, 'info');
+    } catch (err: any) {
+      console.error('Failed to remove student:', err);
+      showNotice('تعذر حذف الطالب', 'error');
     }
   };
 
@@ -867,14 +975,30 @@ export default function LiveDirectManager({
                 </div>
               </div>
               <div className="flex items-center gap-2 w-full md:w-auto justify-end flex-wrap">
-                <button
-                  type="button"
-                  onClick={() => setShowQrModal(true)}
-                  className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-amber-400 border border-amber-500/30 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
-                >
-                  <QrCode className="w-4 h-4" />
-                  <span>رمز QR</span>
-                </button>
+                <div className="flex items-center gap-1 bg-slate-900 border border-amber-500/30 p-1 rounded-xl">
+                  <button
+                    type="button"
+                    onClick={() => setShowQrModal(true)}
+                    className="px-2.5 py-1 text-amber-400 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer hover:text-amber-300"
+                    title="معاينة رمز QR"
+                  >
+                    <QrCode className="w-4 h-4" />
+                    <span>رمز QR</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleQrVisibility(!sessionState?.showQrInRoom)}
+                    disabled={isUpdatingQrVisibility}
+                    title={sessionState?.showQrInRoom ? 'إخفاء رمز QR من شاشة العرض' : 'إظهار رمز QR في شاشة العرض'}
+                    className={`p-1.5 rounded-lg transition-all cursor-pointer border ${
+                      sessionState?.showQrInRoom
+                        ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
+                        : 'bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border-slate-800'
+                    }`}
+                  >
+                    {sessionState?.showQrInRoom ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
                 <button
                   type="button"
                   onClick={handleToggleProgram}
@@ -908,11 +1032,11 @@ export default function LiveDirectManager({
                 </select>
               </div>
 
-              {/* Status Chips */}
+              {/* Status Chips with Eye toggles */}
               <div className="flex items-center gap-2 flex-wrap">
-                {/* PIN Badge */}
+                {/* PIN Badge with Eye toggle (افتراضياً مخفي عن شاشة العرض) */}
                 {sessionState?.sessionPin && (
-                  <div className="flex items-center gap-1.5 bg-slate-950 border border-amber-500/30 px-3 py-1.5 rounded-xl font-mono text-xs">
+                  <div className="flex items-center gap-1.5 bg-slate-950 border border-amber-500/30 px-2.5 py-1.5 rounded-xl font-mono text-xs">
                     <span className="text-slate-400">PIN:</span>
                     <span className="font-bold text-amber-300">{sessionState.sessionPin}</span>
                     <button onClick={handleCopyPin} title="نسخ الرمز" className="p-1 hover:text-amber-400">
@@ -921,27 +1045,100 @@ export default function LiveDirectManager({
                     <button onClick={handleRegeneratePin} title="توليد رمز جديد" className="p-1 hover:text-amber-400">
                       <RefreshCw className={`w-3.5 h-3.5 ${isRegeneratingPin ? 'animate-spin' : ''}`} />
                     </button>
+                    {/* أيقونة العين لإظهار/إخفاء الرمز في شاشة العرض */}
+                    <button
+                      type="button"
+                      onClick={() => handleTogglePinVisibility(!sessionState?.showPinInRoom)}
+                      disabled={isUpdatingPinVisibility}
+                      title={sessionState?.showPinInRoom ? 'إخفاء الرمز من شاشة العرض' : 'إظهار الرمز في شاشة العرض'}
+                      className={`p-1 rounded-lg transition-all cursor-pointer border ${
+                        sessionState?.showPinInRoom
+                          ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
+                          : 'bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border-slate-800'
+                      }`}
+                    >
+                      {sessionState?.showPinInRoom ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                    </button>
                   </div>
                 )}
 
-                {/* Connected Students Counter */}
-                <div className="flex items-center gap-1.5 bg-slate-950 border border-indigo-500/30 px-3 py-1.5 rounded-xl text-xs font-bold text-indigo-300">
-                  <Users className="w-3.5 h-3.5 text-indigo-400" />
-                  <span>المتصلون: {(sessionState?.connectedStudents || []).length}</span>
+                {/* QR Code Button with Eye toggle (افتراضياً مخفي عن شاشة العرض) */}
+                <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 p-1 rounded-xl shadow-sm">
+                  <button
+                    type="button"
+                    onClick={() => setShowQrModal(true)}
+                    className="px-2.5 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 font-bold rounded-lg text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                    title="معاينة رمز QR"
+                  >
+                    <QrCode className="w-3.5 h-3.5" />
+                    <span>رمز QR</span>
+                  </button>
+                  {/* أيقونة العين لإظهار/إخفاء رمز QR في شاشة العرض */}
+                  <button
+                    type="button"
+                    onClick={() => handleToggleQrVisibility(!sessionState?.showQrInRoom)}
+                    disabled={isUpdatingQrVisibility}
+                    title={sessionState?.showQrInRoom ? 'إخفاء رمز QR من شاشة العرض' : 'إظهار رمز QR في شاشة العرض'}
+                    className={`p-1 rounded-lg transition-all cursor-pointer border ${
+                      sessionState?.showQrInRoom
+                        ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
+                        : 'bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border-slate-800'
+                    }`}
+                  >
+                    {sessionState?.showQrInRoom ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                  </button>
                 </div>
 
-                {/* Chat Modal Button */}
-                <button
-                  type="button"
-                  onClick={() => setShowChatModal(true)}
-                  className="px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-600/30 hover:bg-indigo-600 text-indigo-200 border border-indigo-500/40 flex items-center gap-1.5 transition-all cursor-pointer"
-                >
-                  <MessageSquare className="w-3.5 h-3.5" />
-                  <span>المحادثة</span>
-                  <span className="px-1.5 py-0.2 rounded-full bg-slate-800 text-[10px] font-mono">
-                    {(sessionState?.messages || []).length}
-                  </span>
-                </button>
+                {/* Connected Students Counter with Eye toggle (افتراضياً مخفي عن شاشة العرض) */}
+                <div className="flex items-center gap-1.5 bg-slate-950 border border-indigo-500/30 p-1 rounded-xl shadow-sm">
+                  <div className="px-2 py-0.5 text-xs font-bold text-indigo-300 flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>المتصلون: {(sessionState?.connectedStudents || []).length}</span>
+                  </div>
+                  {/* أيقونة العين لإظهار/إخفاء عدد المتصلين في شاشة العرض */}
+                  <button
+                    type="button"
+                    onClick={() => handleToggleConnectedCountVisibility(!sessionState?.showConnectedCountInRoom)}
+                    disabled={isUpdatingConnectedCountVisibility}
+                    title={sessionState?.showConnectedCountInRoom ? 'إخفاء عدد المتصلين من شاشة العرض' : 'إظهار عدد المتصلين في شاشة العرض'}
+                    className={`p-1 rounded-lg transition-all cursor-pointer border ${
+                      sessionState?.showConnectedCountInRoom
+                        ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
+                        : 'bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border-slate-800'
+                    }`}
+                  >
+                    {sessionState?.showConnectedCountInRoom ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+
+                {/* Chat Modal Button with Eye toggle (افتراضياً مخفي عن شاشة العرض) */}
+                <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 p-1 rounded-xl shadow-sm">
+                  <button
+                    type="button"
+                    onClick={() => setShowChatModal(true)}
+                    className="px-2.5 py-1 rounded-lg text-xs font-bold bg-indigo-600/30 hover:bg-indigo-600 text-indigo-200 border border-indigo-500/40 flex items-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5" />
+                    <span>المحادثة</span>
+                    <span className="px-1.5 py-0.2 rounded-full bg-slate-800 text-[10px] font-mono">
+                      {(sessionState?.messages || []).length}
+                    </span>
+                  </button>
+                  {/* أيقونة العين لإظهار/إخفاء المحادثة في شاشة العرض */}
+                  <button
+                    type="button"
+                    onClick={() => handleToggleChatVisibility(!sessionState?.showChatInRoom)}
+                    disabled={isUpdatingChatVisibility}
+                    title={sessionState?.showChatInRoom ? 'إخفاء المحادثة من شاشة العرض' : 'إظهار المحادثة في شاشة العرض'}
+                    className={`p-1 rounded-lg transition-all cursor-pointer border ${
+                      sessionState?.showChatInRoom
+                        ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
+                        : 'bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border-slate-800'
+                    }`}
+                  >
+                    {sessionState?.showChatInRoom ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -1028,6 +1225,304 @@ export default function LiveDirectManager({
                 </div>
               </div>
             </div>
+
+            {/* Real-time Interactive Controls Bar (أعداد الخيارات، إجابات الطلاب، الذين لم يجاوبوا، البحث) */}
+            <div className="pt-3 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3">
+              {/* Search Bar + Unanswered Filter Button */}
+              <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[280px] max-w-xl">
+                <div className="relative flex-1 min-w-[180px]">
+                  <Search className="w-4 h-4 text-slate-500 absolute right-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={studentSearch}
+                    onChange={(e) => setStudentSearch(e.target.value)}
+                    placeholder="بحث باسم الطالب أو رقم المشترك..."
+                    className="w-full pr-10 pl-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 placeholder-slate-500 outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                {/* زر إظهار الذين لم يجيبوا */}
+                {(() => {
+                  const answersMap = sessionState?.answersForCurrentQuestion || {};
+                  const answeredUsers = new Set(
+                    Object.values(answersMap)
+                      .map(sub => String(sub.username || '').trim().toLowerCase())
+                      .filter(Boolean)
+                  );
+                  const totalCount = sessionState?.connectedStudents?.length || 0;
+                  const unansweredCount = Math.max(0, totalCount - answeredUsers.size);
+
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => setFilterUnansweredOnly(prev => !prev)}
+                      className={`px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border shrink-0 ${
+                        filterUnansweredOnly
+                          ? 'bg-amber-500 text-slate-950 border-amber-400 font-black shadow-lg shadow-amber-500/20 ring-2 ring-amber-300'
+                          : 'bg-slate-950 hover:bg-slate-850 text-slate-300 hover:text-white border-slate-800'
+                      }`}
+                      title={filterUnansweredOnly ? 'إلغاء الفلتر وعرض جميع الطلاب' : 'إظهار المشتركين الذين لم يجيبوا فقط'}
+                    >
+                      <Clock className={`w-3.5 h-3.5 ${filterUnansweredOnly ? 'text-slate-950' : 'text-amber-400'}`} />
+                      <span>{filterUnansweredOnly ? 'عرض الجميع' : 'الذين لم يجيبوا'}</span>
+                      <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-mono font-black ${
+                        filterUnansweredOnly ? 'bg-slate-950 text-amber-400' : 'bg-slate-800 text-slate-300'
+                      }`}>
+                        {unansweredCount}
+                      </span>
+                    </button>
+                  );
+                })()}
+              </div>
+
+              {/* أزرار التحكم في إظهار وإخفاء عناصر الإجابات في شاشة العرض (أعداد الخيارات + إجابات الطلاب) */}
+              <div className="flex flex-wrap items-center gap-2">
+                {/* 1. زر إظهار/إخفاء عدد المصوتين بالخيارات (افتراضياً مخفي) */}
+                <button
+                  type="button"
+                  onClick={() => handleToggleOptionCountsVisibility(!sessionState?.showOptionCountsInRoom)}
+                  disabled={isUpdatingOptionCountsVisibility}
+                  title={sessionState?.showOptionCountsInRoom ? 'عدد المصوتين بالخيارات ظاهر بشاشة العرض - انقر للإخفاء' : 'عدد المصوتين بالخيارات مخفي بشاشة العرض - انقر للإظهار'}
+                  className={`px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border shadow-sm ${
+                    sessionState?.showOptionCountsInRoom
+                      ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25'
+                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {sessionState?.showOptionCountsInRoom ? (
+                    <>
+                      <Eye className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>أعداد الخيارات: إظهار</span>
+                    </>
+                  ) : (
+                    <>
+                      <EyeOff className="w-3.5 h-3.5 text-slate-500" />
+                      <span>أعداد الخيارات: إخفاء</span>
+                    </>
+                  )}
+                </button>
+
+                {/* 2. زر إظهار/إخفاء نصوص إجابات الطلاب بشاشة العرض (افتراضياً مخفي) */}
+                <button
+                  type="button"
+                  onClick={() => handleToggleStudentAnswersVisibility(!sessionState?.showStudentTextAnswersInRoom)}
+                  disabled={isUpdatingStudentAnswersVisibility}
+                  title={sessionState?.showStudentTextAnswersInRoom ? 'نصوص وإجابات الطلاب معروضة بشاشة العرض - انقر للإخفاء' : 'نصوص وإجابات الطلاب مخفية بشاشة العرض - انقر للإظهار'}
+                  className={`px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border shadow-sm ${
+                    sessionState?.showStudentTextAnswersInRoom
+                      ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25'
+                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {sessionState?.showStudentTextAnswersInRoom ? (
+                    <>
+                      <Eye className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>إجابات الطلاب: إظهار</span>
+                    </>
+                  ) : (
+                    <>
+                      <EyeOff className="w-3.5 h-3.5 text-slate-500" />
+                      <span>إجابات الطلاب: إخفاء</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Response Meter Badge Card */}
+            {(() => {
+              const currentQ = sessionState?.currentQuestion;
+              const answersMap = sessionState?.answersForCurrentQuestion || {};
+              const uniqueAnsweredUsers = new Set(
+                Object.values(answersMap)
+                  .map(sub => String(sub.username || '').trim().toLowerCase())
+                  .filter(Boolean)
+              );
+              const totalStudentsCount = sessionState?.connectedStudents?.length || 0;
+              const answeredCount = uniqueAnsweredUsers.size;
+              const answerPercentage = totalStudentsCount > 0 
+                ? Math.min(100, Math.round((answeredCount / totalStudentsCount) * 100)) 
+                : 0;
+
+              return (
+                <div className="bg-slate-950/70 border border-slate-800/80 rounded-2xl p-4 shadow-inner">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-lg bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center font-black text-xs font-mono">
+                          {(sessionState?.currentQuestionIndex ?? 0) + 1}
+                        </span>
+                        <span className="text-xs font-bold text-amber-400">
+                          {sessionState?.status === 'question_active' 
+                            ? '⚡ سؤال تفاعلي نشط معروض على الشاشة وأجهزة الطلاب' 
+                            : sessionState?.status === 'revealed'
+                            ? '🎯 تم كشف الإجابة النموذجية'
+                            : 'متابعة إجابات وتفاعل الطلاب على الأسئلة الحية'}
+                        </span>
+                      </div>
+                      <h4 className="text-xs sm:text-sm font-bold text-slate-200 line-clamp-1">
+                        {currentQ ? currentQ.question : (selectedLessonTitle ? `الدرس: ${selectedLessonTitle}` : 'في انتظار طرح سؤال من بنك الأسئلة...')}
+                      </h4>
+                    </div>
+
+                    {/* Progress Percentage Badge */}
+                    <div className="flex items-center gap-3 bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 self-start sm:self-auto">
+                      <div className="text-right">
+                        <div className="text-[10px] font-bold text-slate-400">إجابات الطلاب</div>
+                        <div className="text-sm font-black text-emerald-400 font-mono">
+                          {answeredCount} / {totalStudentsCount} طالب
+                        </div>
+                      </div>
+                      <div className="w-10 h-10 relative flex items-center justify-center">
+                        <svg className="w-10 h-10 -rotate-90" viewBox="0 0 36 36">
+                          <path
+                            className="text-slate-800"
+                            strokeWidth="3.5"
+                            stroke="currentColor"
+                            fill="none"
+                            d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                          />
+                          <path
+                            className="text-emerald-500 transition-all duration-500 ease-out"
+                            strokeDasharray={`${answerPercentage}, 100`}
+                            strokeWidth="3.5"
+                            strokeLinecap="round"
+                            stroke="currentColor"
+                            fill="none"
+                            d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                          />
+                        </svg>
+                        <span className="absolute text-[10px] font-black font-mono text-slate-200">
+                          {answerPercentage}%
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Live Students Responses List */}
+            {(() => {
+              const answersMap = sessionState?.answersForCurrentQuestion || {};
+              const currentQ = sessionState?.currentQuestion;
+              const list = (sessionState?.connectedStudents || []).filter(s => {
+                const studentKey = s.sheetNumber ? `${s.username}_${s.sheetNumber}` : s.username;
+                const ansObj = answersMap[studentKey] || 
+                               answersMap[s.username] || 
+                               answersMap[`${s.username}_${s.sheetNumber || ''}`] ||
+                               Object.values(answersMap).find(sub => String(sub.username || '').trim().toLowerCase() === s.username.trim().toLowerCase());
+                const hasAnswered = Boolean(ansObj);
+
+                if (filterUnansweredOnly && hasAnswered) {
+                  return false;
+                }
+
+                if (!studentSearch.trim()) return true;
+                const q = studentSearch.toLowerCase();
+                return s.username.toLowerCase().includes(q) || (s.sheetNumber && s.sheetNumber.includes(q));
+              });
+
+              if (list.length === 0) {
+                return (
+                  <div className="bg-slate-950/60 border border-slate-800/80 rounded-2xl p-6 text-center space-y-2">
+                    <div className="w-10 h-10 rounded-xl bg-slate-800/60 text-slate-500 mx-auto flex items-center justify-center">
+                      {filterUnansweredOnly ? <CheckCircle2 className="w-5 h-5 text-emerald-400" /> : <Users className="w-5 h-5" />}
+                    </div>
+                    <div>
+                      <h4 className="text-xs sm:text-sm font-bold text-slate-300">
+                        {filterUnansweredOnly
+                          ? '🎉 جميع الطلاب المتصلين قاموا بالإجابة على السؤال الحالي!'
+                          : studentSearch
+                          ? 'لم يتم العثور على طالب يطابق البحث'
+                          : 'لا يوجد طلاب متصلون حالياً بالحصة'}
+                      </h4>
+                      {filterUnansweredOnly && (
+                        <button
+                          onClick={() => setFilterUnansweredOnly(false)}
+                          className="mt-2 px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-lg transition-all inline-flex items-center gap-1.5 cursor-pointer"
+                        >
+                          عرض جميع الطلاب ({(sessionState?.connectedStudents || []).length})
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="bg-slate-950 border border-slate-800/80 rounded-2xl overflow-hidden shadow-lg divide-y divide-slate-800/70 max-h-72 overflow-y-auto">
+                  {list.map((student, idx) => {
+                    const studentKey = student.sheetNumber ? `${student.username}_${student.sheetNumber}` : student.username;
+                    const ansObj = answersMap[studentKey] || 
+                                   answersMap[student.username] || 
+                                   answersMap[`${student.username}_${student.sheetNumber || ''}`] ||
+                                   Object.values(answersMap).find(s => String(s.username || '').trim().toLowerCase() === student.username.trim().toLowerCase());
+                    const hasAnswered = Boolean(ansObj);
+                    const evalSub = (hasAnswered && currentQ && sessionState?.status === 'revealed')
+                      ? evaluateLiveAnswer(currentQ, ansObj.answer)
+                      : null;
+
+                    return (
+                      <div
+                        key={idx}
+                        className="px-3.5 py-2.5 sm:py-3 flex items-center justify-between gap-3 hover:bg-slate-900/60 transition-colors"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                          <span className="w-6 h-6 rounded-lg bg-slate-800 text-slate-300 flex items-center justify-center font-bold text-[11px] font-mono shrink-0">
+                            {idx + 1}
+                          </span>
+                          <span className="font-bold text-xs sm:text-sm text-slate-100 truncate">
+                            {student.username}
+                          </span>
+                          <span className="font-mono font-bold text-[11px] text-slate-400 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 shrink-0">
+                            {student.sheetNumber || '-'}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <div className="flex items-center justify-center p-0.5" title="متصل الآن">
+                            <span className="relative flex h-2 w-2">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                            </span>
+                          </div>
+
+                          {hasAnswered ? (
+                            <div className="flex items-center gap-1.5">
+                              <span className="px-2 py-0.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-bold flex items-center gap-1">
+                                <CheckCircle2 className="w-3 h-3" />
+                                <span>الإجابة: <b className="font-mono text-white mr-0.5">{ansObj.answer}</b></span>
+                              </span>
+                              {evalSub && evalSub.isCorrect !== null && (
+                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                  evalSub.isCorrect ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'
+                                }`}>
+                                  {evalSub.isCorrect ? '✓ صحيح' : '✗ خطأ'}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-bold flex items-center gap-1">
+                              <Clock className="w-3 h-3" />
+                              <span>في انتظار الإجابة</span>
+                            </span>
+                          )}
+
+                          <button
+                            onClick={() => handleRemoveStudent(student.username, student.sheetNumber)}
+                            title="حذف المشترك من الحصة"
+                            className="p-1 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded transition-all cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
 
           {/* Interactive Questions Launchpad */}

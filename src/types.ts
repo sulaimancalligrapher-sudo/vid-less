@@ -264,6 +264,7 @@ export interface LiveSessionState {
   showOptionCountsInRoom?: boolean; // Controls whether answer counts on options appear on projector display screen
   showStudentTextAnswersInRoom?: boolean; // Controls whether student text answers appear on projector display screen
   showChatInRoom?: boolean; // Controls whether chat window / badge appears on projector display screen
+  showConnectedCountInRoom?: boolean; // Controls whether connected students badge appears on projector display screen
   messages?: LiveStudentMessage[]; // Live list of questions and reactions from students
   lessonTitle: string;
   videoUrl: string;

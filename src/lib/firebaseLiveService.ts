@@ -34,6 +34,7 @@ export const defaultLiveSessionState: LiveSessionState = {
   showOptionCountsInRoom: false,
   showStudentTextAnswersInRoom: false,
   showChatInRoom: false,
+  showConnectedCountInRoom: false,
   messages: [],
   lessonTitle: '',
   videoUrl: '',
@@ -86,6 +87,7 @@ export function subscribeToLiveSession(
           showOptionCountsInRoom: Boolean(data.showOptionCountsInRoom),
           showStudentTextAnswersInRoom: Boolean(data.showStudentTextAnswersInRoom),
           showChatInRoom: Boolean(data.showChatInRoom),
+          showConnectedCountInRoom: Boolean(data.showConnectedCountInRoom),
           messages: Array.isArray(data.messages) ? data.messages : [],
           lessonTitle: data.lessonTitle || '',
           videoUrl: data.videoUrl || '',
@@ -142,6 +144,8 @@ export async function getLiveSessionState(): Promise<LiveSessionState | null> {
         videoPlaying: Boolean(data.videoPlaying),
         showOptionCountsInRoom: Boolean(data.showOptionCountsInRoom),
         showStudentTextAnswersInRoom: Boolean(data.showStudentTextAnswersInRoom),
+        showChatInRoom: Boolean(data.showChatInRoom),
+        showConnectedCountInRoom: Boolean(data.showConnectedCountInRoom),
         lessonTitle: data.lessonTitle || '',
         videoUrl: data.videoUrl || '',
         status: data.status || 'idle',
@@ -1005,6 +1009,21 @@ export async function toggleShowChatInRoom(show: boolean): Promise<{ success: bo
     return { success: true, state: cachedState };
   } catch (error: any) {
     console.error('Failed to toggle showChatInRoom in Firebase:', error);
+    return { success: false };
+  }
+}
+
+// Toggle showing connected students badge on projector display screen
+export async function toggleShowConnectedCountInRoom(show: boolean): Promise<{ success: boolean; state?: LiveSessionState }> {
+  try {
+    await updateDoc(LIVE_DOC_REF, {
+      showConnectedCountInRoom: show,
+      updatedAt: serverTimestamp(),
+    });
+    cachedState = { ...cachedState, showConnectedCountInRoom: show };
+    return { success: true, state: cachedState };
+  } catch (error: any) {
+    console.error('Failed to toggle showConnectedCountInRoom in Firebase:', error);
     return { success: false };
   }
 }
