@@ -2047,28 +2047,44 @@ export {
 
 export function formatPdfEmbedUrl(rawUrl: string, page?: number): string {
   if (!rawUrl || !rawUrl.trim()) return '';
-  const trimmed = rawUrl.trim();
+  let trimmed = rawUrl.trim();
 
-  // 1. Google Drive file link detection
-  // Format: https://drive.google.com/file/d/FILE_ID/view... or /preview or id=FILE_ID
+  // 1. Google Docs (مستندات جوجل) -> تحويل تلقائي إلى preview
+  const docsMatch = trimmed.match(/docs\.google\.com\/document\/d\/([a-zA-Z0-9_-]+)/);
+  if (docsMatch && docsMatch[1]) {
+    return `https://docs.google.com/document/d/${docsMatch[1]}/preview`;
+  }
+
+  // 2. Google Slides (عروض جوجل التقديمية) -> تحويل تلقائي إلى preview
+  const slidesMatch = trimmed.match(/docs\.google\.com\/presentation\/d\/([a-zA-Z0-9_-]+)/);
+  if (slidesMatch && slidesMatch[1]) {
+    return `https://docs.google.com/presentation/d/${slidesMatch[1]}/preview`;
+  }
+
+  // 3. Google Sheets (جداول بيانات جوجل) -> تحويل تلقائي إلى preview
+  const sheetsMatch = trimmed.match(/docs\.google\.com\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+  if (sheetsMatch && sheetsMatch[1]) {
+    return `https://docs.google.com/spreadsheets/d/${sheetsMatch[1]}/preview`;
+  }
+
+  // 4. Google Drive File (ملف PDF أو وسائط في Drive) -> تحويل تلقائي إلى preview
   const driveFileMatch = trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
   if (driveFileMatch && driveFileMatch[1]) {
-    const fileId = driveFileMatch[1];
-    return `https://drive.google.com/file/d/${fileId}/preview`;
+    return `https://drive.google.com/file/d/${driveFileMatch[1]}/preview`;
   }
 
   const driveIdParamMatch = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-  if (driveIdParamMatch && driveIdParamMatch[1] && trimmed.includes('drive.google.com')) {
-    const fileId = driveIdParamMatch[1];
-    return `https://drive.google.com/file/d/${fileId}/preview`;
+  if (driveIdParamMatch && driveIdParamMatch[1] && (trimmed.includes('drive.google.com') || trimmed.includes('docs.google.com'))) {
+    return `https://drive.google.com/file/d/${driveIdParamMatch[1]}/preview`;
   }
 
-  // 2. Already an embed or preview or standard url
-  if (trimmed.includes('drive.google.com') && trimmed.includes('/preview')) {
+  // 5. إذا كان الرابط من Google ويحتوي على /edit أو /view يتم استبداله بـ /preview
+  if (trimmed.includes('google.com') && (trimmed.includes('/edit') || trimmed.includes('/view'))) {
+    trimmed = trimmed.replace(/\/edit(\?[^#]*)?/, '/preview').replace(/\/view(\?[^#]*)?/, '/preview');
     return trimmed;
   }
 
-  // 3. Direct PDF file URL with optional page hash
+  // 6. Direct PDF file URL with optional page hash
   if (trimmed.toLowerCase().endsWith('.pdf') || trimmed.includes('.pdf?')) {
     if (page && page > 1) {
       return `${trimmed}#page=${page}`;

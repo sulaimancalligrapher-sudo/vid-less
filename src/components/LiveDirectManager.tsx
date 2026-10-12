@@ -2089,11 +2089,11 @@ export default function LiveDirectManager({
                   </div>
 
                   <a
-                    href={sessionState.pdfUrl}
+                    href={formatPdfEmbedUrl(sessionState.pdfUrl, sessionState.pdfPage)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="p-2 bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-xl transition-all cursor-pointer"
-                    title="فتح الرابط في نافذة جديدة"
+                    title="فتح الرابط في نافذة جديدة (وضع العرض)"
                   >
                     <ExternalLink className="w-4 h-4" />
                   </a>
@@ -2207,11 +2207,11 @@ export default function LiveDirectManager({
                           </button>
 
                           <a
-                            href={item.url}
+                            href={formatPdfEmbedUrl(item.url)}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all"
-                            title="فتح الرابط الأصلي"
+                            title="فتح الرابط في نافذة جديدة (وضع العرض)"
                           >
                             <ExternalLink className="w-3.5 h-3.5" />
                           </a>
