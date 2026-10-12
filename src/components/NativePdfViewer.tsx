@@ -1,18 +1,19 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { pdfjsLib } from '../lib/pdfLib';
+import {
+  pdfjsLib,
+  PDF_CMAP_URL,
+  PDF_CMAP_PACKED,
+  PDF_STANDARD_FONT_DATA_URL,
+} from '../lib/pdfLib';
 import { getPdfFromIndexedDB } from '../lib/pdfStorage';
 import {
   ChevronRight,
   ChevronLeft,
   ZoomIn,
   ZoomOut,
-  Maximize2,
-  RefreshCw,
   AlertCircle,
-  FileText,
   Loader2,
   Palette,
-  Eraser,
   Trash2,
   Sparkles,
 } from 'lucide-react';
@@ -66,7 +67,7 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
   // Drawing tools state (only for teacher)
   const [activeTool, setActiveTool] = useState<'laser' | 'pen' | 'highlighter' | 'eraser' | 'none'>('laser');
   const [penColor, setPenColor] = useState<string>('#ef4444'); // red default
-  const [penWidth, setPenWidth] = useState<number>(3);
+  const [penWidth, setPenWidth] = useState<number>(3.5);
   const [isDrawing, setIsDrawing] = useState<boolean>(false);
   const currentStrokeRef = useRef<Array<{ x: number; y: number }>>([]);
 
@@ -109,6 +110,14 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
       try {
         let loadingTask: any;
 
+        // Base options configuring CMap & fonts to prevent Arabic/Thai character disconnections
+        const baseOptions = {
+          cMapUrl: PDF_CMAP_URL,
+          cMapPacked: PDF_CMAP_PACKED,
+          standardFontDataUrl: PDF_STANDARD_FONT_DATA_URL,
+          enableXfa: true,
+        };
+
         // Check if local file from IndexedDB
         if (pdfUrl.startsWith('local://')) {
           const fileId = pdfUrl.replace('local://', '');
@@ -116,7 +125,10 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
           if (!record || !record.data) {
             throw new Error('لم يتم العثور على الملف المحلي المخزن');
           }
-          loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(record.data) });
+          loadingTask = pdfjsLib.getDocument({
+            ...baseOptions,
+            data: new Uint8Array(record.data),
+          });
         } else if (pdfUrl.startsWith('data:application/pdf;base64,')) {
           // Base64 direct data
           const base64Data = pdfUrl.split(',')[1];
@@ -125,7 +137,10 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
           for (let i = 0; i < rawData.length; i++) {
             uint8Array[i] = rawData.charCodeAt(i);
           }
-          loadingTask = pdfjsLib.getDocument({ data: uint8Array });
+          loadingTask = pdfjsLib.getDocument({
+            ...baseOptions,
+            data: uint8Array,
+          });
         } else {
           // Check if Google Drive link, convert to download/view stream if possible
           let directFetchUrl = pdfUrl;
@@ -135,6 +150,7 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
           }
 
           loadingTask = pdfjsLib.getDocument({
+            ...baseOptions,
             url: directFetchUrl,
             withCredentials: false,
           });
@@ -165,6 +181,51 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
     };
   }, [pdfUrl]);
 
+  // Redraw annotations on the overlay canvas
+  const redrawAnnotations = useCallback(() => {
+    if (!drawingCanvasRef.current) return;
+    const canvas = drawingCanvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const pageStrokes = annotations[currentPage] || [];
+    if (pageStrokes.length === 0) return;
+
+    const w = canvas.width;
+    const h = canvas.height;
+    const dpr = window.devicePixelRatio || 1;
+
+    pageStrokes.forEach((stroke) => {
+      if (!stroke.points || stroke.points.length < 2) return;
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.strokeStyle = stroke.color;
+      ctx.lineWidth = stroke.width * dpr;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      if (stroke.type === 'highlighter') {
+        ctx.globalAlpha = 0.35;
+        ctx.lineWidth = stroke.width * 3 * dpr;
+      } else {
+        ctx.globalAlpha = 0.95;
+      }
+
+      const p0 = stroke.points[0];
+      ctx.moveTo(p0.x * w, p0.y * h);
+
+      for (let i = 1; i < stroke.points.length; i++) {
+        const pt = stroke.points[i];
+        ctx.lineTo(pt.x * w, pt.y * h);
+      }
+      ctx.stroke();
+      ctx.restore();
+    });
+  }, [annotations, currentPage]);
+
   // Render current page onto canvas
   const renderPage = useCallback(async () => {
     if (!pdfDoc || !canvasRef.current || !containerRef.current) return;
@@ -183,9 +244,12 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
       // Base unscaled viewport
       const unscaledViewport = pageObj.getViewport({ scale: 1.0 });
 
-      // Calculate scale to fit container width & height nicely
-      const scaleX = (containerWidth - 32) / unscaledViewport.width;
-      const scaleY = (containerHeight - 32) / unscaledViewport.height;
+      // In readOnly presentation mode (Projector Display Room), utilize 100% full screen
+      // without extra margins or padding, filling maximum available stage area
+      const marginH = readOnly ? 8 : 24;
+      const marginV = readOnly ? 8 : 40;
+      const scaleX = Math.max(0.1, (containerWidth - marginH) / unscaledViewport.width);
+      const scaleY = Math.max(0.1, (containerHeight - marginV) / unscaledViewport.height);
       const fitScale = Math.min(scaleX, scaleY) * zoomScale;
       const finalScale = Math.max(fitScale, 0.4);
 
@@ -198,7 +262,7 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
       canvas.style.width = `${Math.floor(viewport.width)}px`;
       canvas.style.height = `${Math.floor(viewport.height)}px`;
 
-      // Also match drawing overlay canvas
+      // Match drawing overlay canvas exactly
       if (drawingCanvasRef.current) {
         const dCanvas = drawingCanvasRef.current;
         dCanvas.width = canvas.width;
@@ -223,7 +287,7 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
     } catch (renderErr) {
       console.warn('PDF Page render interrupted or failed:', renderErr);
     }
-  }, [pdfDoc, currentPage, totalPages, zoomScale]);
+  }, [pdfDoc, currentPage, totalPages, zoomScale, readOnly, redrawAnnotations]);
 
   // Trigger page render on state changes or window resize
   useEffect(() => {
@@ -236,50 +300,7 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
     return () => window.removeEventListener('resize', handleResize);
   }, [renderPage]);
 
-  // Redraw annotations on the overlay canvas
-  const redrawAnnotations = useCallback(() => {
-    if (!drawingCanvasRef.current) return;
-    const canvas = drawingCanvasRef.current;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    const pageStrokes = annotations[currentPage] || [];
-    if (pageStrokes.length === 0) return;
-
-    const w = canvas.width;
-    const h = canvas.height;
-
-    pageStrokes.forEach((stroke) => {
-      if (!stroke.points || stroke.points.length < 2) return;
-
-      ctx.save();
-      ctx.beginPath();
-      ctx.strokeStyle = stroke.color;
-      ctx.lineWidth = stroke.width * (window.devicePixelRatio || 1);
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-
-      if (stroke.type === 'highlighter') {
-        ctx.globalAlpha = 0.35;
-        ctx.lineWidth = stroke.width * 3 * (window.devicePixelRatio || 1);
-      } else {
-        ctx.globalAlpha = 0.95;
-      }
-
-      const p0 = stroke.points[0];
-      ctx.moveTo(p0.x * w, p0.y * h);
-
-      for (let i = 1; i < stroke.points.length; i++) {
-        const pt = stroke.points[i];
-        ctx.lineTo(pt.x * w, pt.y * h);
-      }
-      ctx.stroke();
-      ctx.restore();
-    });
-  }, [annotations, currentPage]);
-
+  // Redraw annotations whenever annotations prop or currentPage changes
   useEffect(() => {
     redrawAnnotations();
   }, [redrawAnnotations]);
@@ -305,14 +326,14 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
   const getNormalizedCoords = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     if (!drawingCanvasRef.current) return { x: 0, y: 0 };
     const rect = drawingCanvasRef.current.getBoundingClientRect();
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    const clientX = 'touches' in e && e.touches.length > 0 ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
+    const clientY = 'touches' in e && e.touches.length > 0 ? e.touches[0].clientY : (e as React.MouseEvent).clientY;
     const x = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     const y = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
     return { x, y };
   };
 
-  const handlePointerDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handlePointerDown = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     if (readOnly || !isTeacherControl) return;
 
     if (activeTool === 'laser') {
@@ -330,7 +351,7 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
     }
   };
 
-  const handlePointerMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handlePointerMove = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     if (readOnly || !isTeacherControl) return;
 
     if (activeTool === 'laser') {
@@ -360,6 +381,8 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
           if (activeTool === 'highlighter') {
             ctx.globalAlpha = 0.35;
             ctx.lineWidth = penWidth * 3 * (window.devicePixelRatio || 1);
+          } else {
+            ctx.globalAlpha = 0.95;
           }
 
           const pts = currentStrokeRef.current;
@@ -425,7 +448,9 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
   return (
     <div
       ref={containerRef}
-      className="relative w-full h-full flex flex-col items-center justify-between overflow-hidden bg-slate-950 select-none text-slate-100"
+      className={`relative w-full h-full flex flex-col items-center justify-between overflow-hidden bg-slate-950 select-none text-slate-100 ${
+        readOnly ? 'p-0' : ''
+      }`}
     >
       {/* Top Floating Teacher Control Bar (if teacher control mode) */}
       {isTeacherControl && !readOnly && (
@@ -526,7 +551,7 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
       )}
 
       {/* Main Canvas Presentation Viewport */}
-      <div className="relative flex-1 w-full h-full flex items-center justify-center overflow-auto p-2">
+      <div className={`relative flex-1 w-full h-full flex items-center justify-center overflow-auto ${readOnly ? 'p-0' : 'p-2'}`}>
         {loading && (
           <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-slate-950/80 backdrop-blur-sm">
             <Loader2 className="w-10 h-10 text-emerald-400 animate-spin" />
@@ -540,13 +565,13 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
             <div className="text-base font-bold text-rose-200 mb-1">تعذر فتح ملف الـ PDF</div>
             <div className="text-xs text-rose-300 mb-4">{errorMsg}</div>
             <div className="text-xs text-slate-400 bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
-              💡 نصيحة: يمكنك رفع ملف الـ PDF مباشرة من جهازك عبر زر "رفع ملف PDF"، ليعمل بأقصى سرعة وبدون قيود.
+              💡 نصيحة: يمكنك رفع ملف الـ PDF مباشرة من جهازك عبر زر &quot;رفع ملف PDF&quot;، ليعمل بأقصى سرعة وبدون قيود.
             </div>
           </div>
         )}
 
         {/* PDF Render Canvas & Overlay Wrapper */}
-        <div className="relative shadow-2xl rounded-lg overflow-hidden border border-slate-800 bg-white">
+        <div className="relative shadow-2xl rounded-lg overflow-hidden border border-slate-800 bg-white leading-none">
           <canvas ref={canvasRef} className="block pointer-events-none" />
 
           {/* Realtime Drawing / Laser Interaction Overlay Canvas */}
@@ -556,7 +581,11 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
             onMouseMove={handlePointerMove}
             onMouseUp={handlePointerUp}
             onMouseLeave={handlePointerUp}
-            className={`absolute inset-0 z-10 ${
+            onTouchStart={handlePointerDown}
+            onTouchMove={handlePointerMove}
+            onTouchEnd={handlePointerUp}
+            onTouchCancel={handlePointerUp}
+            className={`absolute inset-0 z-10 touch-none ${
               readOnly
                 ? 'pointer-events-none'
                 : activeTool === 'laser'
@@ -585,45 +614,47 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
         </div>
       </div>
 
-      {/* Floating Bottom Navigation Controls (Page Navigator) */}
-      <div className="sticky bottom-2 z-30 flex items-center gap-3 px-5 py-2 bg-slate-900/90 backdrop-blur-md rounded-2xl border border-slate-800 shadow-xl">
-        <button
-          type="button"
-          onClick={handlePrevPage}
-          disabled={currentPage <= 1 || readOnly}
-          className={`flex items-center gap-1 px-3 py-1.5 rounded-xl font-bold text-xs transition-all ${
-            currentPage <= 1 || readOnly
-              ? 'opacity-30 cursor-not-allowed bg-slate-800 text-slate-500'
-              : 'bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer shadow-md shadow-emerald-950'
-          }`}
-          title="الصفحة السابقة"
-        >
-          <ChevronRight className="w-4 h-4" />
-          <span>السابقة</span>
-        </button>
+      {/* Floating Bottom Navigation Controls (Page Navigator) - Only shown in Teacher Control or standalone mode, hidden on projector display room */}
+      {!readOnly && (
+        <div className="sticky bottom-2 z-30 flex items-center gap-3 px-5 py-2 bg-slate-900/90 backdrop-blur-md rounded-2xl border border-slate-800 shadow-xl">
+          <button
+            type="button"
+            onClick={handlePrevPage}
+            disabled={currentPage <= 1}
+            className={`flex items-center gap-1 px-3 py-1.5 rounded-xl font-bold text-xs transition-all ${
+              currentPage <= 1
+                ? 'opacity-30 cursor-not-allowed bg-slate-800 text-slate-500'
+                : 'bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer shadow-md shadow-emerald-950'
+            }`}
+            title="الصفحة السابقة"
+          >
+            <ChevronRight className="w-4 h-4" />
+            <span>السابقة</span>
+          </button>
 
-        <div className="flex items-center gap-2 px-3 py-1 bg-slate-950 rounded-xl border border-slate-800 font-mono text-xs">
-          <span className="text-slate-400">صفحة</span>
-          <span className="text-emerald-400 font-black text-sm">{currentPage}</span>
-          <span className="text-slate-500">من</span>
-          <span className="text-slate-300 font-bold">{totalPages}</span>
+          <div className="flex items-center gap-2 px-3 py-1 bg-slate-950 rounded-xl border border-slate-800 font-mono text-xs">
+            <span className="text-slate-400">صفحة</span>
+            <span className="text-emerald-400 font-black text-sm">{currentPage}</span>
+            <span className="text-slate-500">من</span>
+            <span className="text-slate-300 font-bold">{totalPages}</span>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleNextPage}
+            disabled={currentPage >= totalPages}
+            className={`flex items-center gap-1 px-3 py-1.5 rounded-xl font-bold text-xs transition-all ${
+              currentPage >= totalPages
+                ? 'opacity-30 cursor-not-allowed bg-slate-800 text-slate-500'
+                : 'bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer shadow-md shadow-emerald-950'
+            }`}
+            title="الصفحة التالية"
+          >
+            <span>التالية</span>
+            <ChevronLeft className="w-4 h-4" />
+          </button>
         </div>
-
-        <button
-          type="button"
-          onClick={handleNextPage}
-          disabled={currentPage >= totalPages || readOnly}
-          className={`flex items-center gap-1 px-3 py-1.5 rounded-xl font-bold text-xs transition-all ${
-            currentPage >= totalPages || readOnly
-              ? 'opacity-30 cursor-not-allowed bg-slate-800 text-slate-500'
-              : 'bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer shadow-md shadow-emerald-950'
-          }`}
-          title="الصفحة التالية"
-        >
-          <span>التالية</span>
-          <ChevronLeft className="w-4 h-4" />
-        </button>
-      </div>
+      )}
     </div>
   );
 };
