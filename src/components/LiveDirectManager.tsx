@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Mic,
@@ -42,6 +42,7 @@ import {
   BookOpen,
   FileText,
   Layers,
+  Upload,
 } from 'lucide-react';
 import {
   LiveDirectLessonRow,
@@ -81,6 +82,7 @@ import {
   formatDriveImageUrl,
   setupLiveDirectSheetsApi,
   startLiveProgram,
+  endLiveProgram,
   getSavedPdfLessons,
   savePdfLessons,
   formatPdfEmbedUrl,
@@ -1435,7 +1437,7 @@ export default function LiveDirectManager({
                   <select
                     value={sessionState?.pdfUrl || ''}
                     onChange={(e) => {
-                      const selected = pdfLessons.find(p => formatPdfEmbedUrl(p.url) === e.target.value || p.url === e.target.value);
+                      const selected = pdfLessons.find(p => (p.url && formatPdfEmbedUrl(p.url) === e.target.value) || p.url === e.target.value);
                       if (selected) {
                         handleSelectPdfLesson(selected);
                       } else if (!e.target.value) {
@@ -2256,7 +2258,8 @@ export default function LiveDirectManager({
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {pdfLessons.map((item) => {
-                  const isCurrentActive = sessionState?.pdfUrl === formatPdfEmbedUrl(item.url) || sessionState?.pdfUrl === item.url;
+                  const itemUrl = item.url || (item.storageType === 'file' ? `local://${item.id}` : '');
+                  const isCurrentActive = sessionState?.pdfUrl === (item.url ? formatPdfEmbedUrl(item.url) : itemUrl) || sessionState?.pdfUrl === itemUrl;
                   const isShowing = isCurrentActive && Boolean(sessionState?.showPdfInRoom);
 
                   return (
@@ -2309,7 +2312,7 @@ export default function LiveDirectManager({
                           ) : (
                             <>
                               <ExternalLink className="w-3 h-3 shrink-0" />
-                              <span className="truncate" dir="ltr">{item.url}</span>
+                              <span className="truncate" dir="ltr">{item.url || ''}</span>
                             </>
                           )}
                         </div>
@@ -2327,15 +2330,17 @@ export default function LiveDirectManager({
                             <span>عرض وتفعيل الآن 🚀</span>
                           </button>
 
-                          <a
-                            href={formatPdfEmbedUrl(item.url)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all"
-                            title="فتح الرابط في نافذة جديدة (وضع العرض)"
-                          >
-                            <ExternalLink className="w-3.5 h-3.5" />
-                          </a>
+                          {item.url && (
+                            <a
+                              href={formatPdfEmbedUrl(item.url)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all"
+                              title="فتح الرابط في نافذة جديدة (وضع العرض)"
+                            >
+                              <ExternalLink className="w-3.5 h-3.5" />
+                            </a>
+                          )}
                         </div>
 
                         <div className="flex items-center gap-1">
