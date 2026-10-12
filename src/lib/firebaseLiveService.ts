@@ -1047,11 +1047,13 @@ export async function updateLivePdfState({
   pdfUrl,
   pdfTitle,
   pdfPage,
+  pdfTotalPages,
 }: {
   showPdfInRoom?: boolean;
   pdfUrl?: string;
   pdfTitle?: string;
   pdfPage?: number;
+  pdfTotalPages?: number;
 }): Promise<{ success: boolean; state?: LiveSessionState }> {
   try {
     const updatePayload: Record<string, any> = {
@@ -1061,6 +1063,7 @@ export async function updateLivePdfState({
     if (pdfUrl !== undefined) updatePayload.pdfUrl = pdfUrl;
     if (pdfTitle !== undefined) updatePayload.pdfTitle = pdfTitle;
     if (pdfPage !== undefined) updatePayload.pdfPage = pdfPage;
+    if (pdfTotalPages !== undefined) updatePayload.pdfTotalPages = pdfTotalPages;
 
     await updateDoc(LIVE_DOC_REF, updatePayload);
     cachedState = {
@@ -1069,6 +1072,7 @@ export async function updateLivePdfState({
       ...(pdfUrl !== undefined ? { pdfUrl } : {}),
       ...(pdfTitle !== undefined ? { pdfTitle } : {}),
       ...(pdfPage !== undefined ? { pdfPage } : {}),
+      ...(pdfTotalPages !== undefined ? { pdfTotalPages } : {}),
     };
     return { success: true, state: cachedState };
   } catch (error: any) {
@@ -1080,5 +1084,40 @@ export async function updateLivePdfState({
 export async function toggleShowPdfInRoom(show: boolean): Promise<{ success: boolean; state?: LiveSessionState }> {
   return updateLivePdfState({ showPdfInRoom: show });
 }
+
+// Realtime sync of laser pointer (debounced/throttled on caller side)
+export async function updateLivePdfLaser(laser: { x: number; y: number; active: boolean; timestamp: number } | null): Promise<{ success: boolean }> {
+  try {
+    await updateDoc(LIVE_DOC_REF, {
+      pdfLaser: laser,
+    });
+    cachedState = { ...cachedState, pdfLaser: laser };
+    return { success: true };
+  } catch (error: any) {
+    return { success: false };
+  }
+}
+
+// Realtime sync of drawings/annotations per page
+export async function updateLivePdfAnnotations(
+  annotations: Record<number, Array<{
+    type: 'pen' | 'highlighter';
+    color: string;
+    width: number;
+    points: Array<{ x: number; y: number }>;
+  }>>
+): Promise<{ success: boolean }> {
+  try {
+    await updateDoc(LIVE_DOC_REF, {
+      pdfAnnotations: annotations,
+    });
+    cachedState = { ...cachedState, pdfAnnotations: annotations };
+    return { success: true };
+  } catch (error: any) {
+    console.error('Failed to update pdfAnnotations in Firebase:', error);
+    return { success: false };
+  }
+}
+
 
 

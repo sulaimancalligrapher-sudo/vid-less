@@ -81,14 +81,18 @@ import {
   formatDriveImageUrl,
   setupLiveDirectSheetsApi,
   startLiveProgram,
-  endLiveProgram,
   getSavedPdfLessons,
   savePdfLessons,
   formatPdfEmbedUrl,
   updateLivePdfState,
   toggleShowPdfInRoom,
+  updateLivePdfLaser,
+  updateLivePdfAnnotations,
+  savePdfToIndexedDB,
+  deletePdfFromIndexedDB,
 } from '../api';
 import LiveChatModal from './LiveChatModal';
+import { NativePdfViewer } from './NativePdfViewer';
 
 interface LiveDirectManagerProps {
   onOpenDisplayScreen?: () => void;
@@ -160,6 +164,52 @@ export default function LiveDirectManager({
   const [pdfFormDescription, setPdfFormDescription] = useState('');
   const [activePdfPreviewPage, setActivePdfPreviewPage] = useState(1);
 
+  // File Upload State & Laser throttle ref
+  const [isUploadingPdf, setIsUploadingPdf] = useState(false);
+  const [pdfUploadTab, setPdfUploadTab] = useState<'upload' | 'drive'>('upload');
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [driveFolderId, setDriveFolderId] = useState('');
+  const laserThrottleRef = useRef<number>(0);
+
+  // Handle local PDF file selection & IndexedDB persistence
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      showNotice('يرجى اختيار ملف بصيغة PDF فقط', 'error');
+      return;
+    }
+
+    setUploadedFile(file);
+    if (!pdfFormTitle.trim()) {
+      setPdfFormTitle(file.name.replace(/\.[^/.]+$/, ''));
+    }
+  };
+
+  // Realtime laser move transmitter (throttled to ~50ms to prevent Firebase overload)
+  const handleLaserMove = useCallback(async (laser: { x: number; y: number; active: boolean; timestamp: number } | null) => {
+    const now = Date.now();
+    if (!laser) {
+      await updateLivePdfLaser(null);
+      return;
+    }
+    if (now - laserThrottleRef.current > 50) {
+      laserThrottleRef.current = now;
+      await updateLivePdfLaser(laser);
+    }
+  }, []);
+
+  // Realtime annotations update
+  const handleAnnotationsChange = useCallback(async (annotations: Record<number, Array<{
+    type: 'pen' | 'highlighter';
+    color: string;
+    width: number;
+    points: Array<{ x: number; y: number }>;
+  }>>) => {
+    await updateLivePdfAnnotations(annotations);
+  }, []);
+
   // Toggle PDF in projector room
   const handleTogglePdfVisibility = async (show: boolean) => {
     setIsUpdatingPdfVisibility(true);
@@ -180,10 +230,10 @@ export default function LiveDirectManager({
   const handleSelectPdfLesson = async (lesson: LivePdfItem) => {
     setIsUpdatingPdfVisibility(true);
     try {
-      const formattedUrl = formatPdfEmbedUrl(lesson.url);
+      const finalPdfUrl = lesson.storageType === 'file' ? (lesson.url || `local://${lesson.id}`) : formatPdfEmbedUrl(lesson.url || '');
       const res = await updateLivePdfState({
         showPdfInRoom: true,
-        pdfUrl: formattedUrl,
+        pdfUrl: finalPdfUrl,
         pdfTitle: lesson.title,
         pdfPage: 1,
       });
@@ -219,6 +269,8 @@ export default function LiveDirectManager({
     setPdfFormTitle('');
     setPdfFormUrl('');
     setPdfFormDescription('');
+    setUploadedFile(null);
+    setPdfUploadTab('upload');
     setIsPdfModalOpen(true);
   };
 
@@ -226,55 +278,108 @@ export default function LiveDirectManager({
   const handleOpenEditPdfModal = (item: LivePdfItem) => {
     setEditingPdfItem(item);
     setPdfFormTitle(item.title);
-    setPdfFormUrl(item.url);
+    setPdfFormUrl(item.url || '');
     setPdfFormDescription(item.description || '');
+    setUploadedFile(null);
+    setPdfUploadTab(item.storageType === 'file' ? 'upload' : 'drive');
     setIsPdfModalOpen(true);
   };
 
-  // Save PDF item
-  const handleSavePdfItem = () => {
+  // Save PDF item (Local File or Drive link)
+  const handleSavePdfItem = async () => {
     if (!pdfFormTitle.trim()) {
       showNotice('يرجى كتابة عنوان ملف الـ PDF / موضوع الدرس', 'error');
       return;
     }
-    if (!pdfFormUrl.trim()) {
-      showNotice('يرجى وضع رابط ملف PDF (Google Drive أو مباشر)', 'error');
-      return;
-    }
 
-    let updatedList: LivePdfItem[];
-    if (editingPdfItem) {
-      updatedList = pdfLessons.map(p =>
-        p.id === editingPdfItem.id
-          ? {
-              ...p,
-              title: pdfFormTitle.trim(),
-              url: pdfFormUrl.trim(),
-              description: pdfFormDescription.trim(),
-            }
-          : p
-      );
-      showNotice('تم تعديل بيانات ملف الـ PDF بنجاح ✏️');
-    } else {
-      const newItem: LivePdfItem = {
-        id: `pdf_${Date.now()}`,
-        title: pdfFormTitle.trim(),
-        url: pdfFormUrl.trim(),
-        description: pdfFormDescription.trim(),
-        addedAt: Date.now(),
-      };
-      updatedList = [newItem, ...pdfLessons];
-      showNotice('تمت إضافة ملف الـ PDF إلى مكتبة الدروس بنجاح 📚');
-    }
+    setIsUploadingPdf(true);
 
-    setPdfLessons(updatedList);
-    savePdfLessons(updatedList);
-    setIsPdfModalOpen(false);
+    try {
+      let updatedList: LivePdfItem[];
+
+      if (editingPdfItem) {
+        let finalUrl = editingPdfItem.url;
+        let storageType = editingPdfItem.storageType || 'url';
+
+        if (uploadedFile) {
+          const fileId = `file_${Date.now()}`;
+          await savePdfToIndexedDB(fileId, uploadedFile.name, uploadedFile);
+          finalUrl = `local://${fileId}`;
+          storageType = 'file';
+        } else if (pdfUploadTab === 'drive') {
+          finalUrl = pdfFormUrl.trim();
+          storageType = 'url';
+        }
+
+        updatedList = pdfLessons.map(p =>
+          p.id === editingPdfItem.id
+            ? {
+                ...p,
+                title: pdfFormTitle.trim(),
+                url: finalUrl,
+                storageType,
+                description: pdfFormDescription.trim(),
+                driveFileId: driveFolderId.trim() || p.driveFileId,
+              }
+            : p
+        );
+        showNotice('تم تعديل بيانات ملف الـ PDF بنجاح ✏️');
+      } else {
+        // Adding new item
+        let finalUrl = '';
+        let storageType: 'file' | 'url' = 'url';
+        const fileId = `pdf_${Date.now()}`;
+
+        if (pdfUploadTab === 'upload') {
+          if (!uploadedFile) {
+            showNotice('يرجى اختيار ملف PDF من جهازك أولاً', 'error');
+            setIsUploadingPdf(false);
+            return;
+          }
+          await savePdfToIndexedDB(fileId, uploadedFile.name, uploadedFile);
+          finalUrl = `local://${fileId}`;
+          storageType = 'file';
+        } else {
+          if (!pdfFormUrl.trim()) {
+            showNotice('يرجى وضع رابط ملف PDF أو معرف Google Drive', 'error');
+            setIsUploadingPdf(false);
+            return;
+          }
+          finalUrl = pdfFormUrl.trim();
+          storageType = 'url';
+        }
+
+        const newItem: LivePdfItem = {
+          id: fileId,
+          title: pdfFormTitle.trim(),
+          url: finalUrl,
+          storageType,
+          description: pdfFormDescription.trim(),
+          driveFileId: driveFolderId.trim() || undefined,
+          addedAt: Date.now(),
+        };
+        updatedList = [newItem, ...pdfLessons];
+        showNotice('تمت إضافة ملف الـ PDF وتجهيزه للعرض الفوري بنجاح 📚');
+      }
+
+      setPdfLessons(updatedList);
+      savePdfLessons(updatedList);
+      setIsPdfModalOpen(false);
+    } catch (err: any) {
+      console.error('Error saving PDF:', err);
+      showNotice('حدث خطأ أثناء حفظ ملف الـ PDF', 'error');
+    } finally {
+      setIsUploadingPdf(false);
+    }
   };
 
   // Delete PDF item
-  const handleDeletePdfItem = (id: string) => {
+  const handleDeletePdfItem = async (id: string) => {
     if (!window.confirm('هل أنت متأكد من حذف هذا الملف من قائمة أدوات التعليم؟')) return;
+    const target = pdfLessons.find(p => p.id === id);
+    if (target?.storageType === 'file') {
+      await deletePdfFromIndexedDB(id);
+    }
     const updated = pdfLessons.filter(p => p.id !== id);
     setPdfLessons(updated);
     savePdfLessons(updated);
@@ -1340,11 +1445,14 @@ export default function LiveDirectManager({
                     className="bg-slate-900 border border-slate-700 hover:border-emerald-400 text-slate-100 text-xs font-bold rounded-xl px-3 py-1.5 outline-none cursor-pointer focus:border-emerald-400 min-w-[200px]"
                   >
                     <option value="">-- اختر ملف PDF للشرح --</option>
-                    {pdfLessons.map((pdf) => (
-                      <option key={pdf.id} value={formatPdfEmbedUrl(pdf.url)}>
-                        {pdf.title}
-                      </option>
-                    ))}
+                    {pdfLessons.map((pdf) => {
+                      const val = pdf.storageType === 'file' ? (pdf.url || `local://${pdf.id}`) : formatPdfEmbedUrl(pdf.url || '');
+                      return (
+                        <option key={pdf.id} value={val}>
+                          {pdf.title} {pdf.storageType === 'file' ? '📁 (ملف محلي سريع)' : '🌐 (رابط)'}
+                        </option>
+                      );
+                    })}
                   </select>
 
                   {/* Toggle Show/Hide on Display Room */}
@@ -2100,13 +2208,18 @@ export default function LiveDirectManager({
                 </div>
               </div>
 
-              {/* Embedded Live Preview iFrame */}
-              <div className="rounded-2xl border border-slate-800 overflow-hidden bg-slate-950 shadow-inner h-96 sm:h-[480px]">
-                <iframe
-                  src={formatPdfEmbedUrl(sessionState.pdfUrl, sessionState.pdfPage)}
-                  title="معاينة ملف PDF"
-                  className="w-full h-full border-0"
-                  allow="autoplay"
+              {/* Embedded Live Native PDF Viewer with Teacher Annotation & Laser Tools */}
+              <div className="rounded-2xl border border-slate-800 overflow-hidden bg-slate-950 shadow-inner h-[500px] sm:h-[650px] relative">
+                <NativePdfViewer
+                  pdfUrl={sessionState.pdfUrl}
+                  page={sessionState.pdfPage || 1}
+                  onPageChange={(p) => handlePdfPageChange(p)}
+                  isTeacherControl={true}
+                  readOnly={false}
+                  realtimeLaser={sessionState.pdfLaser}
+                  realtimeAnnotations={sessionState.pdfAnnotations}
+                  onLaserMove={handleLaserMove}
+                  onAnnotationsChange={handleAnnotationsChange}
                 />
               </div>
             </div>
@@ -2187,10 +2300,18 @@ export default function LiveDirectManager({
                           )}
                         </div>
 
-                        {/* Link preview pill */}
-                        <div className="flex items-center gap-1.5 text-[11px] text-slate-500 font-mono truncate bg-slate-950/60 px-2.5 py-1 rounded-lg border border-slate-800/80">
-                          <ExternalLink className="w-3 h-3 shrink-0" />
-                          <span className="truncate" dir="ltr">{item.url}</span>
+                        {/* Storage & link preview pill */}
+                        <div className="flex items-center gap-1.5 text-[11px] text-slate-400 font-mono truncate bg-slate-950/60 px-2.5 py-1 rounded-lg border border-slate-800/80">
+                          {item.storageType === 'file' ? (
+                            <span className="flex items-center gap-1 text-emerald-400 font-bold">
+                              <span>📁 ملف محلي مخزن (فائق السرعة)</span>
+                            </span>
+                          ) : (
+                            <>
+                              <ExternalLink className="w-3 h-3 shrink-0" />
+                              <span className="truncate" dir="ltr">{item.url}</span>
+                            </>
+                          )}
                         </div>
                       </div>
 
@@ -2921,6 +3042,34 @@ export default function LiveDirectManager({
                 </button>
               </div>
 
+              {/* Tab Selector between Direct Upload and Drive Link */}
+              <div className="flex items-center gap-2 p-1 bg-slate-950 rounded-2xl border border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setPdfUploadTab('upload')}
+                  className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                    pdfUploadTab === 'upload'
+                      ? 'bg-emerald-600 text-white shadow-md'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Upload className="w-4 h-4" />
+                  <span>رفع ملف PDF من جهازك (موصى به - فائق السرعة ⚡)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPdfUploadTab('drive')}
+                  className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                    pdfUploadTab === 'drive'
+                      ? 'bg-indigo-600 text-white shadow-md'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  <span>رابط Google Drive أو ويب</span>
+                </button>
+              </div>
+
               <div className="space-y-3.5 text-xs">
                 <div>
                   <label className="block text-slate-300 font-bold mb-1">
@@ -2935,22 +3084,62 @@ export default function LiveDirectManager({
                   />
                 </div>
 
-                <div>
-                  <label className="block text-slate-300 font-bold mb-1">
-                    2. رابط ملف PDF (Google Drive مشاركة أو رابط مباشر): <span className="text-rose-400">*</span>
-                  </label>
-                  <input
-                    type="url"
-                    value={pdfFormUrl}
-                    onChange={(e) => setPdfFormUrl(e.target.value)}
-                    placeholder="https://drive.google.com/file/d/.../view?usp=sharing أو رابط مباشر"
-                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs font-mono outline-none focus:border-emerald-400"
-                    dir="ltr"
-                  />
-                  <p className="text-[11px] text-slate-400 mt-1">
-                    💡 يمكنك لصق رابط المشاركة المباشر من Google Drive كما هو، وسيقوم النظام بتشغيله تلقائياً.
-                  </p>
-                </div>
+                {pdfUploadTab === 'upload' ? (
+                  <div>
+                    <label className="block text-slate-300 font-bold mb-1">
+                      2. اختيار ملف PDF من جهازك: <span className="text-rose-400">*</span>
+                    </label>
+                    <div className="p-4 border-2 border-dashed border-slate-800 hover:border-emerald-500/60 rounded-2xl bg-slate-950/60 text-center transition-colors">
+                      <input
+                        type="file"
+                        accept="application/pdf,.pdf"
+                        onChange={handleFileChange}
+                        className="hidden"
+                        id="pdf-file-upload-input"
+                      />
+                      <label htmlFor="pdf-file-upload-input" className="cursor-pointer block space-y-2">
+                        <Upload className="w-8 h-8 text-emerald-400 mx-auto animate-bounce" />
+                        <div className="font-bold text-slate-200">
+                          {uploadedFile ? `✅ تم اختيار الملف: ${uploadedFile.name}` : 'اضغط هنا لاختيار ملف PDF من الكمبيوتر / الجوال'}
+                        </div>
+                        <p className="text-[11px] text-slate-500">
+                          {uploadedFile ? `الحجم: ${(uploadedFile.size / (1024 * 1024)).toFixed(2)} ميجابايت` : 'يتم تخزين الملف فورياً داخل المتصفح (IndexedDB) ليعمل بـ 0 ثانية تأخير'}
+                        </p>
+                      </label>
+                    </div>
+
+                    <div className="mt-2.5">
+                      <label className="block text-slate-400 font-bold mb-1 text-[11px]">
+                        معرف مجلد Google Drive للأرشفة (اختياري):
+                      </label>
+                      <input
+                        type="text"
+                        value={driveFolderId}
+                        onChange={(e) => setDriveFolderId(e.target.value)}
+                        placeholder="معرف مجلد درايف (مثال: 1BxiMVs0XRA5nFM...)"
+                        className="w-full px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-300 text-xs font-mono outline-none focus:border-indigo-400"
+                        dir="ltr"
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-slate-300 font-bold mb-1">
+                      2. رابط ملف PDF (Google Drive مشاركة أو رابط مباشر): <span className="text-rose-400">*</span>
+                    </label>
+                    <input
+                      type="url"
+                      value={pdfFormUrl}
+                      onChange={(e) => setPdfFormUrl(e.target.value)}
+                      placeholder="https://drive.google.com/file/d/.../view?usp=sharing أو رابط مباشر"
+                      className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs font-mono outline-none focus:border-emerald-400"
+                      dir="ltr"
+                    />
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      💡 يمكنك لصق رابط المشاركة المباشر من Google Drive كما هو، وسيقوم النظام بتشغيله تلقائياً.
+                    </p>
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-slate-300 font-bold mb-1">

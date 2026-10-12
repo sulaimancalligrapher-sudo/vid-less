@@ -2039,7 +2039,15 @@ export {
   sendTeacherBroadcastMessage,
   updateLivePdfState,
   toggleShowPdfInRoom,
+  updateLivePdfLaser,
+  updateLivePdfAnnotations,
 } from './lib/firebaseLiveService';
+
+export {
+  savePdfToIndexedDB,
+  getPdfFromIndexedDB,
+  deletePdfFromIndexedDB,
+} from './lib/pdfStorage';
 
 // ==========================================
 // --- PDF LESSONS & TEACHING TOOLS HELPERS ---

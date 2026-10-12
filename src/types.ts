@@ -266,9 +266,17 @@ export interface LiveSessionState {
   showChatInRoom?: boolean; // Controls whether chat window / badge appears on projector display screen
   showConnectedCountInRoom?: boolean; // Controls whether connected students badge appears on projector display screen
   showPdfInRoom?: boolean; // Controls whether PDF / lesson book is displayed on projector screen
-  pdfUrl?: string; // Direct or Google Drive PDF URL to display
+  pdfUrl?: string; // Direct or Google Drive PDF URL or local file ID
   pdfTitle?: string; // Title / name of active PDF lesson or book
-  pdfPage?: number; // Optional page number
+  pdfPage?: number; // Active page number (1-indexed)
+  pdfTotalPages?: number; // Total number of pages in active PDF
+  pdfLaser?: { x: number; y: number; active: boolean; timestamp: number } | null; // Realtime normalized laser coordinates (0..1)
+  pdfAnnotations?: Record<number, Array<{
+    type: 'pen' | 'highlighter';
+    color: string;
+    width: number;
+    points: Array<{ x: number; y: number }>;
+  }>>; // Realtime drawings keyed by page number
   messages?: LiveStudentMessage[]; // Live list of questions and reactions from students
   lessonTitle: string;
   videoUrl: string;
@@ -285,11 +293,24 @@ export interface LiveSessionState {
   allSessionAnswers: Record<string, Record<number, string>>;
 }
 
+export interface LivePdfDrawingStroke {
+  id?: string;
+  type: 'pen' | 'highlighter';
+  color: string;
+  width: number;
+  points: Array<{ x: number; y: number }>; // Normalized 0..1 coordinates
+}
+
 export interface LivePdfItem {
   id: string;
   title: string;
-  url: string;
+  url?: string;
+  storageType?: 'file' | 'url'; // 'file' if stored in local IndexedDB, 'url' if web or direct link
+  fileData?: string; // Base64 or object URL cache
+  fileSize?: number;
+  totalPages?: number;
   description?: string;
+  driveFileId?: string; // Optional Google Drive file/folder ID
   addedAt: number;
 }
 

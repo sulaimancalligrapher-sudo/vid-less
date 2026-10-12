@@ -39,6 +39,7 @@ import {
   formatPdfEmbedUrl,
 } from '../api';
 import LiveChatModal from './LiveChatModal';
+import { NativePdfViewer } from './NativePdfViewer';
 
 interface LiveDirectDisplayRoomProps {
   // Theater projector screen
@@ -511,14 +512,16 @@ export default function LiveDirectDisplayRoom({}: LiveDirectDisplayRoomProps = {
           </motion.div>
         ) : Boolean(sessionState?.showPdfInRoom) && sessionState?.pdfUrl ? (
           /* ========================================================================= */
-          /* PDF PRESENTATION STAGE (بكامل الشاشة بدون هوامش - شاشة العرض للعرض فقط) */
+          /* NATIVE PDF PRESENTATION STAGE (بكامل الشاشة بدون هوامش - شاشة العرض للعرض فقط) */
           /* ========================================================================= */
           <div className="w-full flex-1 flex flex-col h-[calc(100vh-64px)] min-h-[580px] bg-slate-950 overflow-hidden relative border-0">
-            <iframe
-              src={formatPdfEmbedUrl(sessionState.pdfUrl, sessionState.pdfPage)}
-              title={sessionState.pdfTitle || 'عرض ملف الشرح'}
-              className="w-full flex-1 h-full min-h-[calc(100vh-64px)] border-0 pointer-events-none select-none"
-              allow="autoplay; encrypted-media; fullscreen"
+            <NativePdfViewer
+              pdfUrl={sessionState.pdfUrl}
+              page={sessionState.pdfPage || 1}
+              readOnly={true}
+              isTeacherControl={false}
+              realtimeLaser={sessionState.pdfLaser}
+              realtimeAnnotations={sessionState.pdfAnnotations}
             />
 
             {/* Elevated Question Modal Overlay above PDF */}
