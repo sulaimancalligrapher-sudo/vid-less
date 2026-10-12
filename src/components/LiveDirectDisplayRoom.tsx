@@ -483,7 +483,11 @@ export default function LiveDirectDisplayRoom({}: LiveDirectDisplayRoomProps = {
       </header>
 
       {/* Main Presentation Stage */}
-      <main className="flex-1 flex flex-col items-center justify-center p-3 sm:p-6 max-w-7xl mx-auto w-full relative">
+      <main className={`flex-1 flex flex-col items-center justify-center w-full relative ${
+        Boolean(sessionState?.showPdfInRoom) && sessionState?.pdfUrl
+          ? 'p-0 max-w-none h-[calc(100vh-64px)] overflow-hidden'
+          : 'p-3 sm:p-6 max-w-7xl mx-auto'
+      }`}>
         {/* ========================================================================= */}
         {/* SCENARIO 3: FINISHED SESSION / PROGRAM ENDED MODE */}
         {/* ========================================================================= */}
@@ -507,13 +511,13 @@ export default function LiveDirectDisplayRoom({}: LiveDirectDisplayRoomProps = {
           </motion.div>
         ) : Boolean(sessionState?.showPdfInRoom) && sessionState?.pdfUrl ? (
           /* ========================================================================= */
-          /* PDF PRESENTATION STAGE (مع إبقاء الـ PDF ثابتاً ورفع السؤال كنافذة أنيقة فوقه) */
+          /* PDF PRESENTATION STAGE (بكامل الشاشة بدون هوامش - شاشة العرض للعرض فقط) */
           /* ========================================================================= */
-          <div className="w-full flex-1 flex flex-col h-[calc(100vh-140px)] min-h-[580px] rounded-3xl border border-slate-800/80 bg-slate-900/90 shadow-2xl overflow-hidden relative">
+          <div className="w-full flex-1 flex flex-col h-[calc(100vh-64px)] min-h-[580px] bg-slate-950 overflow-hidden relative border-0">
             <iframe
               src={formatPdfEmbedUrl(sessionState.pdfUrl, sessionState.pdfPage)}
               title={sessionState.pdfTitle || 'عرض ملف الشرح'}
-              className="w-full flex-1 h-full min-h-[580px] border-0"
+              className="w-full flex-1 h-full min-h-[calc(100vh-64px)] border-0 pointer-events-none select-none"
               allow="autoplay; encrypted-media; fullscreen"
             />
 
@@ -603,11 +607,13 @@ export default function LiveDirectDisplayRoom({}: LiveDirectDisplayRoomProps = {
         )}
       </main>
 
-      {/* Footer Branding Bar */}
-      <footer className="p-3 sm:p-4 bg-slate-950/80 border-t border-slate-900 flex items-center justify-between text-[11px] text-slate-500 font-mono">
-        <span>نظام الحصص المباشرة والأسئلة الحية (Live)</span>
-        <span>متزامن لحظياً عبر السحابة ⚡</span>
-      </footer>
+      {/* Footer Branding Bar (مخفي أثناء عرض الـ PDF لتوفير 100% من مساحة الشاشة) */}
+      {!Boolean(sessionState?.showPdfInRoom && sessionState?.pdfUrl) && (
+        <footer className="p-3 sm:p-4 bg-slate-950/80 border-t border-slate-900 flex items-center justify-between text-[11px] text-slate-500 font-mono">
+          <span>نظام الحصص المباشرة والأسئلة الحية (Live)</span>
+          <span>متزامن لحظياً عبر السحابة ⚡</span>
+        </footer>
+      )}
 
       {/* QR Code Modal Overlay */}
       <AnimatePresence>
