@@ -20,6 +20,7 @@ import {
   Sparkles,
   ExternalLink,
   ChevronRight,
+  ChevronLeft,
   ListVideo,
   Eye,
   EyeOff,
@@ -38,12 +39,16 @@ import {
   Power,
   ShieldAlert,
   Image as ImageIcon,
+  BookOpen,
+  FileText,
+  Layers,
 } from 'lucide-react';
 import {
   LiveDirectLessonRow,
   LiveDirectQuestionItem,
   LiveDirectAnswerRecord,
   LiveSessionState,
+  LivePdfItem,
   evaluateLiveAnswer,
   normalizeArabicText,
 } from '../types';
@@ -77,6 +82,11 @@ import {
   setupLiveDirectSheetsApi,
   startLiveProgram,
   endLiveProgram,
+  getSavedPdfLessons,
+  savePdfLessons,
+  formatPdfEmbedUrl,
+  updateLivePdfState,
+  toggleShowPdfInRoom,
 } from '../api';
 import LiveChatModal from './LiveChatModal';
 
@@ -89,8 +99,8 @@ export default function LiveDirectManager({
   onOpenDisplayScreen,
   onBackToAdmin,
 }: LiveDirectManagerProps) {
-  // Main tabs: 1- أسئلة الشيت | 2- سجل الإجابات | 3- إعدادات التدريس والتحكم المباشر
-  const [activeTab, setActiveTab] = useState<'teaching' | 'questions' | 'answers'>('teaching');
+  // Main tabs: 1- أسئلة الشيت | 2- سجل الإجابات | 3- إعدادات التدريس والتحكم المباشر | 4- أدوات التعليم
+  const [activeTab, setActiveTab] = useState<'teaching' | 'tools' | 'questions' | 'answers'>('teaching');
 
   // Lessons and Answers
   const [lessons, setLessons] = useState<LiveDirectLessonRow[]>([]);
@@ -139,6 +149,137 @@ export default function LiveDirectManager({
   // Student list search & Unanswered filter
   const [studentSearch, setStudentSearch] = useState('');
   const [filterUnansweredOnly, setFilterUnansweredOnly] = useState(false);
+
+  // PDF Lessons & Educational Tools State
+  const [pdfLessons, setPdfLessons] = useState<LivePdfItem[]>(() => getSavedPdfLessons());
+  const [isUpdatingPdfVisibility, setIsUpdatingPdfVisibility] = useState(false);
+  const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
+  const [editingPdfItem, setEditingPdfItem] = useState<LivePdfItem | null>(null);
+  const [pdfFormTitle, setPdfFormTitle] = useState('');
+  const [pdfFormUrl, setPdfFormUrl] = useState('');
+  const [pdfFormDescription, setPdfFormDescription] = useState('');
+  const [activePdfPreviewPage, setActivePdfPreviewPage] = useState(1);
+
+  // Toggle PDF in projector room
+  const handleTogglePdfVisibility = async (show: boolean) => {
+    setIsUpdatingPdfVisibility(true);
+    try {
+      const res = await toggleShowPdfInRoom(show);
+      if (res.success && res.state) {
+        setSessionState(res.state);
+        showNotice(show ? 'تم إظهار ملف الـ PDF في شاشة العرض 📚' : 'تم إخفاء ملف الـ PDF من شاشة العرض');
+      }
+    } catch (e) {
+      showNotice('حدث خطأ أثناء تعديل ظهور ملف الـ PDF', 'error');
+    } finally {
+      setIsUpdatingPdfVisibility(false);
+    }
+  };
+
+  // Select and activate PDF lesson for presentation
+  const handleSelectPdfLesson = async (lesson: LivePdfItem) => {
+    setIsUpdatingPdfVisibility(true);
+    try {
+      const formattedUrl = formatPdfEmbedUrl(lesson.url);
+      const res = await updateLivePdfState({
+        showPdfInRoom: true,
+        pdfUrl: formattedUrl,
+        pdfTitle: lesson.title,
+        pdfPage: 1,
+      });
+      if (res.success && res.state) {
+        setSessionState(res.state);
+        setActivePdfPreviewPage(1);
+        showNotice(`تم تفعيل وعرض ملف "${lesson.title}" بشاشة البروجكتر 🚀`);
+      }
+    } catch (e) {
+      showNotice('تعذر تحديث ملف الـ PDF في الجلسة المباشرة', 'error');
+    } finally {
+      setIsUpdatingPdfVisibility(false);
+    }
+  };
+
+  // Stepper for PDF Page
+  const handlePdfPageChange = async (newPage: number) => {
+    if (newPage < 1) return;
+    setActivePdfPreviewPage(newPage);
+    try {
+      const res = await updateLivePdfState({ pdfPage: newPage });
+      if (res.success && res.state) {
+        setSessionState(res.state);
+      }
+    } catch (e) {
+      console.error('Failed to change page', e);
+    }
+  };
+
+  // Open PDF modal for adding
+  const handleOpenAddPdfModal = () => {
+    setEditingPdfItem(null);
+    setPdfFormTitle('');
+    setPdfFormUrl('');
+    setPdfFormDescription('');
+    setIsPdfModalOpen(true);
+  };
+
+  // Open PDF modal for editing
+  const handleOpenEditPdfModal = (item: LivePdfItem) => {
+    setEditingPdfItem(item);
+    setPdfFormTitle(item.title);
+    setPdfFormUrl(item.url);
+    setPdfFormDescription(item.description || '');
+    setIsPdfModalOpen(true);
+  };
+
+  // Save PDF item
+  const handleSavePdfItem = () => {
+    if (!pdfFormTitle.trim()) {
+      showNotice('يرجى كتابة عنوان ملف الـ PDF / موضوع الدرس', 'error');
+      return;
+    }
+    if (!pdfFormUrl.trim()) {
+      showNotice('يرجى وضع رابط ملف PDF (Google Drive أو مباشر)', 'error');
+      return;
+    }
+
+    let updatedList: LivePdfItem[];
+    if (editingPdfItem) {
+      updatedList = pdfLessons.map(p =>
+        p.id === editingPdfItem.id
+          ? {
+              ...p,
+              title: pdfFormTitle.trim(),
+              url: pdfFormUrl.trim(),
+              description: pdfFormDescription.trim(),
+            }
+          : p
+      );
+      showNotice('تم تعديل بيانات ملف الـ PDF بنجاح ✏️');
+    } else {
+      const newItem: LivePdfItem = {
+        id: `pdf_${Date.now()}`,
+        title: pdfFormTitle.trim(),
+        url: pdfFormUrl.trim(),
+        description: pdfFormDescription.trim(),
+        addedAt: Date.now(),
+      };
+      updatedList = [newItem, ...pdfLessons];
+      showNotice('تمت إضافة ملف الـ PDF إلى مكتبة الدروس بنجاح 📚');
+    }
+
+    setPdfLessons(updatedList);
+    savePdfLessons(updatedList);
+    setIsPdfModalOpen(false);
+  };
+
+  // Delete PDF item
+  const handleDeletePdfItem = (id: string) => {
+    if (!window.confirm('هل أنت متأكد من حذف هذا الملف من قائمة أدوات التعليم؟')) return;
+    const updated = pdfLessons.filter(p => p.id !== id);
+    setPdfLessons(updated);
+    savePdfLessons(updated);
+    showNotice('تم حذف الملف من القائمة');
+  };
 
   // Notice timer
   const showNotice = (text: string, type: 'success' | 'error' | 'info' = 'success') => {
@@ -877,30 +1018,45 @@ export default function LiveDirectManager({
         </motion.div>
       )}
 
-      {/* 3 Main Tabs: 1- إعدادات التدريس | 2- الأسئلة | 3- سجل الإجابات */}
-      <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
+      {/* 4 Main Tabs: 1- إعدادات التدريس | 2- أدوات التعليم و PDF | 3- الأسئلة | 4- سجل الإجابات */}
+      <div className="flex items-center gap-2 border-b border-slate-800 pb-2 overflow-x-auto">
         <button
           onClick={() => setActiveTab('teaching')}
-          className={`px-5 py-2.5 rounded-2xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer border ${
+          className={`px-4 sm:px-5 py-2.5 rounded-2xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer border shrink-0 ${
             activeTab === 'teaching'
               ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-500/20'
               : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'
           }`}
         >
           <Radio className="w-4 h-4" />
-          <span>3. إعدادات التدريس والتحكم المباشر 🎙️</span>
+          <span>إعدادات التدريس والتحكم المباشر 🎙️</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('tools')}
+          className={`px-4 sm:px-5 py-2.5 rounded-2xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer border shrink-0 ${
+            activeTab === 'tools'
+              ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-500/20'
+              : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'
+          }`}
+        >
+          <BookOpen className="w-4 h-4 text-emerald-400" />
+          <span>أدوات التعليم و PDF 📚</span>
+          <span className="px-2 py-0.5 rounded-full bg-slate-950/40 text-[10px] font-mono text-emerald-300">
+            {pdfLessons.length}
+          </span>
         </button>
 
         <button
           onClick={() => setActiveTab('questions')}
-          className={`px-5 py-2.5 rounded-2xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer border ${
+          className={`px-4 sm:px-5 py-2.5 rounded-2xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer border shrink-0 ${
             activeTab === 'questions'
               ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-500/20'
               : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'
           }`}
         >
           <HelpCircle className="w-4 h-4" />
-          <span>1. قسم إعدادات الأسئلة (Questions-Live)</span>
+          <span>قسم إعدادات الأسئلة (Questions-Live)</span>
           <span className="px-2 py-0.5 rounded-full bg-slate-950/40 text-[10px] font-mono">
             {lessons.length}
           </span>
@@ -908,14 +1064,14 @@ export default function LiveDirectManager({
 
         <button
           onClick={() => setActiveTab('answers')}
-          className={`px-5 py-2.5 rounded-2xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer border ${
+          className={`px-4 sm:px-5 py-2.5 rounded-2xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer border shrink-0 ${
             activeTab === 'answers'
               ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-500/20'
               : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'
           }`}
         >
           <BarChart3 className="w-4 h-4" />
-          <span>2. قسم سجل الإجابات (Answers-Live)</span>
+          <span>قسم سجل الإجابات (Answers-Live)</span>
           <span className="px-2 py-0.5 rounded-full bg-slate-950/40 text-[10px] font-mono">
             {answers.length}
           </span>
@@ -1137,6 +1293,112 @@ export default function LiveDirectManager({
                     }`}
                   >
                     {sessionState?.showChatInRoom ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Educational Tools & PDF Bar (شريط التحكم السريع في ملفات PDF للشرح) */}
+            <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-3 shadow-inner">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/30">
+                    <BookOpen className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-black text-slate-200">أدوات التعليم و PDF:</span>
+                      {Boolean(sessionState?.showPdfInRoom) && sessionState?.pdfUrl ? (
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold">
+                          معروض حالياً بشاشة البروجكتر 🟢
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 text-[10px] font-medium">
+                          غير معروض بالشاشة ⚪
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      {sessionState?.pdfTitle ? `الملف النشط: ${sessionState.pdfTitle}` : 'اختر ملف PDF للشرح أو أضف روابط جديدة من تبويب أدوات التعليم'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Direct quick action buttons */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  {/* Select from PDF catalog dropdown */}
+                  <select
+                    value={sessionState?.pdfUrl || ''}
+                    onChange={(e) => {
+                      const selected = pdfLessons.find(p => formatPdfEmbedUrl(p.url) === e.target.value || p.url === e.target.value);
+                      if (selected) {
+                        handleSelectPdfLesson(selected);
+                      } else if (!e.target.value) {
+                        handleTogglePdfVisibility(false);
+                      }
+                    }}
+                    className="bg-slate-900 border border-slate-700 hover:border-emerald-400 text-slate-100 text-xs font-bold rounded-xl px-3 py-1.5 outline-none cursor-pointer focus:border-emerald-400 min-w-[200px]"
+                  >
+                    <option value="">-- اختر ملف PDF للشرح --</option>
+                    {pdfLessons.map((pdf) => (
+                      <option key={pdf.id} value={formatPdfEmbedUrl(pdf.url)}>
+                        {pdf.title}
+                      </option>
+                    ))}
+                  </select>
+
+                  {/* Toggle Show/Hide on Display Room */}
+                  {sessionState?.pdfUrl && (
+                    <button
+                      type="button"
+                      onClick={() => handleTogglePdfVisibility(!sessionState?.showPdfInRoom)}
+                      disabled={isUpdatingPdfVisibility}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border shadow-sm ${
+                        sessionState?.showPdfInRoom
+                          ? 'bg-emerald-600 text-white border-emerald-500'
+                          : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-700'
+                      }`}
+                      title={sessionState?.showPdfInRoom ? 'إخفاء ملف الـ PDF من شاشة العرض' : 'إظهار ملف الـ PDF في شاشة العرض'}
+                    >
+                      {sessionState?.showPdfInRoom ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                      <span>{sessionState?.showPdfInRoom ? 'ظاهر بالشاشة' : 'مخفي عن الشاشة'}</span>
+                    </button>
+                  )}
+
+                  {/* Page Navigator Stepper */}
+                  {Boolean(sessionState?.showPdfInRoom) && sessionState?.pdfUrl && (
+                    <div className="flex items-center gap-1 bg-slate-900 border border-slate-700 p-1 rounded-xl">
+                      <button
+                        type="button"
+                        onClick={() => handlePdfPageChange(Math.max(1, (sessionState?.pdfPage || 1) - 1))}
+                        disabled={(sessionState?.pdfPage || 1) <= 1}
+                        className="px-2 py-1 text-slate-300 hover:text-white disabled:opacity-30 rounded hover:bg-slate-800 text-xs font-mono cursor-pointer"
+                        title="الصفحة السابقة"
+                      >
+                        ◀
+                      </button>
+                      <span className="text-[11px] font-mono font-bold text-amber-300 px-1">
+                        ص {sessionState?.pdfPage || 1}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handlePdfPageChange((sessionState?.pdfPage || 1) + 1)}
+                        className="px-2 py-1 text-slate-300 hover:text-white rounded hover:bg-slate-800 text-xs font-mono cursor-pointer"
+                        title="الصفحة التالية"
+                      >
+                        ▶
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Jump to Tools Tab */}
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('tools')}
+                    className="px-3 py-1.5 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>إدارة المكتبة</span>
                   </button>
                 </div>
               </div>
@@ -1709,6 +1971,276 @@ export default function LiveDirectManager({
               <span>مساحة التوسعات القادمة: استطلاعات الرأي السريعة، الأسئلة المفتوحة، والمؤقتات المباشرة.</span>
             </span>
             <span className="text-[10px] text-slate-500 font-mono">Ready for extensions</span>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB: EDUCATIONAL TOOLS & PDF LIBRARY (قسم أدوات التعليم وعرض ملفات PDF) */}
+      {/* ========================================================================= */}
+      {activeTab === 'tools' && (
+        <div className="space-y-6">
+          {/* Header Action Bar */}
+          <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-5 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-sm border border-emerald-500/30">
+                  <BookOpen className="w-4 h-4" />
+                </span>
+                <h3 className="text-base font-black text-slate-100">
+                  مكتبة أدوات التعليم وعرض ملفات PDF 📚
+                </h3>
+              </div>
+              <p className="text-xs text-slate-400">
+                أضف روابط ملفات PDF (مباشرة أو عبر Google Drive)، واختر الدرس المطلوب ليظهر فورياً وبدقة عالية على شاشة العرض والبروجكتر للمسرح.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <button
+                type="button"
+                onClick={handleOpenAddPdfModal}
+                className="px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-emerald-600/20 transition-all cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>إضافة درس / ملف PDF جديد ➕</span>
+              </button>
+
+              {sessionState?.pdfUrl && (
+                <button
+                  type="button"
+                  onClick={() => handleTogglePdfVisibility(!sessionState?.showPdfInRoom)}
+                  disabled={isUpdatingPdfVisibility}
+                  className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border shadow-sm ${
+                    sessionState?.showPdfInRoom
+                      ? 'bg-rose-600/30 hover:bg-rose-600 text-rose-200 hover:text-white border-rose-500/40'
+                      : 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-500'
+                  }`}
+                >
+                  {sessionState?.showPdfInRoom ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  <span>{sessionState?.showPdfInRoom ? 'إخفاء عن شاشة البروجكتر' : 'إظهار على شاشة البروجكتر'}</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Quick Guide on Google Drive Link Integration */}
+          <div className="p-4 bg-gradient-to-r from-emerald-950/40 via-slate-900 to-slate-900 border border-emerald-500/20 rounded-2xl flex items-start gap-3 text-xs text-emerald-200">
+            <Sparkles className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <h4 className="font-bold text-emerald-300">💡 كيف تضيف ملف من Google Drive بسهولة؟</h4>
+              <p className="text-slate-300 leading-relaxed text-[11px]">
+                افتح Google Drive واضغط بالزر الأيمن على ملف الـ PDF واختر <b>مشاركة (Share)</b> ثم اجعل الوصول <b>"أي شخص لديه الرابط يمكنه العرض"</b> وانسخ الرابط والصقه هنا. يقوم نظامنا تلقائياً بمعالجة الرابط وتحويله إلى عارض تفاعلي مدمج وسلس على شاشة البروجكتر.
+              </p>
+            </div>
+          </div>
+
+          {/* Active PDF Live Controller & Preview Widget */}
+          {sessionState?.pdfUrl && (
+            <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-5 space-y-4 shadow-xl">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center border border-amber-500/30">
+                    <Tv className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-black text-slate-100">
+                        الملف المعروض حالياً على الشاشة:
+                      </span>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        sessionState.showPdfInRoom
+                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                          : 'bg-slate-800 text-slate-400'
+                      }`}>
+                        {sessionState.showPdfInRoom ? 'معروض للطلاب بالمسرح 🟢' : 'مخفي حالياً ⚪'}
+                      </span>
+                    </div>
+                    <h4 className="text-sm font-black text-amber-300 mt-0.5">
+                      {sessionState.pdfTitle || 'ملف الشرح المباشر'}
+                    </h4>
+                  </div>
+                </div>
+
+                {/* Page Controls for Active PDF */}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-400">تحريك الصفحة:</span>
+                  <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 px-3 py-1.5 rounded-2xl">
+                    <button
+                      type="button"
+                      onClick={() => handlePdfPageChange(Math.max(1, (sessionState.pdfPage || 1) - 1))}
+                      disabled={(sessionState.pdfPage || 1) <= 1}
+                      className="px-2.5 py-1 text-slate-300 hover:text-white disabled:opacity-30 rounded-lg hover:bg-slate-800 text-xs font-bold transition-all cursor-pointer"
+                      title="الصفحة السابقة"
+                    >
+                      الصفحة السابقة ◀
+                    </button>
+                    <div className="px-3 py-1 rounded-lg bg-slate-900 border border-slate-700 text-xs font-mono font-bold text-amber-300">
+                      ص {sessionState.pdfPage || 1}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handlePdfPageChange((sessionState.pdfPage || 1) + 1)}
+                      className="px-2.5 py-1 text-slate-300 hover:text-white rounded-lg hover:bg-slate-800 text-xs font-bold transition-all cursor-pointer"
+                      title="الصفحة التالية"
+                    >
+                      ▶ الصفحة التالية
+                    </button>
+                  </div>
+
+                  <a
+                    href={sessionState.pdfUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="p-2 bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-xl transition-all cursor-pointer"
+                    title="فتح الرابط في نافذة جديدة"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                  </a>
+                </div>
+              </div>
+
+              {/* Embedded Live Preview iFrame */}
+              <div className="rounded-2xl border border-slate-800 overflow-hidden bg-slate-950 shadow-inner h-96 sm:h-[480px]">
+                <iframe
+                  src={formatPdfEmbedUrl(sessionState.pdfUrl, sessionState.pdfPage)}
+                  title="معاينة ملف PDF"
+                  className="w-full h-full border-0"
+                  allow="autoplay"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* List of Saved PDF Lessons */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-black text-slate-200 flex items-center gap-2">
+                <FileText className="w-4 h-4 text-emerald-400" />
+                <span>قائمة الدروس وملفات PDF المتوفرة ({pdfLessons.length}):</span>
+              </h4>
+              <span className="text-xs text-slate-400">انقر على أي درس لتفعيله وعرضه للطلاب فورياً</span>
+            </div>
+
+            {pdfLessons.length === 0 ? (
+              <div className="p-10 text-center bg-slate-900/40 border border-dashed border-slate-800 rounded-3xl space-y-3">
+                <BookOpen className="w-10 h-10 text-slate-600 mx-auto" />
+                <div className="space-y-1">
+                  <h4 className="text-sm font-bold text-slate-300">لم تقم بإضافة ملفات PDF بعد</h4>
+                  <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                    اضغط زر "إضافة درس / ملف PDF جديد" وضع رابط أي ملف من Google Drive أو رابط مباشر للبدء في الشرح التفاعلي.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleOpenAddPdfModal}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs inline-flex items-center gap-1.5 cursor-pointer shadow-md"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>إضافة ملف الآن</span>
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {pdfLessons.map((item) => {
+                  const isCurrentActive = sessionState?.pdfUrl === formatPdfEmbedUrl(item.url) || sessionState?.pdfUrl === item.url;
+                  const isShowing = isCurrentActive && Boolean(sessionState?.showPdfInRoom);
+
+                  return (
+                    <div
+                      key={item.id}
+                      className={`p-5 rounded-3xl border transition-all space-y-4 shadow-xl flex flex-col justify-between ${
+                        isShowing
+                          ? 'bg-emerald-950/40 border-emerald-500/60 ring-2 ring-emerald-500/20'
+                          : isCurrentActive
+                          ? 'bg-slate-900 border-amber-500/50'
+                          : 'bg-slate-900/90 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="space-y-2">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <span className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 ${
+                              isShowing
+                                ? 'bg-emerald-500 text-slate-950 shadow-md'
+                                : 'bg-slate-800 text-emerald-400'
+                            }`}>
+                              <BookOpen className="w-4 h-4" />
+                            </span>
+                            <div className="min-w-0">
+                              <h4 className="text-sm font-black text-slate-100 truncate">
+                                {item.title}
+                              </h4>
+                              {item.description && (
+                                <p className="text-xs text-slate-400 line-clamp-2 mt-0.5">
+                                  {item.description}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Status Badge */}
+                          {isShowing && (
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-black shrink-0">
+                              معروض الآن 🟢
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Link preview pill */}
+                        <div className="flex items-center gap-1.5 text-[11px] text-slate-500 font-mono truncate bg-slate-950/60 px-2.5 py-1 rounded-lg border border-slate-800/80">
+                          <ExternalLink className="w-3 h-3 shrink-0" />
+                          <span className="truncate" dir="ltr">{item.url}</span>
+                        </div>
+                      </div>
+
+                      {/* Action buttons */}
+                      <div className="flex items-center justify-between gap-2 pt-3 border-t border-slate-800/80">
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleSelectPdfLesson(item)}
+                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                          >
+                            <Play className="w-3 h-3 fill-white" />
+                            <span>عرض وتفعيل الآن 🚀</span>
+                          </button>
+
+                          <a
+                            href={item.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all"
+                            title="فتح الرابط الأصلي"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        </div>
+
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditPdfModal(item)}
+                            className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-lg transition-all"
+                            title="تعديل"
+                          >
+                            <Edit className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeletePdfItem(item.id)}
+                            className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-all"
+                            title="حذف"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -2353,6 +2885,102 @@ export default function LiveDirectManager({
                 >
                   <Power className="w-4 h-4" />
                   <span>تأكيد إنهاء الحصة 🛑</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* PDF Lesson Add / Edit Modal */}
+      <AnimatePresence>
+        {isPdfModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-lg w-full text-right space-y-4 shadow-2xl relative"
+              dir="rtl"
+            >
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-sm border border-emerald-500/30">
+                    <BookOpen className="w-4 h-4" />
+                  </span>
+                  <h3 className="text-base font-black text-slate-100">
+                    {editingPdfItem ? 'تعديل بيانات ملف الـ PDF ✏️' : 'إضافة ملف / درس PDF جديد ➕'}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsPdfModalOpen(false)}
+                  className="p-1.5 text-slate-400 hover:text-white rounded-xl bg-slate-800"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-3.5 text-xs">
+                <div>
+                  <label className="block text-slate-300 font-bold mb-1">
+                    1. عنوان الدرس أو اسم الكتاب / الملف: <span className="text-rose-400">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={pdfFormTitle}
+                    onChange={(e) => setPdfFormTitle(e.target.value)}
+                    placeholder="مثال: الوحدة الأولى - مراجعة القواعد والتراكيب"
+                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs font-bold outline-none focus:border-emerald-400"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-bold mb-1">
+                    2. رابط ملف PDF (Google Drive مشاركة أو رابط مباشر): <span className="text-rose-400">*</span>
+                  </label>
+                  <input
+                    type="url"
+                    value={pdfFormUrl}
+                    onChange={(e) => setPdfFormUrl(e.target.value)}
+                    placeholder="https://drive.google.com/file/d/.../view?usp=sharing أو رابط مباشر"
+                    className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs font-mono outline-none focus:border-emerald-400"
+                    dir="ltr"
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    💡 يمكنك لصق رابط المشاركة المباشر من Google Drive كما هو، وسيقوم النظام بتشغيله تلقائياً.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-bold mb-1">
+                    3. وصف مختصر أو ملاحظات للدرس (اختياري):
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={pdfFormDescription}
+                    onChange={(e) => setPdfFormDescription(e.target.value)}
+                    placeholder="ملاحظات تفيدك أثناء الشرح والتقديم..."
+                    className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 text-xs outline-none focus:border-emerald-400 resize-none"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsPdfModalOpen(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs cursor-pointer"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSavePdfItem}
+                  className="px-5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black rounded-xl text-xs flex items-center gap-1.5 shadow-md cursor-pointer"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>{editingPdfItem ? 'حفظ التعديلات' : 'إضافة للقائمة 📚'}</span>
                 </button>
               </div>
             </motion.div>

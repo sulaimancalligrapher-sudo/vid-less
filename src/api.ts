@@ -3,7 +3,7 @@ import {
   HeaderNavButton, HeaderConfig, StudentCorrection,
   TelegramConfig, TelegramTemplateItem, TelegramUserBinding, TelegramBroadcastMessage,
   LiveQuestionItem, LiveLessonRow, LiveAnswerRecord, LiveSessionState, LiveStudentAnswerSubmission,
-  LiveDirectQuestionItem, LiveDirectLessonRow, LiveDirectAnswerRecord
+  LiveDirectQuestionItem, LiveDirectLessonRow, LiveDirectAnswerRecord, LivePdfItem
 } from './types';
 
 // Helper to get Web App URL from localStorage or environment variables
@@ -2037,7 +2037,80 @@ export {
   toggleShowChatInRoom,
   toggleShowConnectedCountInRoom,
   sendTeacherBroadcastMessage,
+  updateLivePdfState,
+  toggleShowPdfInRoom,
 } from './lib/firebaseLiveService';
+
+// ==========================================
+// --- PDF LESSONS & TEACHING TOOLS HELPERS ---
+// ==========================================
+
+export function formatPdfEmbedUrl(rawUrl: string, page?: number): string {
+  if (!rawUrl || !rawUrl.trim()) return '';
+  const trimmed = rawUrl.trim();
+
+  // 1. Google Drive file link detection
+  // Format: https://drive.google.com/file/d/FILE_ID/view... or /preview or id=FILE_ID
+  const driveFileMatch = trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+  if (driveFileMatch && driveFileMatch[1]) {
+    const fileId = driveFileMatch[1];
+    return `https://drive.google.com/file/d/${fileId}/preview`;
+  }
+
+  const driveIdParamMatch = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (driveIdParamMatch && driveIdParamMatch[1] && trimmed.includes('drive.google.com')) {
+    const fileId = driveIdParamMatch[1];
+    return `https://drive.google.com/file/d/${fileId}/preview`;
+  }
+
+  // 2. Already an embed or preview or standard url
+  if (trimmed.includes('drive.google.com') && trimmed.includes('/preview')) {
+    return trimmed;
+  }
+
+  // 3. Direct PDF file URL with optional page hash
+  if (trimmed.toLowerCase().endsWith('.pdf') || trimmed.includes('.pdf?')) {
+    if (page && page > 1) {
+      return `${trimmed}#page=${page}`;
+    }
+    return trimmed;
+  }
+
+  return trimmed;
+}
+
+const PDF_LESSONS_STORAGE_KEY = 'live_direct_pdf_lessons_catalog';
+
+export function getSavedPdfLessons(): LivePdfItem[] {
+  try {
+    const raw = localStorage.getItem(PDF_LESSONS_STORAGE_KEY);
+    if (!raw) {
+      // Default sample lesson items for convenience
+      const defaultSamples: LivePdfItem[] = [
+        {
+          id: 'sample-1',
+          title: 'ملف الشرح النموذجي (Google Drive مثال)',
+          url: 'https://drive.google.com/file/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs/view?usp=sharing',
+          description: 'مثال على ملف بي دي اف تفاعلي جاهز للعرض',
+          addedAt: Date.now(),
+        },
+      ];
+      localStorage.setItem(PDF_LESSONS_STORAGE_KEY, JSON.stringify(defaultSamples));
+      return defaultSamples;
+    }
+    return JSON.parse(raw);
+  } catch (e) {
+    return [];
+  }
+}
+
+export function savePdfLessons(list: LivePdfItem[]): void {
+  try {
+    localStorage.setItem(PDF_LESSONS_STORAGE_KEY, JSON.stringify(list));
+  } catch (e) {
+    console.error('Failed to save PDF lessons catalog to localStorage', e);
+  }
+}
 
 
 

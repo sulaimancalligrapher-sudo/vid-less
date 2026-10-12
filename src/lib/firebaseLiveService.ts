@@ -35,6 +35,10 @@ export const defaultLiveSessionState: LiveSessionState = {
   showStudentTextAnswersInRoom: false,
   showChatInRoom: false,
   showConnectedCountInRoom: false,
+  showPdfInRoom: false,
+  pdfUrl: '',
+  pdfTitle: '',
+  pdfPage: 1,
   messages: [],
   lessonTitle: '',
   videoUrl: '',
@@ -88,6 +92,10 @@ export function subscribeToLiveSession(
           showStudentTextAnswersInRoom: Boolean(data.showStudentTextAnswersInRoom),
           showChatInRoom: Boolean(data.showChatInRoom),
           showConnectedCountInRoom: Boolean(data.showConnectedCountInRoom),
+          showPdfInRoom: Boolean(data.showPdfInRoom),
+          pdfUrl: data.pdfUrl || '',
+          pdfTitle: data.pdfTitle || '',
+          pdfPage: typeof data.pdfPage === 'number' ? data.pdfPage : 1,
           messages: Array.isArray(data.messages) ? data.messages : [],
           lessonTitle: data.lessonTitle || '',
           videoUrl: data.videoUrl || '',
@@ -1026,6 +1034,46 @@ export async function toggleShowConnectedCountInRoom(show: boolean): Promise<{ s
     console.error('Failed to toggle showConnectedCountInRoom in Firebase:', error);
     return { success: false };
   }
+}
+
+// Toggle or update PDF presentation in projector display room
+export async function updateLivePdfState({
+  showPdfInRoom,
+  pdfUrl,
+  pdfTitle,
+  pdfPage,
+}: {
+  showPdfInRoom?: boolean;
+  pdfUrl?: string;
+  pdfTitle?: string;
+  pdfPage?: number;
+}): Promise<{ success: boolean; state?: LiveSessionState }> {
+  try {
+    const updatePayload: Record<string, any> = {
+      updatedAt: serverTimestamp(),
+    };
+    if (showPdfInRoom !== undefined) updatePayload.showPdfInRoom = showPdfInRoom;
+    if (pdfUrl !== undefined) updatePayload.pdfUrl = pdfUrl;
+    if (pdfTitle !== undefined) updatePayload.pdfTitle = pdfTitle;
+    if (pdfPage !== undefined) updatePayload.pdfPage = pdfPage;
+
+    await updateDoc(LIVE_DOC_REF, updatePayload);
+    cachedState = {
+      ...cachedState,
+      ...(showPdfInRoom !== undefined ? { showPdfInRoom } : {}),
+      ...(pdfUrl !== undefined ? { pdfUrl } : {}),
+      ...(pdfTitle !== undefined ? { pdfTitle } : {}),
+      ...(pdfPage !== undefined ? { pdfPage } : {}),
+    };
+    return { success: true, state: cachedState };
+  } catch (error: any) {
+    console.error('Failed to update live PDF state in Firebase:', error);
+    return { success: false };
+  }
+}
+
+export async function toggleShowPdfInRoom(show: boolean): Promise<{ success: boolean; state?: LiveSessionState }> {
+  return updateLivePdfState({ showPdfInRoom: show });
 }
 
 

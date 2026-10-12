@@ -265,6 +265,10 @@ export interface LiveSessionState {
   showStudentTextAnswersInRoom?: boolean; // Controls whether student text answers appear on projector display screen
   showChatInRoom?: boolean; // Controls whether chat window / badge appears on projector display screen
   showConnectedCountInRoom?: boolean; // Controls whether connected students badge appears on projector display screen
+  showPdfInRoom?: boolean; // Controls whether PDF / lesson book is displayed on projector screen
+  pdfUrl?: string; // Direct or Google Drive PDF URL to display
+  pdfTitle?: string; // Title / name of active PDF lesson or book
+  pdfPage?: number; // Optional page number
   messages?: LiveStudentMessage[]; // Live list of questions and reactions from students
   lessonTitle: string;
   videoUrl: string;
@@ -279,6 +283,14 @@ export interface LiveSessionState {
   connectedStudents: LiveConnectedStudent[];
   answersForCurrentQuestion: Record<string, LiveStudentAnswerSubmission>;
   allSessionAnswers: Record<string, Record<number, string>>;
+}
+
+export interface LivePdfItem {
+  id: string;
+  title: string;
+  url: string;
+  description?: string;
+  addedAt: number;
 }
 
 // ==========================================

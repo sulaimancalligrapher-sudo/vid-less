@@ -17,6 +17,8 @@ import {
   X,
   Volume2,
   VolumeX,
+  BookOpen,
+  FileText,
 } from 'lucide-react';
 import {
   LiveSessionState,
@@ -34,6 +36,7 @@ import {
   sendTeacherBroadcastMessage,
   formatSecondsToTime,
   formatDriveImageUrl,
+  formatPdfEmbedUrl,
 } from '../api';
 import LiveChatModal from './LiveChatModal';
 
@@ -171,6 +174,208 @@ export default function LiveDirectDisplayRoom({}: LiveDirectDisplayRoomProps = {
     return counts;
   }, [currentAnswers, options]);
 
+  const renderQuestionCard = () => {
+    if (!currentQ) return null;
+    return (
+      <div className="w-full space-y-6">
+        {/* Top Question Info Bar with Circular Countdown Timer */}
+        <div className="flex items-center justify-between gap-4 bg-slate-900/95 border border-slate-800 p-4 rounded-3xl shadow-2xl backdrop-blur-md">
+          <div className="flex items-center gap-3">
+            <span className="w-10 h-10 rounded-2xl bg-amber-500 text-slate-950 font-black text-sm flex items-center justify-center shadow-md">
+              س{(sessionState?.currentQuestionIndex ?? 0) + 1}
+            </span>
+            <div>
+              <div className="text-xs text-slate-400 font-bold">السؤال التفاعلي المباشر</div>
+              <div className="text-xs font-mono text-amber-400 font-semibold">
+                أجاب {answeredCount} من {totalConnected} طالب
+              </div>
+            </div>
+          </div>
+
+          {/* Timer & Revealed Badge */}
+          <div className="flex items-center gap-3">
+            {sessionState?.status === 'question_active' && (
+              <div className={`flex items-center gap-2 px-4 py-2 rounded-2xl font-mono text-base font-black border transition-all ${
+                remainingTime <= 5
+                  ? 'bg-rose-500/20 border-rose-500 text-rose-300 animate-pulse ring-2 ring-rose-500/30'
+                  : 'bg-slate-950 border-amber-500/30 text-amber-300'
+              }`}>
+                <Clock className="w-4 h-4 text-amber-400" />
+                <span>{formatSecondsToTime(remainingTime)}</span>
+              </div>
+            )}
+
+            {sessionState?.status === 'revealed' && (
+              <span className="px-4 py-2 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-black flex items-center gap-1.5 shadow-md">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                <span>تم كشف الإجابة الصحيحة 🌟</span>
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Question Text & Visual Box */}
+        <div className="bg-slate-900/95 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl text-center space-y-5 backdrop-blur-md">
+          {/* Optional Question Image */}
+          {currentQ.image && (
+            <div className="max-w-2xl mx-auto rounded-2xl overflow-hidden border border-slate-800 shadow-xl bg-slate-950 p-1">
+              <img
+                src={formatDriveImageUrl(currentQ.image)}
+                alt="صورة السؤال"
+                className="w-full max-h-72 sm:max-h-96 object-contain rounded-xl mx-auto"
+              />
+            </div>
+          )}
+
+          {currentQ.question && (
+            <h2 className="text-xl sm:text-3xl md:text-4xl font-black text-slate-100 leading-snug">
+              {currentQ.question}
+            </h2>
+          )}
+        </div>
+
+        {/* Sub-case A: Written Text Answer Question */}
+        {currentQ.isTextAnswer || options.length === 0 ? (
+          <div className="space-y-4 max-w-2xl mx-auto">
+            <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 text-center space-y-3 shadow-xl backdrop-blur-md">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-300 text-xs font-bold border border-indigo-500/30">
+                <Sparkles className="w-4 h-4 text-indigo-400" />
+                <span>سؤال إجابة نصية / كتابية ✍️</span>
+              </div>
+              <p className="text-slate-400 text-sm">
+                الطلاب يقومون بكتابة وإرسال إجاباتهم مباشرة من أجهزتهم الآن ({answeredCount} إجابة تم استلامها).
+              </p>
+            </div>
+
+            {/* If revealed and correct answer provided */}
+            {sessionState?.status === 'revealed' && currentQ.correctAnswer && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="bg-emerald-950/80 border-2 border-emerald-500/60 rounded-3xl p-6 text-center space-y-2 shadow-2xl ring-4 ring-emerald-500/20"
+              >
+                <span className="text-xs font-black text-emerald-400 tracking-wider">
+                  الإجابة النموذجية الصحيحة:
+                </span>
+                <p className="text-xl sm:text-3xl font-black text-emerald-200">
+                  {currentQ.correctAnswer}
+                </p>
+              </motion.div>
+            )}
+          </div>
+        ) : (
+          /* Sub-case B: Multiple Choice Options Grid (with real-time vote percentage bars) */
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {options.map((opt, idx) => {
+              const optLetter = ['أ', 'ب', 'ج', 'د', 'هـ'][idx] || String(idx + 1);
+              const voteCount = optionCounts[idx] || 0;
+              const percentage = answeredCount > 0 ? Math.round((voteCount / answeredCount) * 100) : 0;
+
+              const isCorrect = sessionState?.status === 'revealed' && (
+                String(idx + 1) === String(currentQ.correctAnswer).trim() ||
+                opt.trim().toLowerCase() === String(currentQ.correctAnswer).trim().toLowerCase()
+              );
+
+              return (
+                <div
+                  key={idx}
+                  className={`relative overflow-hidden p-5 sm:p-6 rounded-3xl border-2 transition-all shadow-xl flex items-center justify-between ${
+                    isCorrect
+                      ? 'bg-emerald-950/80 border-emerald-400 ring-4 ring-emerald-500/30 shadow-emerald-500/20'
+                      : 'bg-slate-900/90 border-slate-800'
+                  }`}
+                >
+                  {/* Live Vote Progress Fill Bar (مخفي افتراضياً - يتحكم به المعلم) */}
+                  {Boolean(sessionState?.showOptionCountsInRoom) && (
+                    <div
+                      className={`absolute inset-y-0 right-0 transition-all duration-500 pointer-events-none ${
+                        isCorrect ? 'bg-emerald-500/20' : 'bg-indigo-600/15'
+                      }`}
+                      style={{ width: `${percentage}%` }}
+                    />
+                  )}
+
+                  {/* Option Text and Letter */}
+                  <div className="relative z-10 flex items-center gap-4">
+                    <span className={`w-10 h-10 sm:w-12 sm:h-12 rounded-2xl flex items-center justify-center font-black text-base sm:text-lg shadow-md shrink-0 ${
+                      isCorrect
+                        ? 'bg-emerald-500 text-slate-950'
+                        : 'bg-slate-800 text-indigo-300'
+                    }`}>
+                      {optLetter}
+                    </span>
+                    <span className="text-base sm:text-xl font-bold text-slate-100">
+                      {opt}
+                    </span>
+                  </div>
+
+                  {/* Stats & Badge */}
+                  <div className="relative z-10 flex items-center gap-2 font-mono">
+                    {isCorrect && (
+                      <span className="px-2.5 py-1 rounded-xl bg-emerald-500/30 text-emerald-300 text-xs font-bold">
+                        صحيحة ✓
+                      </span>
+                    )}
+                    {Boolean(sessionState?.showOptionCountsInRoom) && (
+                      <span className="text-sm sm:text-base font-bold text-slate-300 animate-in fade-in">
+                        {voteCount} ({percentage}%)
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Live stream list of student submissions - controlled via Admin (مخفي افتراضياً) */}
+        {Boolean(sessionState?.showStudentTextAnswersInRoom) && (
+          <div className="bg-slate-900/95 border border-slate-800 rounded-3xl p-4 sm:p-5 max-h-64 overflow-y-auto space-y-2 mt-4 text-right shadow-2xl animate-in fade-in backdrop-blur-md">
+            <div className="text-xs font-bold text-slate-400 mb-2 flex items-center justify-between">
+              <span className="flex items-center gap-1.5 text-indigo-400">
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>إجابات الطلاب المستلمة فورياً ({Object.keys(currentAnswers).length}):</span>
+              </span>
+              <span className="text-[10px] text-slate-500 font-mono">تحديث فوري متزامن</span>
+            </div>
+            {Object.keys(currentAnswers).length === 0 ? (
+              <p className="text-xs text-slate-500 py-4 text-center">في انتظار إجابات الطلاب من أجهزتهم...</p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {Object.values(currentAnswers).map((sub, sIdx) => {
+                  const evalSub = sessionState?.status === 'revealed' ? evaluateLiveAnswer(currentQ, sub.answer) : null;
+                  return (
+                    <div
+                      key={sIdx}
+                      className="p-2.5 bg-slate-950/70 border border-slate-800 rounded-xl flex items-center justify-between gap-2"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="w-6 h-6 rounded-lg bg-indigo-600/20 text-indigo-300 font-bold text-[10px] flex items-center justify-center shrink-0">
+                          {sub.sheetNumber || sIdx + 1}
+                        </span>
+                        <span className="text-xs font-bold text-slate-200 truncate">{sub.username}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className="text-xs font-mono font-bold text-amber-300 max-w-[130px] truncate">{sub.answer}</span>
+                        {evalSub && evalSub.isCorrect !== null && (
+                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                            evalSub.isCorrect ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
+                          }`}>
+                            {evalSub.isCorrect ? '✓' : '✗'}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between selection:bg-amber-500 selection:text-slate-950 font-sans" dir="rtl">
       {/* Top Theater Header Bar */}
@@ -252,6 +457,19 @@ export default function LiveDirectDisplayRoom({}: LiveDirectDisplayRoomProps = {
             </button>
           )}
 
+          {/* Active PDF Badge (إذا كان معروضاً على شاشة البروجكتر) */}
+          {Boolean(sessionState?.showPdfInRoom) && sessionState?.pdfUrl && (
+            <div className="flex items-center gap-1.5 bg-slate-950 border border-emerald-500/30 px-3 py-1.5 rounded-xl text-xs font-bold text-emerald-300 animate-in fade-in shadow-inner">
+              <BookOpen className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="truncate max-w-[130px] sm:max-w-[200px]">{sessionState.pdfTitle || 'ملف الشرح PDF'}</span>
+              {Boolean(sessionState.pdfPage) && (
+                <span className="px-1.5 py-0.2 rounded-md bg-emerald-500/20 text-emerald-300 text-[10px] font-mono">
+                  ص {sessionState.pdfPage}
+                </span>
+              )}
+            </div>
+          )}
+
           {/* Fullscreen Button */}
           <button
             type="button"
@@ -265,259 +483,11 @@ export default function LiveDirectDisplayRoom({}: LiveDirectDisplayRoomProps = {
       </header>
 
       {/* Main Presentation Stage */}
-      <main className="flex-1 flex flex-col items-center justify-center p-4 sm:p-8 max-w-6xl mx-auto w-full">
-        {/* ========================================================================= */}
-        {/* SCENARIO 1: EXPLANATION MODE / WAITING MODE (الشرح أو الانتظار) */}
-        {/* ========================================================================= */}
-        {(!sessionState || 
-          (sessionState.status !== 'question_active' && 
-           sessionState.status !== 'revealed' && 
-           sessionState.status !== 'finished' && 
-           sessionState.status !== 'program_ended')) && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="w-full text-center space-y-8 my-auto"
-          >
-            {/* Majestic Animated Podium Icon */}
-            <div className="relative inline-block">
-              <div className="absolute -inset-6 bg-gradient-to-r from-amber-500/20 via-indigo-500/20 to-teal-500/20 rounded-full blur-2xl animate-pulse" />
-              <div className="relative w-28 h-28 sm:w-36 sm:h-36 rounded-3xl bg-slate-900 border-2 border-amber-500/40 text-amber-400 flex items-center justify-center shadow-2xl mx-auto">
-                <Mic className="w-14 h-14 sm:w-18 sm:h-18 animate-bounce text-amber-400" />
-              </div>
-            </div>
-
-            <div className="space-y-3 max-w-2xl mx-auto">
-              <span className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full font-bold text-xs sm:text-sm border ${
-                sessionState?.isProgramActive
-                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
-                  : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
-              }`}>
-                <Sparkles className="w-4 h-4 text-amber-400" />
-                <span>{sessionState?.isProgramActive ? 'الأستاذ يشرح الآن 🎙️' : 'في انتظار بدء المعلم للحصة المباشرة ⏳'}</span>
-              </span>
-              <h2 className="text-2xl sm:text-4xl md:text-5xl font-black text-slate-100 tracking-tight leading-tight">
-                {sessionState?.lessonTitle || (sessionState?.isProgramActive ? 'حصة تدريبية تفاعلية حية' : 'القاعة المباشرة')}
-              </h2>
-              <p className="text-sm sm:text-base text-slate-400 leading-relaxed max-w-lg mx-auto">
-                {sessionState?.isProgramActive
-                  ? 'استمع بتركيز للشرح والملاحظات • سيتم طرح الأسئلة التفاعلية على هذه الشاشة وفي هواتفكم في أي لحظة.'
-                  : 'بمجرد أن يبدأ المعلم الحصة من لوحة التحكم، ستفتح القاعة وتظهر الأسئلة التفاعلية لحظياً.'}
-              </p>
-            </div>
-          </motion.div>
-        )}
-
-        {/* ========================================================================= */}
-        {/* SCENARIO 2: QUESTION ACTIVE / REVEALED MODE (طرح السؤال وعرض الخيارات) */}
-        {/* ========================================================================= */}
-        {(sessionState?.status === 'question_active' || sessionState?.status === 'revealed') && currentQ && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="w-full space-y-6 my-auto"
-          >
-            {/* Top Question Info Bar with Circular Countdown Timer */}
-            <div className="flex items-center justify-between gap-4 bg-slate-900/90 border border-slate-800 p-4 rounded-3xl shadow-xl">
-              <div className="flex items-center gap-3">
-                <span className="w-10 h-10 rounded-2xl bg-amber-500 text-slate-950 font-black text-sm flex items-center justify-center shadow-md">
-                  س{(sessionState.currentQuestionIndex ?? 0) + 1}
-                </span>
-                <div>
-                  <div className="text-xs text-slate-400 font-bold">السؤال التفاعلي المباشر</div>
-                  <div className="text-xs font-mono text-amber-400 font-semibold">
-                    أجاب {answeredCount} من {totalConnected} طالب
-                  </div>
-                </div>
-              </div>
-
-              {/* Timer & Revealed Badge */}
-              <div className="flex items-center gap-3">
-                {sessionState.status === 'question_active' && (
-                  <div className={`flex items-center gap-2 px-4 py-2 rounded-2xl font-mono text-base font-black border transition-all ${
-                    remainingTime <= 5
-                      ? 'bg-rose-500/20 border-rose-500 text-rose-300 animate-pulse ring-2 ring-rose-500/30'
-                      : 'bg-slate-950 border-amber-500/30 text-amber-300'
-                  }`}>
-                    <Clock className="w-4 h-4 text-amber-400" />
-                    <span>{formatSecondsToTime(remainingTime)}</span>
-                  </div>
-                )}
-
-                {sessionState.status === 'revealed' && (
-                  <span className="px-4 py-2 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-black flex items-center gap-1.5 shadow-md">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                    <span>تم كشف الإجابة الصحيحة 🌟</span>
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {/* Question Text & Visual Box */}
-            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl text-center space-y-5">
-              {/* Optional Question Image */}
-              {currentQ.image && (
-                <div className="max-w-2xl mx-auto rounded-2xl overflow-hidden border border-slate-800 shadow-xl bg-slate-950 p-1">
-                  <img
-                    src={formatDriveImageUrl(currentQ.image)}
-                    alt="صورة السؤال"
-                    className="w-full max-h-72 sm:max-h-96 object-contain rounded-xl mx-auto"
-                  />
-                </div>
-              )}
-
-              {currentQ.question && (
-                <h2 className="text-xl sm:text-3xl md:text-4xl font-black text-slate-100 leading-snug">
-                  {currentQ.question}
-                </h2>
-              )}
-            </div>
-
-            {/* Sub-case A: Written Text Answer Question */}
-            {currentQ.isTextAnswer || options.length === 0 ? (
-              <div className="space-y-4 max-w-2xl mx-auto">
-                <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 text-center space-y-3 shadow-xl">
-                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/20 text-indigo-300 text-xs font-bold border border-indigo-500/30">
-                    <Sparkles className="w-4 h-4 text-indigo-400" />
-                    <span>سؤال إجابة نصية / كتابية ✍️</span>
-                  </div>
-                  <p className="text-slate-400 text-sm">
-                    الطلاب يقومون بكتابة وإرسال إجاباتهم مباشرة من أجهزتهم الآن ({answeredCount} إجابة تم استلامها).
-                  </p>
-                </div>
-
-                {/* If revealed and correct answer provided */}
-                {sessionState.status === 'revealed' && currentQ.correctAnswer && (
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    className="bg-emerald-950/70 border-2 border-emerald-500/60 rounded-3xl p-6 text-center space-y-2 shadow-2xl ring-4 ring-emerald-500/20"
-                  >
-                    <span className="text-xs font-black text-emerald-400 tracking-wider">
-                      الإجابة النموذجية الصحيحة:
-                    </span>
-                    <p className="text-xl sm:text-3xl font-black text-emerald-200">
-                      {currentQ.correctAnswer}
-                    </p>
-                  </motion.div>
-                )}
-              </div>
-            ) : (
-              /* Sub-case B: Multiple Choice Options Grid (with real-time vote percentage bars) */
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {options.map((opt, idx) => {
-                  const optLetter = ['أ', 'ب', 'ج', 'د', 'هـ'][idx] || String(idx + 1);
-                  const voteCount = optionCounts[idx] || 0;
-                  const percentage = answeredCount > 0 ? Math.round((voteCount / answeredCount) * 100) : 0;
-
-                  const isCorrect = sessionState.status === 'revealed' && (
-                    String(idx + 1) === String(currentQ.correctAnswer).trim() ||
-                    opt.trim().toLowerCase() === String(currentQ.correctAnswer).trim().toLowerCase()
-                  );
-
-                  return (
-                    <div
-                      key={idx}
-                      className={`relative overflow-hidden p-5 sm:p-6 rounded-3xl border-2 transition-all shadow-xl flex items-center justify-between ${
-                        isCorrect
-                          ? 'bg-emerald-950/70 border-emerald-400 ring-4 ring-emerald-500/30 shadow-emerald-500/20'
-                          : 'bg-slate-900/90 border-slate-800'
-                      }`}
-                    >
-                      {/* Live Vote Progress Fill Bar (مخفي افتراضياً - يتحكم به المعلم) */}
-                      {Boolean(sessionState.showOptionCountsInRoom) && (
-                        <div
-                          className={`absolute inset-y-0 right-0 transition-all duration-500 pointer-events-none ${
-                            isCorrect ? 'bg-emerald-500/20' : 'bg-indigo-600/15'
-                          }`}
-                          style={{ width: `${percentage}%` }}
-                        />
-                      )}
-
-                      {/* Option Text and Letter */}
-                      <div className="relative z-10 flex items-center gap-4">
-                        <span className={`w-10 h-10 sm:w-12 sm:h-12 rounded-2xl flex items-center justify-center font-black text-base sm:text-lg shadow-md shrink-0 ${
-                          isCorrect
-                            ? 'bg-emerald-500 text-slate-950'
-                            : 'bg-slate-800 text-indigo-300'
-                        }`}>
-                          {optLetter}
-                        </span>
-                        <span className="text-base sm:text-xl font-bold text-slate-100">
-                          {opt}
-                        </span>
-                      </div>
-
-                      {/* Stats & Badge */}
-                      <div className="relative z-10 flex items-center gap-2 font-mono">
-                        {isCorrect && (
-                          <span className="px-2.5 py-1 rounded-xl bg-emerald-500/30 text-emerald-300 text-xs font-bold">
-                            صحيحة ✓
-                          </span>
-                        )}
-                        {Boolean(sessionState.showOptionCountsInRoom) && (
-                          <span className="text-sm sm:text-base font-bold text-slate-300 animate-in fade-in">
-                            {voteCount} ({percentage}%)
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Live stream list of student submissions - controlled via Admin (مخفي افتراضياً) */}
-            {Boolean(sessionState?.showStudentTextAnswersInRoom) && (
-              <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-4 sm:p-5 max-h-64 overflow-y-auto space-y-2 mt-4 text-right shadow-xl animate-in fade-in">
-                <div className="text-xs font-bold text-slate-400 mb-2 flex items-center justify-between">
-                  <span className="flex items-center gap-1.5 text-indigo-400">
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>إجابات الطلاب المستلمة فورياً ({Object.keys(currentAnswers).length}):</span>
-                  </span>
-                  <span className="text-[10px] text-slate-500 font-mono">تحديث فوري متزامن</span>
-                </div>
-                {Object.keys(currentAnswers).length === 0 ? (
-                  <p className="text-xs text-slate-500 py-4 text-center">في انتظار إجابات الطلاب من أجهزتهم...</p>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {Object.values(currentAnswers).map((sub, sIdx) => {
-                      const evalSub = sessionState.status === 'revealed' ? evaluateLiveAnswer(currentQ, sub.answer) : null;
-                      return (
-                        <div
-                          key={sIdx}
-                          className="p-2.5 bg-slate-950/70 border border-slate-800 rounded-xl flex items-center justify-between gap-2"
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className="w-6 h-6 rounded-lg bg-indigo-600/20 text-indigo-300 font-bold text-[10px] flex items-center justify-center shrink-0">
-                              {sub.sheetNumber || sIdx + 1}
-                            </span>
-                            <span className="text-xs font-bold text-slate-200 truncate">{sub.username}</span>
-                          </div>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <span className="text-xs font-mono font-bold text-amber-300 max-w-[130px] truncate">{sub.answer}</span>
-                            {evalSub && evalSub.isCorrect !== null && (
-                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                                evalSub.isCorrect ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'
-                              }`}>
-                                {evalSub.isCorrect ? '✓' : '✗'}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-          </motion.div>
-        )}
-
+      <main className="flex-1 flex flex-col items-center justify-center p-3 sm:p-6 max-w-7xl mx-auto w-full relative">
         {/* ========================================================================= */}
         {/* SCENARIO 3: FINISHED SESSION / PROGRAM ENDED MODE */}
         {/* ========================================================================= */}
-        {(sessionState?.status === 'finished' || sessionState?.status === 'program_ended') && (
+        {(sessionState?.status === 'finished' || sessionState?.status === 'program_ended') ? (
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -535,6 +505,101 @@ export default function LiveDirectDisplayRoom({}: LiveDirectDisplayRoomProps = {
               </p>
             </div>
           </motion.div>
+        ) : Boolean(sessionState?.showPdfInRoom) && sessionState?.pdfUrl ? (
+          /* ========================================================================= */
+          /* PDF PRESENTATION STAGE (مع إبقاء الـ PDF ثابتاً ورفع السؤال كنافذة أنيقة فوقه) */
+          /* ========================================================================= */
+          <div className="w-full flex-1 flex flex-col h-[calc(100vh-140px)] min-h-[580px] rounded-3xl border border-slate-800/80 bg-slate-900/90 shadow-2xl overflow-hidden relative">
+            <iframe
+              src={formatPdfEmbedUrl(sessionState.pdfUrl, sessionState.pdfPage)}
+              title={sessionState.pdfTitle || 'عرض ملف الشرح'}
+              className="w-full flex-1 h-full min-h-[580px] border-0"
+              allow="autoplay; encrypted-media; fullscreen"
+            />
+
+            {/* Elevated Question Modal Overlay above PDF */}
+            <AnimatePresence>
+              {(sessionState?.status === 'question_active' || sessionState?.status === 'revealed') && currentQ && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.96, y: 30 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.96, y: 30 }}
+                  transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+                  className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/85 backdrop-blur-md overflow-y-auto"
+                >
+                  <div className="w-full max-w-5xl my-auto">
+                    {/* Top indicator that question is floating over PDF */}
+                    <div className="flex items-center justify-between gap-3 mb-3 px-2">
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-bold shadow-md">
+                        <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                        <span>سؤال تفاعلي مباشر يرتفع فوق ملف الشرح 🌟</span>
+                      </span>
+                      <span className="text-xs text-slate-400 font-mono hidden sm:inline">
+                        (عند العودة لوضع الشرح يعود ملف الـ PDF فورياً لنفس الصفحة)
+                      </span>
+                    </div>
+
+                    {/* Question Card */}
+                    {renderQuestionCard()}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        ) : (
+          /* ========================================================================= */
+          /* STANDARD STAGE: EXPLANATION PODIUM OR INLINE QUESTION CARD */
+          /* ========================================================================= */
+          <>
+            {/* SCENARIO 1: EXPLANATION / WAITING MODE */}
+            {(!sessionState || 
+              (sessionState.status !== 'question_active' && 
+               sessionState.status !== 'revealed')) && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="w-full text-center space-y-8 my-auto"
+              >
+                {/* Majestic Animated Podium Icon */}
+                <div className="relative inline-block">
+                  <div className="absolute -inset-6 bg-gradient-to-r from-amber-500/20 via-indigo-500/20 to-teal-500/20 rounded-full blur-2xl animate-pulse" />
+                  <div className="relative w-28 h-28 sm:w-36 sm:h-36 rounded-3xl bg-slate-900 border-2 border-amber-500/40 text-amber-400 flex items-center justify-center shadow-2xl mx-auto">
+                    <Mic className="w-14 h-14 sm:w-18 sm:h-18 animate-bounce text-amber-400" />
+                  </div>
+                </div>
+
+                <div className="space-y-3 max-w-2xl mx-auto">
+                  <span className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full font-bold text-xs sm:text-sm border ${
+                    sessionState?.isProgramActive
+                      ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+                      : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+                  }`}>
+                    <Sparkles className="w-4 h-4 text-amber-400" />
+                    <span>{sessionState?.isProgramActive ? 'الأستاذ يشرح الآن 🎙️' : 'في انتظار بدء المعلم للحصة المباشرة ⏳'}</span>
+                  </span>
+                  <h2 className="text-2xl sm:text-4xl md:text-5xl font-black text-slate-100 tracking-tight leading-tight">
+                    {sessionState?.lessonTitle || (sessionState?.isProgramActive ? 'حصة تدريبية تفاعلية حية' : 'القاعة المباشرة')}
+                  </h2>
+                  <p className="text-sm sm:text-base text-slate-400 leading-relaxed max-w-lg mx-auto">
+                    {sessionState?.isProgramActive
+                      ? 'استمع بتركيز للشرح والملاحظات • سيتم طرح الأسئلة التفاعلية على هذه الشاشة وفي هواتفكم في أي لحظة.'
+                      : 'بمجرد أن يبدأ المعلم الحصة من لوحة التحكم، ستفتح القاعة وتظهر الأسئلة التفاعلية لحظياً.'}
+                  </p>
+                </div>
+              </motion.div>
+            )}
+
+            {/* SCENARIO 2: QUESTION ACTIVE / REVEALED INLINE */}
+            {(sessionState?.status === 'question_active' || sessionState?.status === 'revealed') && currentQ && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="w-full space-y-6 my-auto"
+              >
+                {renderQuestionCard()}
+              </motion.div>
+            )}
+          </>
         )}
       </main>
 
