@@ -1205,26 +1205,203 @@ export default function LiveDirectManager({
                     type="button"
                     onClick={handleQuickSaveAnswers}
                     disabled={isFinishingSession}
-                    className="px-4 py-2 bg-emerald-600/30 hover:bg-emerald-600 text-emerald-200 hover:text-white font-bold rounded-xl text-xs flex items-center gap-1.5 border border-emerald-500/40 transition-all cursor-pointer"
+                    className="px-3.5 py-2 bg-emerald-600/30 hover:bg-emerald-600 text-emerald-200 hover:text-white font-bold rounded-xl text-xs flex items-center gap-1.5 border border-emerald-500/40 transition-all cursor-pointer shadow-sm"
                     title="حفظ وتوثيق إجابات الطلاب المسجلة في ورقة Answers-Live فوراً دون إنهاء الحصة"
                   >
-                    <Save className="w-4 h-4" />
-                    <span>حفظ في الشيت الآن 💾</span>
+                    <Save className="w-4 h-4 text-emerald-400" />
+                    <span>حفظ</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={handleFinishAndSave}
                     disabled={isFinishingSession}
-                    className="px-4 py-2 bg-rose-600/30 hover:bg-rose-600 text-rose-200 hover:text-white font-bold rounded-xl text-xs flex items-center gap-1.5 border border-rose-500/40 transition-all cursor-pointer"
+                    className="px-3.5 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 border border-rose-500/60 transition-all cursor-pointer shadow-md shadow-rose-600/25"
                     title="إنهاء الحصة وتوثيق كافة النتائج في ورقة Answers-Live وإغلاق الجلسة"
                   >
-                    <Power className="w-4 h-4" />
-                    <span>إنهاء وحفظ في الشيت 🛑</span>
+                    <Power className="w-4 h-4 text-rose-100" />
+                    <span>إنهاء وحفظ</span>
                   </button>
                 </div>
               </div>
             </div>
+
+            {/* Interactive Questions Launchpad (صندوق بنك أسئلة الحصة المباشرة) */}
+            {activeLesson ? (
+              <div className="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-4 shadow-xl">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-black text-slate-100 flex items-center gap-2">
+                      <HelpCircle className="w-4 h-4 text-amber-400" />
+                      <span>بنك أسئلة الحصة المباشرة ({activeLesson.questions?.length || 0} أسئلة)</span>
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      انقر على أي سؤال لمعاينته ثم اضغط زر "طرح السؤال الآن" لعرضه فورياً للطلاب وعلى الشاشة.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Question Chips */}
+                <div className="flex flex-wrap items-center gap-2 overflow-x-auto py-1">
+                  {activeLesson.questions.map((q, idx) => {
+                    const isActive = sessionState?.currentQuestionIndex === idx && sessionState?.status === 'question_active';
+                    const isRevealed = sessionState?.currentQuestionIndex === idx && sessionState?.status === 'revealed';
+                    const isSelectedForPreview = previewQuestionIndex === idx;
+
+                    return (
+                      <button
+                        key={idx}
+                        onClick={() => setPreviewQuestionIndex(idx)}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-bold font-mono transition-all flex items-center gap-2 cursor-pointer border ${
+                          isActive
+                            ? 'bg-amber-500 border-amber-400 text-slate-950 font-black shadow-lg shadow-amber-500/20 ring-2 ring-amber-300 animate-pulse'
+                            : isRevealed
+                            ? 'bg-emerald-950 border-emerald-500/60 text-emerald-300'
+                            : isSelectedForPreview
+                            ? 'bg-indigo-600 text-white border-indigo-400 shadow-md'
+                            : 'bg-slate-900 hover:bg-slate-850 border-slate-800 text-slate-300'
+                        }`}
+                      >
+                        <span>س{idx + 1}</span>
+                        {q.image && (
+                          <span className="text-[10px] bg-amber-400/20 text-amber-300 px-1 rounded">🖼️</span>
+                        )}
+                        {q.isTextAnswer && (
+                          <span className="text-[10px] bg-indigo-400/20 text-indigo-300 px-1 rounded">✍️</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Selected Question Preview & Launch Box */}
+                {activeLesson.questions[previewQuestionIndex] && (
+                  <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4 space-y-4">
+                    {/* Top Header of Preview */}
+                    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                      <div className="space-y-1.5 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="px-2.5 py-0.5 rounded-lg bg-indigo-500/20 text-indigo-300 font-bold text-xs">
+                            معاينة السؤال {previewQuestionIndex + 1}
+                          </span>
+                          {activeLesson.questions[previewQuestionIndex].isTextAnswer ? (
+                            <span className="px-2 py-0.5 rounded-lg bg-purple-500/20 text-purple-300 text-xs font-bold flex items-center gap-1">
+                              ✍️ إجابة كتابية / نصية
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-lg bg-emerald-500/20 text-emerald-300 text-xs font-bold">
+                              🔘 خيارات متعددة ({(activeLesson.questions[previewQuestionIndex].options || []).length})
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Question Text */}
+                        {activeLesson.questions[previewQuestionIndex].question && (
+                          <h4 className="text-base font-bold text-slate-100 leading-relaxed pt-1">
+                            {activeLesson.questions[previewQuestionIndex].question}
+                          </h4>
+                        )}
+                      </div>
+
+                      {/* Launch Controls */}
+                      <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
+                        {/* Teacher Live Timer Selector */}
+                        <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 px-2.5 py-2 rounded-xl">
+                          <Clock className="w-3.5 h-3.5 text-amber-400" />
+                          <span className="text-[11px] text-slate-400 font-bold">المهلة:</span>
+                          <select
+                            value={launchTimerDuration}
+                            onChange={(e) => setLaunchTimerDuration(parseInt(e.target.value, 10) || 30)}
+                            className="bg-slate-900 border border-slate-700 text-amber-300 text-xs font-bold font-mono px-2 py-1 rounded-lg outline-none cursor-pointer"
+                          >
+                            <option value={15}>15 ثانية</option>
+                            <option value={30}>30 ثانية</option>
+                            <option value={45}>45 ثانية</option>
+                            <option value={60}>60 ثانية</option>
+                            <option value={90}>90 ثانية</option>
+                            <option value={120}>دقيقتان</option>
+                            <option value={9999}>مفتوح بدون وقت</option>
+                          </select>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleLaunchQuestion(activeLesson.questions[previewQuestionIndex], previewQuestionIndex, launchTimerDuration)}
+                          className="px-5 py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-amber-500/20 transition-all cursor-pointer active:scale-95"
+                        >
+                          <Play className="w-4 h-4 fill-slate-950" />
+                          <span>طرح السؤال للطلاب الآن 🚀</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Question Image Preview if present */}
+                    {activeLesson.questions[previewQuestionIndex].image && (
+                      <div className="max-w-md max-h-56 rounded-2xl overflow-hidden border border-slate-800 bg-slate-950 p-1.5">
+                        <img
+                          src={formatDriveImageUrl(activeLesson.questions[previewQuestionIndex].image)}
+                          alt="توضيح السؤال"
+                          className="w-full max-h-52 object-contain rounded-xl mx-auto"
+                        />
+                      </div>
+                    )}
+
+                    {/* Multiple Choice Options List or Text Answer Info */}
+                    {activeLesson.questions[previewQuestionIndex].isTextAnswer ? (
+                      <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 space-y-1 text-xs">
+                        <div className="text-slate-400 font-bold">طريقة الإجابة: نصية كتابية</div>
+                        {activeLesson.questions[previewQuestionIndex].correctAnswer ? (
+                          <div className="text-emerald-400 font-mono">
+                            الإجابة النموذجية المحددة: <span className="font-bold underline">{activeLesson.questions[previewQuestionIndex].correctAnswer}</span>
+                          </div>
+                        ) : (
+                          <div className="text-amber-400/90">
+                            إجابة حرة مفتوحة (تقييم حر من الأستاذ)
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                        {(activeLesson.questions[previewQuestionIndex].options || []).map((opt, optIdx) => {
+                          const isCorrect = String(optIdx + 1) === String(activeLesson.questions[previewQuestionIndex].correctAnswer).trim() ||
+                                            opt.trim().toLowerCase() === String(activeLesson.questions[previewQuestionIndex].correctAnswer).trim().toLowerCase();
+                          return (
+                            <div
+                              key={optIdx}
+                              className={`p-2.5 rounded-xl border text-xs font-bold flex items-center justify-between ${
+                                isCorrect
+                                  ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-200'
+                                  : 'bg-slate-950 border-slate-800 text-slate-300'
+                              }`}
+                            >
+                              <span className="flex items-center gap-2">
+                                <span className="w-5 h-5 rounded-lg bg-slate-800 text-slate-400 flex items-center justify-center text-[10px] font-mono">
+                                  {optIdx + 1}
+                                </span>
+                                <span>{opt}</span>
+                              </span>
+                              {isCorrect && (
+                                <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 text-[10px]">
+                                  الإجابة الصحيحة ✓
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="p-8 text-center bg-slate-950/50 rounded-2xl border border-dashed border-slate-800 space-y-2">
+                <Mic className="w-10 h-10 text-slate-600 mx-auto" />
+                <h3 className="text-sm font-bold text-slate-300">يرجى اختيار موضوع الحصة من القائمة أعلاه للبدء</h3>
+                <p className="text-xs text-slate-500 max-w-md mx-auto">
+                  أو يمكنك إضافة موضوع جديد مع أسئلته التفاعلية عبر تبويب "قسم إعدادات الأسئلة (Questions-Live)".
+                </p>
+              </div>
+            )}
 
             {/* Real-time Interactive Controls Bar (أعداد الخيارات، إجابات الطلاب، الذين لم يجاوبوا، البحث) */}
             <div className="pt-3 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3">
@@ -1524,183 +1701,6 @@ export default function LiveDirectManager({
               );
             })()}
           </div>
-
-          {/* Interactive Questions Launchpad */}
-          {activeLesson ? (
-            <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-5 space-y-4 shadow-xl">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-black text-slate-100 flex items-center gap-2">
-                    <HelpCircle className="w-4 h-4 text-amber-400" />
-                    <span>بنك أسئلة الحصة المباشرة ({activeLesson.questions?.length || 0} أسئلة)</span>
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    انقر على أي سؤال لمعاينته ثم اضغط زر "طرح السؤال الآن" لعرضه فورياً للطلاب وعلى الشاشة.
-                  </p>
-                </div>
-              </div>
-
-              {/* Question Chips */}
-              <div className="flex flex-wrap items-center gap-2 overflow-x-auto py-1">
-                {activeLesson.questions.map((q, idx) => {
-                  const isActive = sessionState?.currentQuestionIndex === idx && sessionState?.status === 'question_active';
-                  const isRevealed = sessionState?.currentQuestionIndex === idx && sessionState?.status === 'revealed';
-                  const isSelectedForPreview = previewQuestionIndex === idx;
-
-                  return (
-                    <button
-                      key={idx}
-                      onClick={() => setPreviewQuestionIndex(idx)}
-                      className={`px-3.5 py-2 rounded-xl text-xs font-bold font-mono transition-all flex items-center gap-2 cursor-pointer border ${
-                        isActive
-                          ? 'bg-amber-500 border-amber-400 text-slate-950 font-black shadow-lg shadow-amber-500/20 ring-2 ring-amber-300 animate-pulse'
-                          : isRevealed
-                          ? 'bg-emerald-950 border-emerald-500/60 text-emerald-300'
-                          : isSelectedForPreview
-                          ? 'bg-indigo-600 text-white border-indigo-400 shadow-md'
-                          : 'bg-slate-950 hover:bg-slate-800 border-slate-800 text-slate-300'
-                      }`}
-                    >
-                      <span>س{idx + 1}</span>
-                      {q.image && (
-                        <span className="text-[10px] bg-amber-400/20 text-amber-300 px-1 rounded">🖼️</span>
-                      )}
-                      {q.isTextAnswer && (
-                        <span className="text-[10px] bg-indigo-400/20 text-indigo-300 px-1 rounded">✍️</span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Selected Question Preview & Launch Box */}
-              {activeLesson.questions[previewQuestionIndex] && (
-                <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 space-y-4">
-                  {/* Top Header of Preview */}
-                  <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-                    <div className="space-y-1.5 flex-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="px-2.5 py-0.5 rounded-lg bg-indigo-500/20 text-indigo-300 font-bold text-xs">
-                          معاينة السؤال {previewQuestionIndex + 1}
-                        </span>
-                        {activeLesson.questions[previewQuestionIndex].isTextAnswer ? (
-                          <span className="px-2 py-0.5 rounded-lg bg-purple-500/20 text-purple-300 text-xs font-bold flex items-center gap-1">
-                            ✍️ إجابة كتابية / نصية
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 rounded-lg bg-emerald-500/20 text-emerald-300 text-xs font-bold">
-                            🔘 خيارات متعددة ({(activeLesson.questions[previewQuestionIndex].options || []).length})
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Question Text */}
-                      {activeLesson.questions[previewQuestionIndex].question && (
-                        <h4 className="text-base font-bold text-slate-100 leading-relaxed pt-1">
-                          {activeLesson.questions[previewQuestionIndex].question}
-                        </h4>
-                      )}
-                    </div>
-
-                    {/* Launch Controls */}
-                    <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
-                      {/* Teacher Live Timer Selector */}
-                      <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 px-2.5 py-2 rounded-xl">
-                        <Clock className="w-3.5 h-3.5 text-amber-400" />
-                        <span className="text-[11px] text-slate-400 font-bold">المهلة:</span>
-                        <select
-                          value={launchTimerDuration}
-                          onChange={(e) => setLaunchTimerDuration(parseInt(e.target.value, 10) || 30)}
-                          className="bg-slate-950 border border-slate-700 text-amber-300 text-xs font-bold font-mono px-2 py-1 rounded-lg outline-none cursor-pointer"
-                        >
-                          <option value={15}>15 ثانية</option>
-                          <option value={30}>30 ثانية</option>
-                          <option value={45}>45 ثانية</option>
-                          <option value={60}>60 ثانية</option>
-                          <option value={90}>90 ثانية</option>
-                          <option value={120}>دقيقتان</option>
-                          <option value={9999}>مفتوح بدون وقت</option>
-                        </select>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => handleLaunchQuestion(activeLesson.questions[previewQuestionIndex], previewQuestionIndex, launchTimerDuration)}
-                        className="px-5 py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-amber-500/20 transition-all cursor-pointer active:scale-95"
-                      >
-                        <Play className="w-4 h-4 fill-slate-950" />
-                        <span>طرح السؤال للطلاب الآن 🚀</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Question Image Preview if present */}
-                  {activeLesson.questions[previewQuestionIndex].image && (
-                    <div className="max-w-md max-h-56 rounded-2xl overflow-hidden border border-slate-800 bg-slate-900 p-1.5">
-                      <img
-                        src={formatDriveImageUrl(activeLesson.questions[previewQuestionIndex].image)}
-                        alt="توضيح السؤال"
-                        className="w-full max-h-52 object-contain rounded-xl mx-auto"
-                      />
-                    </div>
-                  )}
-
-                  {/* Multiple Choice Options List or Text Answer Info */}
-                  {activeLesson.questions[previewQuestionIndex].isTextAnswer ? (
-                    <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3.5 space-y-1 text-xs">
-                      <div className="text-slate-400 font-bold">طريقة الإجابة: نصية كتابية</div>
-                      {activeLesson.questions[previewQuestionIndex].correctAnswer ? (
-                        <div className="text-emerald-400 font-mono">
-                          الإجابة النموذجية المحددة: <span className="font-bold underline">{activeLesson.questions[previewQuestionIndex].correctAnswer}</span>
-                        </div>
-                      ) : (
-                        <div className="text-amber-400/90">
-                          إجابة حرة مفتوحة (تقييم حر من الأستاذ)
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                      {(activeLesson.questions[previewQuestionIndex].options || []).map((opt, optIdx) => {
-                        const isCorrect = String(optIdx + 1) === String(activeLesson.questions[previewQuestionIndex].correctAnswer).trim() ||
-                                          opt.trim().toLowerCase() === String(activeLesson.questions[previewQuestionIndex].correctAnswer).trim().toLowerCase();
-                        return (
-                          <div
-                            key={optIdx}
-                            className={`p-2.5 rounded-xl border text-xs font-bold flex items-center justify-between ${
-                              isCorrect
-                                ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-200'
-                                : 'bg-slate-900 border-slate-800 text-slate-300'
-                            }`}
-                          >
-                            <span className="flex items-center gap-2">
-                              <span className="w-5 h-5 rounded-lg bg-slate-800 text-slate-400 flex items-center justify-center text-[10px] font-mono">
-                                {optIdx + 1}
-                              </span>
-                              <span>{opt}</span>
-                            </span>
-                            {isCorrect && (
-                              <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 text-[10px]">
-                                الإجابة الصحيحة ✓
-                              </span>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="p-12 text-center bg-slate-900/50 rounded-3xl border border-dashed border-slate-800 space-y-3">
-              <Mic className="w-12 h-12 text-slate-600 mx-auto" />
-              <h3 className="text-base font-bold text-slate-300">يرجى اختيار موضوع الحصة من القائمة أعلاه للبدء</h3>
-              <p className="text-xs text-slate-500 max-w-md mx-auto">
-                أو يمكنك إضافة موضوع جديد مع أسئلته التفاعلية عبر تبويب "قسم إعدادات الأسئلة (Questions-Live)".
-              </p>
-            </div>
-          )}
 
           {/* Extensible Future Widgets Slot (و أشياء أخرى لاحقاً نضيف) */}
           <div className="bg-slate-900/50 border border-slate-800/80 rounded-2xl p-3.5 flex items-center justify-between text-xs text-slate-400">
