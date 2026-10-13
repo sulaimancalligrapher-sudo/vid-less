@@ -541,23 +541,6 @@ async function startServer() {
     }
   });
 
-  // Serve local pdfjs assets (cmaps, fonts, worker) with proper MIME types
-  const pdfjsDir = path.join(process.cwd(), 'public', 'pdfjs');
-  if (fs.existsSync(pdfjsDir)) {
-    app.use('/pdfjs', express.static(pdfjsDir, {
-      maxAge: '1y',
-      immutable: true,
-      setHeaders: (res, filePath) => {
-        if (filePath.endsWith('.bcmap') || filePath.endsWith('.cmap')) {
-          res.setHeader('Content-Type', 'application/octet-stream');
-        } else if (filePath.endsWith('.mjs') || filePath.endsWith('.js')) {
-          res.setHeader('Content-Type', 'text/javascript');
-        }
-        res.setHeader('Access-Control-Allow-Origin', '*');
-      }
-    }));
-  }
-
   // Vite development middleware vs production static server
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

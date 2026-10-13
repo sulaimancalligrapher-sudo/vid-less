@@ -1091,8 +1091,8 @@ export async function toggleShowPdfInRoom(show: boolean): Promise<{ success: boo
   return updateLivePdfState({ showPdfInRoom: show });
 }
 
-// Realtime sync of laser pointer or live pen tip (debounced/throttled on caller side)
-export async function updateLivePdfLaser(laser: { x: number; y: number; active: boolean; timestamp: number; tool?: 'laser' | 'pen' | 'highlighter'; color?: string } | null): Promise<{ success: boolean }> {
+// Realtime sync of laser pointer (debounced/throttled on caller side)
+export async function updateLivePdfLaser(laser: { x: number; y: number; active: boolean; timestamp: number } | null): Promise<{ success: boolean }> {
   try {
     await updateDoc(LIVE_DOC_REF, {
       pdfLaser: laser,
