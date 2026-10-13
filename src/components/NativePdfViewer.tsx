@@ -74,6 +74,9 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawingCanvasRef = useRef<HTMLCanvasElement>(null);
   const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
+  const renderTaskRef = useRef<any>(null);
+  const lastRenderedKeyRef = useRef<string>('');
+  const redrawAnnotationsRef = useRef<() => void>(() => {});
 
   const [pdfDoc, setPdfDoc] = useState<any>(null);
   const [currentPage, setCurrentPage] = useState<number>(page || 1);
@@ -256,13 +259,14 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
     };
   }, [pdfUrl, onTotalPagesLoaded]);
 
-  // Redraw annotations on the overlay canvas
+  // Redraw annotations strictly on the overlay drawing canvas (NEVER touches or clears the PDF canvas!)
   const redrawAnnotations = useCallback(() => {
     if (!drawingCanvasRef.current) return;
     const canvas = drawingCanvasRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    // Clear ONLY the transparent overlay canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     const pageStrokes = annotations[currentPage] || [];
@@ -301,7 +305,12 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
     });
   }, [annotations, currentPage]);
 
-  // Render current page onto canvas with bulletproof viewport measurement
+  // Keep latest redrawAnnotations accessible without triggering renderPage rebuilds
+  useEffect(() => {
+    redrawAnnotationsRef.current = redrawAnnotations;
+  }, [redrawAnnotations]);
+
+  // Render current PDF page onto background canvas (ONLY on page/zoom/scale changes, NOT on drawing/laser moves!)
   const renderPage = useCallback(async () => {
     if (!pdfDoc || !canvasRef.current || !containerRef.current) return;
 
@@ -313,7 +322,7 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      // Ensure all Arabic fonts and document fonts are ready before canvas drawing
+      // Ensure all document and Arabic fonts are ready
       if (typeof document !== 'undefined' && document.fonts && document.fonts.ready) {
         try {
           await document.fonts.ready;
@@ -344,11 +353,9 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
 
       let finalScale = 1.0;
       if (fitMode === 'width') {
-        // Fit Width: fills 100% width of the screen, making slides or book pages huge!
         const marginH = readOnly ? 0 : 16;
         finalScale = ((availableW - marginH) / unscaledViewport.width) * zoomScale;
       } else {
-        // Contain (Fit Screen): fits within both available width and height
         const marginH = readOnly ? 0 : 20;
         const marginV = readOnly ? 0 : 32;
         const scaleX = (availableW - marginH) / unscaledViewport.width;
@@ -356,7 +363,6 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
         finalScale = Math.min(scaleX, scaleY) * zoomScale;
       }
 
-      // Bound final scale to clean visible range
       finalScale = Math.max(0.4, Math.min(finalScale, 4.0));
 
       const viewport = pageObj.getViewport({ scale: finalScale });
@@ -367,6 +373,20 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
       const pixelHeight = Math.floor(viewport.height * dpr);
       const cssWidth = Math.floor(viewport.width);
       const cssHeight = Math.floor(viewport.height);
+
+      // Cache key: If page and exact dimensions haven't changed, DO NOT wipe or re-render canvas!
+      const renderKey = `${pageToRender}_${pixelWidth}_${pixelHeight}_${finalScale}`;
+      if (lastRenderedKeyRef.current === renderKey && canvas.width === pixelWidth) {
+        return;
+      }
+
+      // Cancel any ongoing render task before starting a new one
+      if (renderTaskRef.current) {
+        try {
+          renderTaskRef.current.cancel();
+        } catch {}
+        renderTaskRef.current = null;
+      }
 
       canvas.width = pixelWidth;
       canvas.height = pixelHeight;
@@ -402,40 +422,70 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
         viewport: viewport,
       };
 
-      await pageObj.render(renderContext).promise;
+      const task = pageObj.render(renderContext);
+      renderTaskRef.current = task;
+      await task.promise;
+      renderTaskRef.current = null;
+      lastRenderedKeyRef.current = renderKey;
       ctx.restore();
 
-      // Redraw any existing drawings for this page
-      redrawAnnotations();
-    } catch (renderErr) {
-      console.warn('PDF Page render interrupted or failed:', renderErr);
+      // Redraw drawings on overlay canvas once page is painted
+      if (redrawAnnotationsRef.current) {
+        redrawAnnotationsRef.current();
+      }
+    } catch (renderErr: any) {
+      if (renderErr?.name !== 'RenderingCancelledException') {
+        console.warn('PDF Page render interrupted or failed:', renderErr);
+      }
     }
-  }, [pdfDoc, currentPage, totalPages, zoomScale, fitMode, readOnly, redrawAnnotations]);
+  }, [pdfDoc, currentPage, totalPages, zoomScale, fitMode, readOnly]);
 
-  // Trigger page render on state changes or window resize with ResizeObserver
+  // Trigger page render on page/zoom/scale changes or debounced window resize
   useEffect(() => {
     renderPage();
 
+    let debounceTimer: any = null;
+    let lastW = containerRef.current?.clientWidth || 0;
+    let lastH = containerRef.current?.clientHeight || 0;
+
     const handleResize = () => {
-      renderPage();
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        renderPage();
+      }, 150);
     };
+
     window.addEventListener('resize', handleResize);
 
     let observer: ResizeObserver | null = null;
     if (containerRef.current && typeof ResizeObserver !== 'undefined') {
-      observer = new ResizeObserver(() => {
-        renderPage();
+      observer = new ResizeObserver((entries) => {
+        const entry = entries[0];
+        if (entry) {
+          const newW = entry.contentRect.width;
+          const newH = entry.contentRect.height;
+          // Only re-render if dimensions changed meaningfully (> 4px)
+          if (Math.abs(newW - lastW) > 4 || Math.abs(newH - lastH) > 4) {
+            lastW = newW;
+            lastH = newH;
+            if (debounceTimer) clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+              renderPage();
+            }, 150);
+          }
+        }
       });
       observer.observe(containerRef.current);
     }
 
     return () => {
       window.removeEventListener('resize', handleResize);
+      if (debounceTimer) clearTimeout(debounceTimer);
       if (observer) observer.disconnect();
     };
   }, [renderPage]);
 
-  // Redraw annotations whenever annotations prop or currentPage changes
+  // Redraw ONLY annotations overlay when annotations or page change (never wipes PDF canvas!)
   useEffect(() => {
     redrawAnnotations();
   }, [redrawAnnotations]);
@@ -894,6 +944,7 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
               style={{
                 left: `${(currentPointer?.x ?? 0.5) * 100}%`,
                 top: `${(currentPointer?.y ?? 0.5) * 100}%`,
+                willChange: 'transform, left, top',
               }}
             >
               {currentPointer?.tool === 'pen' || currentPointer?.tool === 'highlighter' ? (
