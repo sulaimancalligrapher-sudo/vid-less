@@ -172,6 +172,18 @@ export default function LiveDirectManager({
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [driveFolderId, setDriveFolderId] = useState('');
   const laserThrottleRef = useRef<number>(0);
+  const livePdfBroadcastChannelRef = useRef<BroadcastChannel | null>(null);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        livePdfBroadcastChannelRef.current = new BroadcastChannel('vidless_live_pdf_channel');
+      } catch {}
+      return () => {
+        livePdfBroadcastChannelRef.current?.close();
+      };
+    }
+  }, []);
 
   // Handle local PDF file selection & IndexedDB persistence
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -189,8 +201,16 @@ export default function LiveDirectManager({
     }
   };
 
-  // Realtime laser move transmitter (throttled to ~50ms to prevent Firebase overload)
-  const handleLaserMove = useCallback(async (laser: { x: number; y: number; active: boolean; timestamp: number } | null) => {
+  // Realtime laser move & live pen drawing indicator transmitter (instant local BroadcastChannel + throttled Firebase)
+  const handleLaserMove = useCallback(async (laser: { x: number; y: number; active: boolean; timestamp: number; tool?: 'laser' | 'pen' | 'highlighter'; color?: string; isDrawing?: boolean } | null) => {
+    // 1. Instant local broadcast (0ms delay for dual monitor / local projector tabs)
+    if (livePdfBroadcastChannelRef.current) {
+      try {
+        livePdfBroadcastChannelRef.current.postMessage({ type: 'laser', laser });
+      } catch {}
+    }
+
+    // 2. Firebase cloud update (throttled to ~50ms to protect network)
     const now = Date.now();
     if (!laser) {
       await updateLivePdfLaser(null);
@@ -209,6 +229,11 @@ export default function LiveDirectManager({
     width: number;
     points: Array<{ x: number; y: number }>;
   }>>) => {
+    if (livePdfBroadcastChannelRef.current) {
+      try {
+        livePdfBroadcastChannelRef.current.postMessage({ type: 'annotations', annotations });
+      } catch {}
+    }
     await updateLivePdfAnnotations(annotations);
   }, []);
 
@@ -2222,6 +2247,10 @@ export default function LiveDirectManager({
                   realtimeAnnotations={sessionState.pdfAnnotations}
                   onLaserMove={handleLaserMove}
                   onAnnotationsChange={handleAnnotationsChange}
+                  fitMode={sessionState.pdfFitMode || 'contain'}
+                  onFitModeChange={(mode) => updateLivePdfState({ pdfFitMode: mode })}
+                  zoom={sessionState.pdfZoom || 1.0}
+                  onZoomChange={(z) => updateLivePdfState({ pdfZoom: z })}
                 />
               </div>
             </div>

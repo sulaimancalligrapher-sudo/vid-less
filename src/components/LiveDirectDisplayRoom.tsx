@@ -19,6 +19,8 @@ import {
   VolumeX,
   BookOpen,
   FileText,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
 import {
   LiveSessionState,
@@ -51,6 +53,8 @@ export default function LiveDirectDisplayRoom({}: LiveDirectDisplayRoomProps = {
   const [showQrModal, setShowQrModal] = useState(false);
   const [showChatModal, setShowChatModal] = useState(false);
   const [remainingTime, setRemainingTime] = useState<number>(0);
+  const [displayFitMode, setDisplayFitMode] = useState<'contain' | 'width'>('contain');
+  const [displayZoom, setDisplayZoom] = useState<number>(1.0);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Sound effects
@@ -377,78 +381,91 @@ export default function LiveDirectDisplayRoom({}: LiveDirectDisplayRoomProps = {
     );
   };
 
+  const isPdfShowing = Boolean(sessionState?.showPdfInRoom) && Boolean(sessionState?.pdfUrl);
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between selection:bg-amber-500 selection:text-slate-950 font-sans" dir="rtl">
+    <div
+      className={`bg-slate-950 text-slate-100 flex flex-col selection:bg-amber-500 selection:text-slate-950 font-sans ${
+        isPdfShowing
+          ? 'fixed inset-0 w-screen h-screen max-w-none max-h-none overflow-hidden select-none'
+          : 'min-h-screen justify-between'
+      }`}
+      dir="rtl"
+    >
       {/* Top Theater Header Bar */}
-      <header className="p-3 sm:p-5 bg-slate-900/80 backdrop-blur-md border-b border-slate-800/80 flex items-center justify-between gap-4 sticky top-0 z-40 shadow-xl">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center shadow-inner">
-            <Mic className="w-5 h-5 animate-pulse" />
+      <header className={`bg-slate-900/90 backdrop-blur-md border-b border-slate-800/80 flex items-center justify-between gap-3 sticky top-0 z-40 shadow-xl shrink-0 ${
+        isPdfShowing ? 'px-3 py-2 sm:px-4' : 'p-3 sm:p-5'
+      }`}>
+        <div className="flex items-center gap-2.5 sm:gap-3">
+          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center shadow-inner shrink-0">
+            <Mic className="w-4 h-4 sm:w-5 sm:h-5 animate-pulse" />
           </div>
-          <div>
+          <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase ${
+              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase shrink-0 ${
                 (sessionState?.status === 'finished' || sessionState?.status === 'program_ended')
                   ? 'bg-slate-800 border border-slate-700 text-slate-400'
                   : sessionState?.isProgramActive
                   ? 'bg-rose-500/20 border border-rose-500/30 text-rose-400 animate-pulse'
                   : 'bg-amber-500/20 border border-amber-500/30 text-amber-400'
               }`}>
-                <Radio className="w-3 h-3" />
+                <Radio className="w-2.5 h-2.5" />
                 <span>
                   {(sessionState?.status === 'finished' || sessionState?.status === 'program_ended')
-                    ? 'الحصة منتهية 🏁'
+                    ? 'منتهية 🏁'
                     : sessionState?.isProgramActive
-                    ? 'شرح مباشر Live'
-                    : 'في الانتظار ⏳'}
+                    ? 'Live مباشر'
+                    : 'في الانتظار'}
                 </span>
               </span>
-              <h1 className="text-sm sm:text-base font-black text-slate-100 truncate max-w-xs sm:max-w-md">
+              <h1 className="text-xs sm:text-base font-black text-slate-100 truncate max-w-[150px] sm:max-w-md">
                 {sessionState?.lessonTitle || 'حصة تفاعلية حية'}
               </h1>
             </div>
-            <p className="text-[11px] text-slate-400 font-medium hidden sm:block">
-              شاشة العرض المباشر للمسرح والبروجكتر • تفاعل حي ومتزامن
-            </p>
+            {!isPdfShowing && (
+              <p className="text-[11px] text-slate-400 font-medium hidden sm:block">
+                شاشة العرض المباشر للمسرح والبروجكتر • تفاعل حي ومتزامن
+              </p>
+            )}
           </div>
         </div>
 
         {/* Center / Right Control Badges */}
-        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+        <div className="flex items-center gap-1.5 sm:gap-2.5 flex-wrap">
           {/* PIN Badge (مخفي افتراضياً - يتحكم به المعلم) */}
           {Boolean(sessionState?.showPinInRoom) && sessionState?.sessionPin && (
-            <div className="flex items-center gap-2 bg-slate-950 border border-amber-500/30 px-3 py-1.5 rounded-xl shadow-inner animate-in fade-in">
-              <span className="text-[10px] text-amber-400 font-bold uppercase tracking-wider">PIN:</span>
-              <span className="font-mono text-base font-black text-amber-300 tracking-widest">{sessionState.sessionPin}</span>
+            <div className="flex items-center gap-1.5 bg-slate-950 border border-amber-500/30 px-2.5 py-1 rounded-xl shadow-inner animate-in fade-in">
+              <span className="text-[10px] text-amber-400 font-bold uppercase">PIN:</span>
+              <span className="font-mono text-sm sm:text-base font-black text-amber-300 tracking-widest">{sessionState.sessionPin}</span>
             </div>
           )}
 
-          {/* QR Code Button (مخفي افتراضياً - يتحكم به المعلم) */}
+          {/* QR Code Button */}
           {Boolean(sessionState?.showQrInRoom) && (
             <button
               type="button"
               onClick={() => setShowQrModal(true)}
-              className="p-2 bg-slate-900 hover:bg-slate-800 text-amber-400 rounded-xl transition-all cursor-pointer border border-slate-800 animate-in fade-in"
+              className="p-1.5 sm:p-2 bg-slate-900 hover:bg-slate-800 text-amber-400 rounded-xl transition-all cursor-pointer border border-slate-800 animate-in fade-in"
               title="عرض رمز QR للدخول"
             >
               <QrCode className="w-4 h-4" />
             </button>
           )}
 
-          {/* Connected Students Badge (مخفي افتراضياً - يتحكم به المعلم) */}
+          {/* Connected Students Badge */}
           {Boolean(sessionState?.showConnectedCountInRoom) && (
-            <div className="flex items-center gap-1.5 bg-slate-950 border border-indigo-500/30 px-3 py-1.5 rounded-xl text-xs font-bold text-indigo-300 animate-in fade-in">
+            <div className="flex items-center gap-1.5 bg-slate-950 border border-indigo-500/30 px-2.5 py-1 rounded-xl text-xs font-bold text-indigo-300 animate-in fade-in">
               <Users className="w-3.5 h-3.5 text-indigo-400" />
-              <span>{totalConnected} طالب متصل</span>
+              <span>{totalConnected} طالب</span>
             </div>
           )}
 
-          {/* Chat Modal Button (مخفي افتراضياً - يتحكم به المعلم) */}
+          {/* Chat Modal Button */}
           {Boolean(sessionState?.showChatInRoom) && (
             <button
               type="button"
               onClick={() => setShowChatModal(true)}
-              className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 rounded-xl text-xs font-bold flex items-center gap-1.5 border border-slate-800 transition-all cursor-pointer animate-in fade-in"
+              className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-slate-300 rounded-xl text-xs font-bold flex items-center gap-1.5 border border-slate-800 transition-all cursor-pointer animate-in fade-in"
             >
               <MessageSquare className="w-3.5 h-3.5 text-indigo-400" />
               <span className="hidden sm:inline">المحادثة</span>
@@ -458,24 +475,75 @@ export default function LiveDirectDisplayRoom({}: LiveDirectDisplayRoomProps = {
             </button>
           )}
 
-          {/* Active PDF Badge (إذا كان معروضاً على شاشة البروجكتر) */}
-          {Boolean(sessionState?.showPdfInRoom) && sessionState?.pdfUrl && (
-            <div className="flex items-center gap-1.5 bg-slate-950 border border-emerald-500/30 px-3 py-1.5 rounded-xl text-xs font-bold text-emerald-300 animate-in fade-in shadow-inner">
-              <BookOpen className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="truncate max-w-[130px] sm:max-w-[200px]">{sessionState.pdfTitle || 'ملف الشرح PDF'}</span>
-              {Boolean(sessionState.pdfPage) && (
-                <span className="px-1.5 py-0.2 rounded-md bg-emerald-500/20 text-emerald-300 text-[10px] font-mono">
-                  ص {sessionState.pdfPage}
-                </span>
-              )}
-            </div>
+          {/* Active PDF Badge & Controls */}
+          {isPdfShowing && (
+            <>
+              <div className="flex items-center gap-1.5 bg-slate-950 border border-emerald-500/30 px-2.5 py-1 rounded-xl text-xs font-bold text-emerald-300 shadow-inner">
+                <BookOpen className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="truncate max-w-[100px] sm:max-w-[180px]">{sessionState?.pdfTitle || 'ملف الشرح PDF'}</span>
+                {Boolean(sessionState?.pdfPage) && (
+                  <span className="px-1.5 py-0.2 rounded-md bg-emerald-500/20 text-emerald-300 text-[10px] font-mono">
+                    ص {sessionState?.pdfPage}
+                  </span>
+                )}
+              </div>
+
+              {/* Display Fit Mode: ملاءمة الشاشة vs ملء العرض */}
+              <div className="hidden sm:flex items-center gap-1 bg-slate-950 p-0.5 rounded-xl border border-slate-800 text-[11px]">
+                <button
+                  type="button"
+                  onClick={() => setDisplayFitMode('contain')}
+                  className={`px-2 py-0.5 rounded-lg font-bold transition-all cursor-pointer ${
+                    (sessionState?.pdfFitMode || displayFitMode) === 'contain'
+                      ? 'bg-emerald-600 text-white'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="ملاءمة كامل الشاشة"
+                >
+                  ملاءمة
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDisplayFitMode('width')}
+                  className={`px-2 py-0.5 rounded-lg font-bold transition-all cursor-pointer ${
+                    (sessionState?.pdfFitMode || displayFitMode) === 'width'
+                      ? 'bg-emerald-600 text-white'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="ملء العرض الكامل"
+                >
+                  ملء العرض
+                </button>
+              </div>
+
+              {/* Display Zoom controls */}
+              <div className="hidden md:flex items-center gap-0.5 bg-slate-950 px-1 py-0.5 rounded-xl border border-slate-800 text-slate-300">
+                <button
+                  type="button"
+                  onClick={() => setDisplayZoom((z) => Math.max(0.7, Math.round((z - 0.15) * 100) / 100))}
+                  className="p-1 hover:text-white transition-colors cursor-pointer"
+                  title="تصغير"
+                >
+                  <ZoomOut className="w-3.5 h-3.5" />
+                </button>
+                <span className="text-[10px] font-mono font-bold px-1">{Math.round((sessionState?.pdfZoom || displayZoom) * 100)}%</span>
+                <button
+                  type="button"
+                  onClick={() => setDisplayZoom((z) => Math.min(2.5, Math.round((z + 0.15) * 100) / 100))}
+                  className="p-1 hover:text-white transition-colors cursor-pointer"
+                  title="تكبير"
+                >
+                  <ZoomIn className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </>
           )}
 
           {/* Fullscreen Button */}
           <button
             type="button"
             onClick={toggleFullscreen}
-            className="p-2 bg-slate-900 hover:bg-slate-800 text-slate-300 rounded-xl transition-all cursor-pointer border border-slate-800"
+            className="p-1.5 sm:p-2 bg-slate-900 hover:bg-slate-800 text-slate-300 rounded-xl transition-all cursor-pointer border border-slate-800"
             title={isFullscreen ? 'تصغير الشاشة' : 'ملء الشاشة'}
           >
             {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
@@ -485,8 +553,8 @@ export default function LiveDirectDisplayRoom({}: LiveDirectDisplayRoomProps = {
 
       {/* Main Presentation Stage */}
       <main className={`flex-1 flex flex-col items-center justify-center w-full relative ${
-        Boolean(sessionState?.showPdfInRoom) && sessionState?.pdfUrl
-          ? 'p-0 max-w-none h-[calc(100vh-64px)] overflow-hidden'
+        isPdfShowing
+          ? 'p-0 m-0 max-w-none w-full h-[calc(100vh-56px)] min-h-0 flex-1 overflow-hidden'
           : 'p-3 sm:p-6 max-w-7xl mx-auto'
       }`}>
         {/* ========================================================================= */}
@@ -510,18 +578,22 @@ export default function LiveDirectDisplayRoom({}: LiveDirectDisplayRoomProps = {
               </p>
             </div>
           </motion.div>
-        ) : Boolean(sessionState?.showPdfInRoom) && sessionState?.pdfUrl ? (
+        ) : isPdfShowing ? (
           /* ========================================================================= */
           /* NATIVE PDF PRESENTATION STAGE (بكامل الشاشة بدون هوامش - شاشة العرض للعرض فقط) */
           /* ========================================================================= */
-          <div className="w-full flex-1 flex flex-col h-[calc(100vh-64px)] min-h-[580px] bg-slate-950 overflow-hidden relative border-0">
+          <div className="w-full h-full flex-1 flex flex-col bg-slate-950 overflow-hidden relative border-0 p-0 m-0">
             <NativePdfViewer
-              pdfUrl={sessionState.pdfUrl}
-              page={sessionState.pdfPage || 1}
+              pdfUrl={sessionState?.pdfUrl || ''}
+              page={sessionState?.pdfPage || 1}
               readOnly={true}
               isTeacherControl={false}
-              realtimeLaser={sessionState.pdfLaser}
-              realtimeAnnotations={sessionState.pdfAnnotations}
+              realtimeLaser={sessionState?.pdfLaser}
+              realtimeAnnotations={sessionState?.pdfAnnotations}
+              fitMode={sessionState?.pdfFitMode || displayFitMode}
+              onFitModeChange={(m) => setDisplayFitMode(m)}
+              zoom={sessionState?.pdfZoom || displayZoom}
+              onZoomChange={(z) => setDisplayZoom(z)}
             />
 
             {/* Elevated Question Modal Overlay above PDF */}

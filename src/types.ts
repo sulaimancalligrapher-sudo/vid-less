@@ -270,7 +270,9 @@ export interface LiveSessionState {
   pdfTitle?: string; // Title / name of active PDF lesson or book
   pdfPage?: number; // Active page number (1-indexed)
   pdfTotalPages?: number; // Total number of pages in active PDF
-  pdfLaser?: { x: number; y: number; active: boolean; timestamp: number } | null; // Realtime normalized laser coordinates (0..1)
+  pdfLaser?: { x: number; y: number; active: boolean; timestamp: number; tool?: 'laser' | 'pen' | 'highlighter'; color?: string; isDrawing?: boolean } | null; // Realtime normalized laser/pen pointer coordinates (0..1)
+  pdfFitMode?: 'contain' | 'width'; // Presentation scaling: 'contain' (fit screen) or 'width' (fill full width)
+  pdfZoom?: number; // Synchronized presentation zoom ratio (e.g. 1.0, 1.25, 1.5)
   pdfAnnotations?: Record<number, Array<{
     type: 'pen' | 'highlighter';
     color: string;

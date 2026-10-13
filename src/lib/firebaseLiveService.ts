@@ -98,6 +98,8 @@ export function subscribeToLiveSession(
           pdfPage: typeof data.pdfPage === 'number' ? data.pdfPage : 1,
           pdfTotalPages: typeof data.pdfTotalPages === 'number' ? data.pdfTotalPages : undefined,
           pdfLaser: data.pdfLaser || null,
+          pdfFitMode: data.pdfFitMode === 'width' ? 'width' : 'contain',
+          pdfZoom: typeof data.pdfZoom === 'number' ? data.pdfZoom : 1.0,
           pdfAnnotations: data.pdfAnnotations || {},
           messages: Array.isArray(data.messages) ? data.messages : [],
           lessonTitle: data.lessonTitle || '',
@@ -163,6 +165,8 @@ export async function getLiveSessionState(): Promise<LiveSessionState | null> {
         pdfPage: typeof data.pdfPage === 'number' ? data.pdfPage : 1,
         pdfTotalPages: typeof data.pdfTotalPages === 'number' ? data.pdfTotalPages : undefined,
         pdfLaser: data.pdfLaser || null,
+        pdfFitMode: data.pdfFitMode === 'width' ? 'width' : 'contain',
+        pdfZoom: typeof data.pdfZoom === 'number' ? data.pdfZoom : 1.0,
         pdfAnnotations: data.pdfAnnotations || {},
         messages: Array.isArray(data.messages) ? data.messages : [],
         lessonTitle: data.lessonTitle || '',
@@ -1054,12 +1058,16 @@ export async function updateLivePdfState({
   pdfTitle,
   pdfPage,
   pdfTotalPages,
+  pdfFitMode,
+  pdfZoom,
 }: {
   showPdfInRoom?: boolean;
   pdfUrl?: string;
   pdfTitle?: string;
   pdfPage?: number;
   pdfTotalPages?: number;
+  pdfFitMode?: 'contain' | 'width';
+  pdfZoom?: number;
 }): Promise<{ success: boolean; state?: LiveSessionState }> {
   try {
     const updatePayload: Record<string, any> = {
@@ -1070,6 +1078,8 @@ export async function updateLivePdfState({
     if (pdfTitle !== undefined) updatePayload.pdfTitle = pdfTitle;
     if (pdfPage !== undefined) updatePayload.pdfPage = pdfPage;
     if (pdfTotalPages !== undefined) updatePayload.pdfTotalPages = pdfTotalPages;
+    if (pdfFitMode !== undefined) updatePayload.pdfFitMode = pdfFitMode;
+    if (pdfZoom !== undefined) updatePayload.pdfZoom = pdfZoom;
 
     await updateDoc(LIVE_DOC_REF, updatePayload);
     cachedState = {
@@ -1079,6 +1089,8 @@ export async function updateLivePdfState({
       ...(pdfTitle !== undefined ? { pdfTitle } : {}),
       ...(pdfPage !== undefined ? { pdfPage } : {}),
       ...(pdfTotalPages !== undefined ? { pdfTotalPages } : {}),
+      ...(pdfFitMode !== undefined ? { pdfFitMode } : {}),
+      ...(pdfZoom !== undefined ? { pdfZoom } : {}),
     };
     return { success: true, state: cachedState };
   } catch (error: any) {
@@ -1091,8 +1103,8 @@ export async function toggleShowPdfInRoom(show: boolean): Promise<{ success: boo
   return updateLivePdfState({ showPdfInRoom: show });
 }
 
-// Realtime sync of laser pointer (debounced/throttled on caller side)
-export async function updateLivePdfLaser(laser: { x: number; y: number; active: boolean; timestamp: number } | null): Promise<{ success: boolean }> {
+// Realtime sync of laser pointer or live pen tip (debounced/throttled on caller side)
+export async function updateLivePdfLaser(laser: { x: number; y: number; active: boolean; timestamp: number; tool?: 'laser' | 'pen' | 'highlighter'; color?: string } | null): Promise<{ success: boolean }> {
   try {
     await updateDoc(LIVE_DOC_REF, {
       pdfLaser: laser,

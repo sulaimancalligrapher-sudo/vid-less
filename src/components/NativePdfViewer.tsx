@@ -7,77 +7,142 @@ import {
 } from '../lib/pdfLib';
 import { getPdfFromIndexedDB } from '../lib/pdfStorage';
 import {
-  ChevronRight,
   ChevronLeft,
+  ChevronRight,
   ZoomIn,
   ZoomOut,
-  AlertCircle,
-  Loader2,
   Palette,
-  Trash2,
   Sparkles,
+  Trash2,
+  Loader2,
+  AlertCircle,
+  Maximize2,
+  Columns,
 } from 'lucide-react';
 
+export interface LivePdfStroke {
+  type: 'pen' | 'highlighter';
+  color: string;
+  width: number;
+  points: Array<{ x: number; y: number }>;
+}
+
+export interface LivePdfLaserData {
+  x: number;
+  y: number;
+  active: boolean;
+  timestamp: number;
+  tool?: 'laser' | 'pen' | 'highlighter';
+  color?: string;
+  isDrawing?: boolean;
+}
+
 interface NativePdfViewerProps {
-  pdfUrl?: string; // Can be a direct URL, Google Drive preview/direct URL, or local file ID (local://id)
-  page?: number; // Controlled active page (1-indexed)
-  onPageChange?: (newPage: number, totalPages: number) => void;
-  onTotalPagesLoaded?: (totalPages: number) => void;
-  isTeacherControl?: boolean; // If true, displays teacher drawing tools and sends realtime laser/pen sync
-  readOnly?: boolean; // If true (e.g. on projector display room), no drawing toolbar, only renders incoming drawings & laser
-  realtimeLaser?: { x: number; y: number; active: boolean; timestamp: number } | null;
-  realtimeAnnotations?: Record<number, Array<{
-    type: 'pen' | 'highlighter';
-    color: string;
-    width: number;
-    points: Array<{ x: number; y: number }>;
-  }>>;
-  onLaserMove?: (laser: { x: number; y: number; active: boolean; timestamp: number } | null) => void;
-  onAnnotationsChange?: (annotations: Record<number, Array<{
-    type: 'pen' | 'highlighter';
-    color: string;
-    width: number;
-    points: Array<{ x: number; y: number }>;
-  }>>) => void;
+  pdfUrl: string;
+  page?: number;
+  onPageChange?: (page: number, total: number) => void;
+  isTeacherControl?: boolean;
+  readOnly?: boolean;
+  realtimeLaser?: LivePdfLaserData | null;
+  realtimeAnnotations?: Record<number, Array<LivePdfStroke>>;
+  onLaserMove?: (laser: LivePdfLaserData | null) => void;
+  onAnnotationsChange?: (annotations: Record<number, Array<LivePdfStroke>>) => void;
+  onTotalPagesLoaded?: (total: number) => void;
+  fitMode?: 'contain' | 'width';
+  onFitModeChange?: (mode: 'contain' | 'width') => void;
+  zoom?: number;
+  onZoomChange?: (zoom: number) => void;
 }
 
 export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
   pdfUrl,
   page = 1,
   onPageChange,
-  onTotalPagesLoaded,
   isTeacherControl = false,
   readOnly = false,
   realtimeLaser,
   realtimeAnnotations,
   onLaserMove,
   onAnnotationsChange,
+  onTotalPagesLoaded,
+  fitMode: propFitMode,
+  onFitModeChange,
+  zoom: propZoom,
+  onZoomChange,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawingCanvasRef = useRef<HTMLCanvasElement>(null);
+  const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
 
   const [pdfDoc, setPdfDoc] = useState<any>(null);
   const [currentPage, setCurrentPage] = useState<number>(page || 1);
   const [totalPages, setTotalPages] = useState<number>(1);
   const [loading, setLoading] = useState<boolean>(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [zoomScale, setZoomScale] = useState<number>(1.0);
 
-  // Drawing tools state (only for teacher)
-  const [activeTool, setActiveTool] = useState<'laser' | 'pen' | 'highlighter' | 'eraser' | 'none'>('laser');
+  // Scaling & Display Modes ('contain': fit height/whole slide, 'width': fill 100% width)
+  const [fitMode, setFitMode] = useState<'contain' | 'width'>(propFitMode || 'contain');
+  const [zoomScale, setZoomScale] = useState<number>(propZoom || 1.0);
+
+  // Sync prop fitMode and zoom
+  useEffect(() => {
+    if (propFitMode && propFitMode !== fitMode) {
+      setFitMode(propFitMode);
+    }
+  }, [propFitMode]);
+
+  useEffect(() => {
+    if (typeof propZoom === 'number' && propZoom !== zoomScale) {
+      setZoomScale(propZoom);
+    }
+  }, [propZoom]);
+
+  // Drawing tools state (for teacher control)
+  const [activeTool, setActiveTool] = useState<'laser' | 'pen' | 'highlighter' | 'none'>('pen');
   const [penColor, setPenColor] = useState<string>('#ef4444'); // red default
   const [penWidth, setPenWidth] = useState<number>(3.5);
   const [isDrawing, setIsDrawing] = useState<boolean>(false);
   const currentStrokeRef = useRef<Array<{ x: number; y: number }>>([]);
 
   // Local copy of annotations per page
-  const [annotations, setAnnotations] = useState<Record<number, Array<{
-    type: 'pen' | 'highlighter';
-    color: string;
-    width: number;
-    points: Array<{ x: number; y: number }>;
-  }>>>(() => realtimeAnnotations || {});
+  const [annotations, setAnnotations] = useState<Record<number, Array<LivePdfStroke>>>(() => realtimeAnnotations || {});
+
+  // Local/received pointer data for drawing & laser movements
+  const [currentPointer, setCurrentPointer] = useState<LivePdfLaserData | null>(() => realtimeLaser || null);
+  const pointerFadeTimeoutRef = useRef<any>(null);
+
+  // Setup BroadcastChannel for 0ms local cross-tab sync
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        const bc = new BroadcastChannel('vidless_live_pdf_channel');
+        broadcastChannelRef.current = bc;
+
+        bc.onmessage = (evt) => {
+          const data = evt.data;
+          if (!data) return;
+
+          if (data.type === 'laser') {
+            setCurrentPointer(data.laser);
+          } else if (data.type === 'annotations') {
+            setAnnotations(data.annotations);
+          } else if (data.type === 'page' && typeof data.page === 'number') {
+            setCurrentPage(data.page);
+          } else if (data.type === 'view_settings') {
+            if (data.fitMode) setFitMode(data.fitMode);
+            if (typeof data.zoom === 'number') setZoomScale(data.zoom);
+          }
+        };
+
+        return () => {
+          bc.close();
+        };
+      } catch (err) {
+        console.warn('BroadcastChannel initialization bypassed:', err);
+      }
+    }
+  }, []);
 
   // Sync incoming external annotations
   useEffect(() => {
@@ -85,6 +150,13 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
       setAnnotations(realtimeAnnotations);
     }
   }, [realtimeAnnotations]);
+
+  // Sync incoming external laser / pen
+  useEffect(() => {
+    if (realtimeLaser !== undefined) {
+      setCurrentPointer(realtimeLaser);
+    }
+  }, [realtimeLaser]);
 
   // Keep internal currentPage in sync with props
   useEffect(() => {
@@ -110,12 +182,15 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
       try {
         let loadingTask: any;
 
-        // Base options configuring CMap & fonts to prevent Arabic/Thai character disconnections
+        // Base options configuring CMap & standard fonts to prevent Arabic/Thai character disconnections
         const baseOptions = {
           cMapUrl: PDF_CMAP_URL,
           cMapPacked: PDF_CMAP_PACKED,
           standardFontDataUrl: PDF_STANDARD_FONT_DATA_URL,
           enableXfa: true,
+          disableFontFace: false,
+          fontExtraProperties: true,
+          useWorkerFetch: true,
         };
 
         // Check if local file from IndexedDB
@@ -179,7 +254,7 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
     return () => {
       isCancelled = true;
     };
-  }, [pdfUrl]);
+  }, [pdfUrl, onTotalPagesLoaded]);
 
   // Redraw annotations on the overlay canvas
   const redrawAnnotations = useCallback(() => {
@@ -226,7 +301,7 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
     });
   }, [annotations, currentPage]);
 
-  // Render current page onto canvas
+  // Render current page onto canvas with bulletproof viewport measurement
   const renderPage = useCallback(async () => {
     if (!pdfDoc || !canvasRef.current || !containerRef.current) return;
 
@@ -238,41 +313,89 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      const containerWidth = containerRef.current.clientWidth || 900;
-      const containerHeight = containerRef.current.clientHeight || 700;
+      // Ensure all Arabic fonts and document fonts are ready before canvas drawing
+      if (typeof document !== 'undefined' && document.fonts && document.fonts.ready) {
+        try {
+          await document.fonts.ready;
+        } catch {}
+      }
 
-      // Base unscaled viewport
+      // Calculate reliable width & height of presentation viewport
+      let availableW = 0;
+      let availableH = 0;
+
+      if (readOnly) {
+        // Full screen / theater mode (Projector Display Room)
+        const windowW = window.innerWidth;
+        const windowH = window.innerHeight;
+        const clientW = containerRef.current?.clientWidth || 0;
+        const clientH = containerRef.current?.clientHeight || 0;
+        availableW = Math.max(clientW, windowW);
+        availableH = Math.max(clientH, windowH - 56); // 56px header
+      } else {
+        // Teacher Manager Card mode
+        const cRect = containerRef.current?.getBoundingClientRect();
+        availableW = Math.max(300, containerRef.current?.clientWidth || cRect?.width || 600);
+        availableH = Math.max(350, containerRef.current?.clientHeight || cRect?.height || 500);
+      }
+
+      // Base unscaled page viewport
       const unscaledViewport = pageObj.getViewport({ scale: 1.0 });
 
-      // In readOnly presentation mode (Projector Display Room), utilize 100% full screen
-      // without extra margins or padding, filling maximum available stage area
-      const marginH = readOnly ? 8 : 24;
-      const marginV = readOnly ? 8 : 40;
-      const scaleX = Math.max(0.1, (containerWidth - marginH) / unscaledViewport.width);
-      const scaleY = Math.max(0.1, (containerHeight - marginV) / unscaledViewport.height);
-      const fitScale = Math.min(scaleX, scaleY) * zoomScale;
-      const finalScale = Math.max(fitScale, 0.4);
+      let finalScale = 1.0;
+      if (fitMode === 'width') {
+        // Fit Width: fills 100% width of the screen, making slides or book pages huge!
+        const marginH = readOnly ? 0 : 16;
+        finalScale = ((availableW - marginH) / unscaledViewport.width) * zoomScale;
+      } else {
+        // Contain (Fit Screen): fits within both available width and height
+        const marginH = readOnly ? 0 : 20;
+        const marginV = readOnly ? 0 : 32;
+        const scaleX = (availableW - marginH) / unscaledViewport.width;
+        const scaleY = (availableH - marginV) / unscaledViewport.height;
+        finalScale = Math.min(scaleX, scaleY) * zoomScale;
+      }
+
+      // Bound final scale to clean visible range
+      finalScale = Math.max(0.4, Math.min(finalScale, 4.0));
 
       const viewport = pageObj.getViewport({ scale: finalScale });
 
-      // Match HiDPI devices for crystal sharp rendering
+      // Match HiDPI devices for razor-sharp Retina presentation
       const dpr = window.devicePixelRatio || 1;
-      canvas.width = Math.floor(viewport.width * dpr);
-      canvas.height = Math.floor(viewport.height * dpr);
-      canvas.style.width = `${Math.floor(viewport.width)}px`;
-      canvas.style.height = `${Math.floor(viewport.height)}px`;
+      const pixelWidth = Math.floor(viewport.width * dpr);
+      const pixelHeight = Math.floor(viewport.height * dpr);
+      const cssWidth = Math.floor(viewport.width);
+      const cssHeight = Math.floor(viewport.height);
+
+      canvas.width = pixelWidth;
+      canvas.height = pixelHeight;
+      canvas.style.width = `${cssWidth}px`;
+      canvas.style.height = `${cssHeight}px`;
 
       // Match drawing overlay canvas exactly
       if (drawingCanvasRef.current) {
         const dCanvas = drawingCanvasRef.current;
-        dCanvas.width = canvas.width;
-        dCanvas.height = canvas.height;
-        dCanvas.style.width = canvas.style.width;
-        dCanvas.style.height = canvas.style.height;
+        dCanvas.width = pixelWidth;
+        dCanvas.height = pixelHeight;
+        dCanvas.style.width = `${cssWidth}px`;
+        dCanvas.style.height = `${cssHeight}px`;
       }
 
       ctx.save();
       ctx.scale(dpr, dpr);
+
+      // Support Arabic RTL text shaping on canvas context
+      if ('direction' in ctx) {
+        try {
+          (ctx as any).direction = 'rtl';
+        } catch {}
+      }
+      if ('fontKerning' in ctx) {
+        try {
+          (ctx as any).fontKerning = 'normal';
+        } catch {}
+      }
 
       const renderContext = {
         canvasContext: ctx,
@@ -287,9 +410,9 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
     } catch (renderErr) {
       console.warn('PDF Page render interrupted or failed:', renderErr);
     }
-  }, [pdfDoc, currentPage, totalPages, zoomScale, readOnly, redrawAnnotations]);
+  }, [pdfDoc, currentPage, totalPages, zoomScale, fitMode, readOnly, redrawAnnotations]);
 
-  // Trigger page render on state changes or window resize
+  // Trigger page render on state changes or window resize with ResizeObserver
   useEffect(() => {
     renderPage();
 
@@ -297,7 +420,19 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
       renderPage();
     };
     window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+
+    let observer: ResizeObserver | null = null;
+    if (containerRef.current && typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(() => {
+        renderPage();
+      });
+      observer.observe(containerRef.current);
+    }
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      if (observer) observer.disconnect();
+    };
   }, [renderPage]);
 
   // Redraw annotations whenever annotations prop or currentPage changes
@@ -311,6 +446,9 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
       const nextP = currentPage - 1;
       setCurrentPage(nextP);
       if (onPageChange) onPageChange(nextP, totalPages);
+      if (broadcastChannelRef.current) {
+        broadcastChannelRef.current.postMessage({ type: 'page', page: nextP });
+      }
     }
   };
 
@@ -319,6 +457,9 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
       const nextP = currentPage + 1;
       setCurrentPage(nextP);
       if (onPageChange) onPageChange(nextP, totalPages);
+      if (broadcastChannelRef.current) {
+        broadcastChannelRef.current.postMessage({ type: 'page', page: nextP });
+      }
     }
   };
 
@@ -333,68 +474,116 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
     return { x, y };
   };
 
+  const broadcastPointer = (pointer: LivePdfLaserData | null) => {
+    // 1. Local BroadcastChannel (0ms delay)
+    if (broadcastChannelRef.current) {
+      try {
+        broadcastChannelRef.current.postMessage({ type: 'laser', laser: pointer });
+      } catch {}
+    }
+    // 2. Local state
+    setCurrentPointer(pointer);
+    // 3. Callback (Firebase)
+    if (onLaserMove) {
+      onLaserMove(pointer);
+    }
+  };
+
   const handlePointerDown = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     if (readOnly || !isTeacherControl) return;
 
+    if (pointerFadeTimeoutRef.current) {
+      clearTimeout(pointerFadeTimeoutRef.current);
+    }
+
+    const coords = getNormalizedCoords(e);
+
     if (activeTool === 'laser') {
-      const coords = getNormalizedCoords(e);
-      if (onLaserMove) {
-        onLaserMove({ ...coords, active: true, timestamp: Date.now() });
-      }
+      broadcastPointer({ ...coords, active: true, timestamp: Date.now(), tool: 'laser' });
       return;
     }
 
     if (activeTool === 'pen' || activeTool === 'highlighter') {
       setIsDrawing(true);
-      const coords = getNormalizedCoords(e);
       currentStrokeRef.current = [coords];
+
+      // Broadcast live pen tip cursor position with isDrawing = true
+      broadcastPointer({
+        ...coords,
+        active: true,
+        timestamp: Date.now(),
+        tool: activeTool,
+        color: penColor,
+        isDrawing: true,
+      });
     }
   };
 
   const handlePointerMove = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     if (readOnly || !isTeacherControl) return;
 
+    const coords = getNormalizedCoords(e);
+
     if (activeTool === 'laser') {
-      const coords = getNormalizedCoords(e);
-      if (onLaserMove) {
-        onLaserMove({ ...coords, active: true, timestamp: Date.now() });
-      }
+      broadcastPointer({ ...coords, active: true, timestamp: Date.now(), tool: 'laser' });
       return;
     }
 
-    if (isDrawing && (activeTool === 'pen' || activeTool === 'highlighter')) {
-      const coords = getNormalizedCoords(e);
-      currentStrokeRef.current.push(coords);
+    if (activeTool === 'pen' || activeTool === 'highlighter') {
+      if (isDrawing) {
+        currentStrokeRef.current.push(coords);
 
-      // Draw immediate live stroke on canvas
-      if (drawingCanvasRef.current) {
-        const canvas = drawingCanvasRef.current;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.save();
-          ctx.beginPath();
-          ctx.strokeStyle = penColor;
-          ctx.lineWidth = penWidth * (window.devicePixelRatio || 1);
-          ctx.lineCap = 'round';
-          ctx.lineJoin = 'round';
+        // Broadcast live writing movement in real time!
+        broadcastPointer({
+          ...coords,
+          active: true,
+          timestamp: Date.now(),
+          tool: activeTool,
+          color: penColor,
+          isDrawing: true,
+        });
 
-          if (activeTool === 'highlighter') {
-            ctx.globalAlpha = 0.35;
-            ctx.lineWidth = penWidth * 3 * (window.devicePixelRatio || 1);
-          } else {
-            ctx.globalAlpha = 0.95;
+        // Draw immediate live stroke segment on teacher canvas
+        if (drawingCanvasRef.current) {
+          const canvas = drawingCanvasRef.current;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.strokeStyle = penColor;
+            ctx.lineWidth = penWidth * (window.devicePixelRatio || 1);
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+
+            if (activeTool === 'highlighter') {
+              ctx.globalAlpha = 0.35;
+              ctx.lineWidth = penWidth * 3 * (window.devicePixelRatio || 1);
+            } else {
+              ctx.globalAlpha = 0.95;
+            }
+
+            const pts = currentStrokeRef.current;
+            if (pts.length >= 2) {
+              const pPrev = pts[pts.length - 2];
+              const pCurr = pts[pts.length - 1];
+              ctx.moveTo(pPrev.x * canvas.width, pPrev.y * canvas.height);
+              ctx.lineTo(pCurr.x * canvas.width, pCurr.y * canvas.height);
+              ctx.stroke();
+            }
+            ctx.restore();
           }
-
-          const pts = currentStrokeRef.current;
-          if (pts.length >= 2) {
-            const pPrev = pts[pts.length - 2];
-            const pCurr = pts[pts.length - 1];
-            ctx.moveTo(pPrev.x * canvas.width, pPrev.y * canvas.height);
-            ctx.lineTo(pCurr.x * canvas.width, pCurr.y * canvas.height);
-            ctx.stroke();
-          }
-          ctx.restore();
         }
+      } else {
+        // Teacher is hovering or pointing with pen (before clicking):
+        // Broadcast pointer position so students see where teacher is pointing with the pen
+        broadcastPointer({
+          ...coords,
+          active: true,
+          timestamp: Date.now(),
+          tool: activeTool,
+          color: penColor,
+          isDrawing: false,
+        });
       }
     }
   };
@@ -403,17 +592,16 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
     if (readOnly || !isTeacherControl) return;
 
     if (activeTool === 'laser') {
-      if (onLaserMove) {
-        onLaserMove(null);
-      }
+      broadcastPointer(null);
       return;
     }
 
     if (isDrawing) {
       setIsDrawing(false);
+
       const pts = currentStrokeRef.current;
       if (pts.length > 1) {
-        const newStroke = {
+        const newStroke: LivePdfStroke = {
           type: activeTool as 'pen' | 'highlighter',
           color: penColor,
           width: penWidth,
@@ -428,8 +616,29 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
         if (onAnnotationsChange) {
           onAnnotationsChange(updated);
         }
+        if (broadcastChannelRef.current) {
+          broadcastChannelRef.current.postMessage({ type: 'annotations', annotations: updated });
+        }
       }
       currentStrokeRef.current = [];
+
+      // Keep the pen tip visible for a short moment after release, then gently fade
+      if (pointerFadeTimeoutRef.current) clearTimeout(pointerFadeTimeoutRef.current);
+      pointerFadeTimeoutRef.current = setTimeout(() => {
+        broadcastPointer(null);
+      }, 1500);
+    }
+  };
+
+  const handlePointerLeave = () => {
+    if (readOnly || !isTeacherControl) return;
+    if (isDrawing) {
+      handlePointerUp();
+    } else {
+      if (pointerFadeTimeoutRef.current) clearTimeout(pointerFadeTimeoutRef.current);
+      pointerFadeTimeoutRef.current = setTimeout(() => {
+        broadcastPointer(null);
+      }, 800);
     }
   };
 
@@ -442,19 +651,47 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
     if (onAnnotationsChange) {
       onAnnotationsChange(updated);
     }
+    if (broadcastChannelRef.current) {
+      broadcastChannelRef.current.postMessage({ type: 'annotations', annotations: updated });
+    }
     redrawAnnotations();
+  };
+
+  const handleToggleFitMode = (mode: 'contain' | 'width') => {
+    setFitMode(mode);
+    if (onFitModeChange) onFitModeChange(mode);
+    if (broadcastChannelRef.current) {
+      broadcastChannelRef.current.postMessage({
+        type: 'view_settings',
+        fitMode: mode,
+        zoom: zoomScale,
+      });
+    }
+  };
+
+  const handleZoomChange = (delta: number) => {
+    const newZ = Math.max(0.6, Math.min(2.5, Math.round((zoomScale + delta) * 100) / 100));
+    setZoomScale(newZ);
+    if (onZoomChange) onZoomChange(newZ);
+    if (broadcastChannelRef.current) {
+      broadcastChannelRef.current.postMessage({
+        type: 'view_settings',
+        fitMode,
+        zoom: newZ,
+      });
+    }
   };
 
   return (
     <div
       ref={containerRef}
-      className={`relative w-full h-full flex flex-col items-center justify-between overflow-hidden bg-slate-950 select-none text-slate-100 ${
-        readOnly ? 'p-0' : ''
+      className={`relative w-full h-full flex flex-col items-center justify-center overflow-hidden bg-slate-950 select-none text-slate-100 ${
+        readOnly ? 'p-0 m-0' : ''
       }`}
     >
-      {/* Top Floating Teacher Control Bar (if teacher control mode) */}
+      {/* Top Teacher Control Bar (Annotations, Laser, Colors, Zoom, Fit Mode) */}
       {isTeacherControl && !readOnly && (
-        <div className="absolute top-3 z-30 flex flex-wrap items-center justify-center gap-2 px-4 py-2 bg-slate-900/90 backdrop-blur-md rounded-2xl border border-slate-700/80 shadow-2xl">
+        <div className="absolute top-2 z-30 flex flex-wrap items-center justify-center gap-2 px-3 py-1.5 bg-slate-900/95 backdrop-blur-md rounded-2xl border border-slate-700/80 shadow-2xl max-w-full">
           {/* Laser Tool */}
           <button
             type="button"
@@ -464,6 +701,7 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
                 ? 'bg-rose-600 text-white shadow-lg shadow-rose-600/30 ring-2 ring-rose-400'
                 : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
             }`}
+            title="مؤشر الليزر الأحمر"
           >
             <span className="w-2.5 h-2.5 rounded-full bg-rose-400 animate-pulse"></span>
             <span>مؤشر الليزر 🔴</span>
@@ -478,6 +716,7 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
                 ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 ring-2 ring-indigo-400'
                 : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
             }`}
+            title="القلم للرسم والكتابة الحية"
           >
             <Palette className="w-3.5 h-3.5" />
             <span>القلم ✏️</span>
@@ -492,15 +731,16 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
                 ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/30 ring-2 ring-amber-300 font-black'
                 : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
             }`}
+            title="تظليل فسفوري شفاف"
           >
             <Sparkles className="w-3.5 h-3.5" />
             <span>تظليل فسفوري 🖍️</span>
           </button>
 
-          {/* Colors quick switch (if pen active) */}
+          {/* Color Switcher */}
           {(activeTool === 'pen' || activeTool === 'highlighter') && (
             <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-950/70 rounded-xl border border-slate-700">
-              {['#ef4444', '#eab308', '#3b82f6', '#10b981', '#ffffff'].map((c) => (
+              {['#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#ec4899', '#ffffff'].map((c) => (
                 <button
                   key={c}
                   type="button"
@@ -509,6 +749,7 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
                     penColor === c ? 'scale-125 ring-2 ring-white' : 'hover:scale-110 opacity-70'
                   }`}
                   style={{ backgroundColor: c }}
+                  title={`لون ${c}`}
                 />
               ))}
             </div>
@@ -525,13 +766,41 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
             <span>مسح الرسومات</span>
           </button>
 
-          <div className="h-4 w-px bg-slate-700 mx-1"></div>
+          <div className="h-4 w-px bg-slate-700 mx-0.5"></div>
 
-          {/* Zoom controls */}
+          {/* Display Mode: Fit Screen vs Fit Width */}
+          <div className="flex items-center gap-1 bg-slate-950/80 p-0.5 rounded-xl border border-slate-800 text-xs">
+            <button
+              type="button"
+              onClick={() => handleToggleFitMode('contain')}
+              className={`px-2 py-1 rounded-lg font-bold transition-all ${
+                fitMode === 'contain'
+                  ? 'bg-emerald-600 text-white shadow'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              title="ملاءمة كامل الشاشة (ارتفاع وعرض)"
+            >
+              ملاءمة الشاشة
+            </button>
+            <button
+              type="button"
+              onClick={() => handleToggleFitMode('width')}
+              className={`px-2 py-1 rounded-lg font-bold transition-all ${
+                fitMode === 'width'
+                  ? 'bg-emerald-600 text-white shadow'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              title="ملء العرض الكامل (شاشة عريضة وضخمة)"
+            >
+              ملء العرض
+            </button>
+          </div>
+
+          {/* Zoom Controls */}
           <div className="flex items-center gap-1 text-slate-400">
             <button
               type="button"
-              onClick={() => setZoomScale((z) => Math.max(0.6, z - 0.15))}
+              onClick={() => handleZoomChange(-0.15)}
               className="p-1 hover:text-white transition-colors cursor-pointer"
               title="تصغير"
             >
@@ -540,7 +809,7 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
             <span className="text-[11px] font-mono px-1 font-bold">{Math.round(zoomScale * 100)}%</span>
             <button
               type="button"
-              onClick={() => setZoomScale((z) => Math.min(2.0, z + 0.15))}
+              onClick={() => handleZoomChange(0.15)}
               className="p-1 hover:text-white transition-colors cursor-pointer"
               title="تكبير"
             >
@@ -551,7 +820,11 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
       )}
 
       {/* Main Canvas Presentation Viewport */}
-      <div className={`relative flex-1 w-full h-full flex items-center justify-center overflow-auto ${readOnly ? 'p-0' : 'p-2'}`}>
+      <div
+        className={`relative flex-1 w-full h-full flex items-center justify-center overflow-auto ${
+          readOnly ? 'p-0 m-0' : 'p-2'
+        }`}
+      >
         {loading && (
           <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-slate-950/80 backdrop-blur-sm">
             <Loader2 className="w-10 h-10 text-emerald-400 animate-spin" />
@@ -571,16 +844,34 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
         )}
 
         {/* PDF Render Canvas & Overlay Wrapper */}
-        <div className="relative shadow-2xl rounded-lg overflow-hidden border border-slate-800 bg-white leading-none">
-          <canvas ref={canvasRef} className="block pointer-events-none" />
+        <div
+          className={`relative shadow-2xl overflow-hidden bg-white leading-none ${
+            readOnly ? 'rounded-none border-0' : 'rounded-lg border border-slate-800'
+          }`}
+          style={{
+            fontFamily: "'Noto Naskh Arabic', 'Cairo', 'Amiri', 'Tajawal', sans-serif",
+            fontFeatureSettings: "'liga' 1, 'kern' 1",
+            direction: 'rtl',
+          }}
+        >
+          {/* Base PDF Render Canvas */}
+          <canvas
+            ref={canvasRef}
+            className="block pointer-events-none mx-auto max-w-none"
+            style={{
+              fontFamily: "'Noto Naskh Arabic', 'Cairo', 'Amiri', 'Tajawal', sans-serif",
+              fontFeatureSettings: "'liga' 1, 'kern' 1",
+              direction: 'rtl',
+            }}
+          />
 
-          {/* Realtime Drawing / Laser Interaction Overlay Canvas */}
+          {/* Realtime Drawing / Interaction Overlay Canvas */}
           <canvas
             ref={drawingCanvasRef}
             onMouseDown={handlePointerDown}
             onMouseMove={handlePointerMove}
             onMouseUp={handlePointerUp}
-            onMouseLeave={handlePointerUp}
+            onMouseLeave={handlePointerLeave}
             onTouchStart={handlePointerDown}
             onTouchMove={handlePointerMove}
             onTouchEnd={handlePointerUp}
@@ -596,25 +887,55 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
             }`}
           />
 
-          {/* Realtime Laser Dot Indicator (Received from Teacher or Local) */}
-          {(realtimeLaser?.active || (activeTool === 'laser' && isTeacherControl)) && (
+          {/* Realtime Writing Pen / Laser Dynamic Indicator */}
+          {Boolean(currentPointer?.active) && (
             <div
-              className="absolute z-20 pointer-events-none -translate-x-1/2 -translate-y-1/2 transition-transform duration-75"
+              className="absolute z-20 pointer-events-none -translate-x-1/2 -translate-y-1/2 transition-all duration-75 ease-out"
               style={{
-                left: `${(realtimeLaser?.x ?? 0.5) * 100}%`,
-                top: `${(realtimeLaser?.y ?? 0.5) * 100}%`,
+                left: `${(currentPointer?.x ?? 0.5) * 100}%`,
+                top: `${(currentPointer?.y ?? 0.5) * 100}%`,
               }}
             >
-              <div className="relative flex items-center justify-center">
-                <span className="absolute w-8 h-8 rounded-full bg-rose-500/40 animate-ping"></span>
-                <span className="w-4 h-4 rounded-full bg-rose-600 border-2 border-white shadow-[0_0_15px_#ff0055]"></span>
-              </div>
+              {currentPointer?.tool === 'pen' || currentPointer?.tool === 'highlighter' ? (
+                /* LIVE WRITING PEN INDICATOR: Shows pen icon tilted down and animated nib */
+                <div className="relative flex items-center justify-center">
+                  {/* Ink contact dot / nib */}
+                  <div
+                    className="w-4 h-4 rounded-full border-2 border-white shadow-lg flex items-center justify-center animate-pulse"
+                    style={{ backgroundColor: currentPointer?.color || penColor }}
+                  >
+                    <div className="w-1.5 h-1.5 rounded-full bg-white" />
+                  </div>
+
+                  {/* Pulsing ink ripple when pen is actively writing / drawing */}
+                  {Boolean(currentPointer?.isDrawing) && (
+                    <span
+                      className="absolute w-8 h-8 rounded-full border-2 border-white/80 animate-ping"
+                      style={{ borderColor: currentPointer?.color || penColor }}
+                    />
+                  )}
+
+                  {/* Distinct tilted pen cursor icon floating right above the nib */}
+                  <div className="absolute -top-7 -right-6 pointer-events-none transform -rotate-12 transition-transform duration-100 flex items-center gap-1 bg-slate-900/90 text-white px-1.5 py-0.5 rounded-md border border-slate-700/80 shadow-md text-[10px] font-bold">
+                    <span>✏️</span>
+                    <span className="text-[9px] font-mono opacity-80">
+                      {currentPointer?.isDrawing ? 'يكتب...' : 'قلم'}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                /* RED PULSING LASER BEAM */
+                <div className="relative flex items-center justify-center">
+                  <span className="absolute w-8 h-8 rounded-full bg-rose-500/40 animate-ping"></span>
+                  <span className="w-4 h-4 rounded-full bg-rose-600 border-2 border-white shadow-[0_0_15px_#ff0055]"></span>
+                </div>
+              )}
             </div>
           )}
         </div>
       </div>
 
-      {/* Floating Bottom Navigation Controls (Page Navigator) - Only shown in Teacher Control or standalone mode, hidden on projector display room */}
+      {/* Floating Bottom Navigation Controls (Page Navigator) - Shown in Teacher Control or standalone mode */}
       {!readOnly && (
         <div className="sticky bottom-2 z-30 flex items-center gap-3 px-5 py-2 bg-slate-900/90 backdrop-blur-md rounded-2xl border border-slate-800 shadow-xl">
           <button

@@ -541,6 +541,7 @@ async function startServer() {
     }
   });
 
+
   // Vite development middleware vs production static server
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
