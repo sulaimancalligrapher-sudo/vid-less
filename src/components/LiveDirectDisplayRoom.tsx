@@ -486,7 +486,7 @@ export default function LiveDirectDisplayRoom({}: LiveDirectDisplayRoomProps = {
       {/* Main Presentation Stage */}
       <main className={`flex-1 flex flex-col items-center justify-center w-full relative ${
         Boolean(sessionState?.showPdfInRoom) && sessionState?.pdfUrl
-          ? 'p-0 max-w-none h-[calc(100vh-64px)] overflow-hidden'
+          ? 'p-0 max-w-none w-full h-[calc(100vh-64px)] flex-1 overflow-hidden'
           : 'p-3 sm:p-6 max-w-7xl mx-auto'
       }`}>
         {/* ========================================================================= */}
@@ -514,7 +514,7 @@ export default function LiveDirectDisplayRoom({}: LiveDirectDisplayRoomProps = {
           /* ========================================================================= */
           /* NATIVE PDF PRESENTATION STAGE (بكامل الشاشة بدون هوامش - شاشة العرض للعرض فقط) */
           /* ========================================================================= */
-          <div className="w-full flex-1 flex flex-col h-[calc(100vh-64px)] min-h-[580px] bg-slate-950 overflow-hidden relative border-0">
+          <div className="w-full h-full flex-1 flex flex-col bg-slate-950 overflow-hidden relative border-0">
             <NativePdfViewer
               pdfUrl={sessionState.pdfUrl}
               page={sessionState.pdfPage || 1}

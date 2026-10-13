@@ -189,14 +189,14 @@ export default function LiveDirectManager({
     }
   };
 
-  // Realtime laser move transmitter (throttled to ~50ms to prevent Firebase overload)
-  const handleLaserMove = useCallback(async (laser: { x: number; y: number; active: boolean; timestamp: number } | null) => {
+  // Realtime laser move & live pen drawing indicator transmitter (throttled to ~50ms to prevent Firebase overload)
+  const handleLaserMove = useCallback(async (laser: { x: number; y: number; active: boolean; timestamp: number; tool?: 'laser' | 'pen' | 'highlighter'; color?: string } | null) => {
     const now = Date.now();
     if (!laser) {
       await updateLivePdfLaser(null);
       return;
     }
-    if (now - laserThrottleRef.current > 50) {
+    if (now - laserThrottleRef.current > 40) {
       laserThrottleRef.current = now;
       await updateLivePdfLaser(laser);
     }

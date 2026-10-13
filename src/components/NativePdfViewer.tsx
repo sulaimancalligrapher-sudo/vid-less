@@ -25,14 +25,14 @@ interface NativePdfViewerProps {
   onTotalPagesLoaded?: (totalPages: number) => void;
   isTeacherControl?: boolean; // If true, displays teacher drawing tools and sends realtime laser/pen sync
   readOnly?: boolean; // If true (e.g. on projector display room), no drawing toolbar, only renders incoming drawings & laser
-  realtimeLaser?: { x: number; y: number; active: boolean; timestamp: number } | null;
+  realtimeLaser?: { x: number; y: number; active: boolean; timestamp: number; tool?: 'laser' | 'pen' | 'highlighter'; color?: string } | null;
   realtimeAnnotations?: Record<number, Array<{
     type: 'pen' | 'highlighter';
     color: string;
     width: number;
     points: Array<{ x: number; y: number }>;
   }>>;
-  onLaserMove?: (laser: { x: number; y: number; active: boolean; timestamp: number } | null) => void;
+  onLaserMove?: (laser: { x: number; y: number; active: boolean; timestamp: number; tool?: 'laser' | 'pen' | 'highlighter'; color?: string } | null) => void;
   onAnnotationsChange?: (annotations: Record<number, Array<{
     type: 'pen' | 'highlighter';
     color: string;
@@ -238,18 +238,24 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      const containerWidth = containerRef.current.clientWidth || 900;
-      const containerHeight = containerRef.current.clientHeight || 700;
+      // Accurately obtain client dimensions with fallback to window viewport
+      const containerRect = containerRef.current.getBoundingClientRect();
+      const containerWidth = Math.max(containerRect.width, containerRef.current.clientWidth || (window.innerWidth - 32));
+      const containerHeight = Math.max(containerRect.height, containerRef.current.clientHeight || (window.innerHeight - 80));
 
       // Base unscaled viewport
       const unscaledViewport = pageObj.getViewport({ scale: 1.0 });
 
-      // In readOnly presentation mode (Projector Display Room), utilize 100% full screen
-      // without extra margins or padding, filling maximum available stage area
-      const marginH = readOnly ? 8 : 24;
-      const marginV = readOnly ? 8 : 40;
-      const scaleX = Math.max(0.1, (containerWidth - marginH) / unscaledViewport.width);
-      const scaleY = Math.max(0.1, (containerHeight - marginV) / unscaledViewport.height);
+      // In readOnly presentation mode (Projector Display Room), maximize screen utilization
+      const marginH = readOnly ? 0 : 20;
+      const marginV = readOnly ? 0 : 40;
+      const availableW = Math.max(100, containerWidth - marginH);
+      const availableH = Math.max(100, containerHeight - marginV);
+
+      const scaleX = availableW / unscaledViewport.width;
+      const scaleY = availableH / unscaledViewport.height;
+
+      // Fit to fill maximum possible viewport dimension (contain)
       const fitScale = Math.min(scaleX, scaleY) * zoomScale;
       const finalScale = Math.max(fitScale, 0.4);
 
@@ -289,7 +295,7 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
     }
   }, [pdfDoc, currentPage, totalPages, zoomScale, readOnly, redrawAnnotations]);
 
-  // Trigger page render on state changes or window resize
+  // Trigger page render on state changes or window resize with ResizeObserver for instant responsive re-render
   useEffect(() => {
     renderPage();
 
@@ -297,7 +303,19 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
       renderPage();
     };
     window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+
+    let observer: ResizeObserver | null = null;
+    if (containerRef.current && typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(() => {
+        renderPage();
+      });
+      observer.observe(containerRef.current);
+    }
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      if (observer) observer.disconnect();
+    };
   }, [renderPage]);
 
   // Redraw annotations whenever annotations prop or currentPage changes
@@ -339,7 +357,7 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
     if (activeTool === 'laser') {
       const coords = getNormalizedCoords(e);
       if (onLaserMove) {
-        onLaserMove({ ...coords, active: true, timestamp: Date.now() });
+        onLaserMove({ ...coords, active: true, timestamp: Date.now(), tool: 'laser' });
       }
       return;
     }
@@ -348,6 +366,11 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
       setIsDrawing(true);
       const coords = getNormalizedCoords(e);
       currentStrokeRef.current = [coords];
+
+      // Broadcast live pen tip cursor position so students see the teacher touching down the pen
+      if (onLaserMove) {
+        onLaserMove({ ...coords, active: true, timestamp: Date.now(), tool: activeTool, color: penColor });
+      }
     }
   };
 
@@ -357,7 +380,7 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
     if (activeTool === 'laser') {
       const coords = getNormalizedCoords(e);
       if (onLaserMove) {
-        onLaserMove({ ...coords, active: true, timestamp: Date.now() });
+        onLaserMove({ ...coords, active: true, timestamp: Date.now(), tool: 'laser' });
       }
       return;
     }
@@ -366,7 +389,12 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
       const coords = getNormalizedCoords(e);
       currentStrokeRef.current.push(coords);
 
-      // Draw immediate live stroke on canvas
+      // Broadcast live pen tip motion in real time! Students see the pen cursor moving as it draws!
+      if (onLaserMove) {
+        onLaserMove({ ...coords, active: true, timestamp: Date.now(), tool: activeTool, color: penColor });
+      }
+
+      // Draw immediate live stroke on teacher canvas
       if (drawingCanvasRef.current) {
         const canvas = drawingCanvasRef.current;
         const ctx = canvas.getContext('2d');
@@ -411,6 +439,11 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
 
     if (isDrawing) {
       setIsDrawing(false);
+      // Turn off live pen cursor on release
+      if (onLaserMove) {
+        onLaserMove(null);
+      }
+
       const pts = currentStrokeRef.current;
       if (pts.length > 1) {
         const newStroke = {
@@ -448,7 +481,7 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
   return (
     <div
       ref={containerRef}
-      className={`relative w-full h-full flex flex-col items-center justify-between overflow-hidden bg-slate-950 select-none text-slate-100 ${
+      className={`relative w-full h-full flex flex-col items-center justify-center overflow-hidden bg-slate-950 select-none text-slate-100 ${
         readOnly ? 'p-0' : ''
       }`}
     >
@@ -605,10 +638,24 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
                 top: `${(realtimeLaser?.y ?? 0.5) * 100}%`,
               }}
             >
-              <div className="relative flex items-center justify-center">
-                <span className="absolute w-8 h-8 rounded-full bg-rose-500/40 animate-ping"></span>
-                <span className="w-4 h-4 rounded-full bg-rose-600 border-2 border-white shadow-[0_0_15px_#ff0055]"></span>
-              </div>
+              {/* Dynamic Indicator: either Laser (red pulsing beam) or Pen tip (animated writing marker) */}
+              {realtimeLaser?.tool === 'pen' || realtimeLaser?.tool === 'highlighter' ? (
+                <div className="relative flex items-center justify-center">
+                  <div
+                    className="w-4 h-4 rounded-full border-2 border-white shadow-lg animate-pulse"
+                    style={{ backgroundColor: realtimeLaser.color || penColor }}
+                  />
+                  {/* Subtle pen cursor icon next to tip */}
+                  <span className="absolute -top-3 -right-3 text-xs drop-shadow-md select-none">
+                    ✏️
+                  </span>
+                </div>
+              ) : (
+                <div className="relative flex items-center justify-center">
+                  <span className="absolute w-8 h-8 rounded-full bg-rose-500/40 animate-ping"></span>
+                  <span className="w-4 h-4 rounded-full bg-rose-600 border-2 border-white shadow-[0_0_15px_#ff0055]"></span>
+                </div>
+              )}
             </div>
           )}
         </div>
