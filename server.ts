@@ -8,8 +8,9 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json({ limit: '10mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+  app.use(express.json({ limit: '100mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '100mb' }));
+  app.use(express.raw({ type: 'application/pdf', limit: '100mb' }));
 
   // ==========================================
   // --- IN-MEMORY REALTIME LIVE CLASS STATE ---
@@ -538,6 +539,72 @@ async function startServer() {
     } catch (error: any) {
       console.error("Error in proxy-drive server endpoint:", error.message);
       res.status(500).send("Error proxying video/audio from Google Drive");
+    }
+  });
+
+  // ==========================================
+  // --- NATIVE PDF STORAGE & STREAMING ---
+  // ==========================================
+  const PDF_UPLOADS_DIR = path.join(process.cwd(), 'public', 'pdf_uploads');
+  if (!fs.existsSync(PDF_UPLOADS_DIR)) {
+    fs.mkdirSync(PDF_UPLOADS_DIR, { recursive: true });
+  }
+
+  // Upload or sync PDF file to server
+  app.post("/api/pdf/upload", (req, res) => {
+    try {
+      const { id, name, base64 } = req.body || {};
+      if (!id) {
+        return res.status(400).json({ error: "Missing id parameter" });
+      }
+
+      const safeId = String(id).replace(/[^a-zA-Z0-9_-]/g, '_');
+      const targetPath = path.join(PDF_UPLOADS_DIR, `${safeId}.pdf`);
+
+      if (base64) {
+        const cleanBase64 = String(base64).replace(/^data:application\/pdf;base64,/, '');
+        const buffer = Buffer.from(cleanBase64, 'base64');
+        fs.writeFileSync(targetPath, buffer);
+      } else if (Buffer.isBuffer(req.body)) {
+        fs.writeFileSync(targetPath, req.body);
+      } else {
+        return res.status(400).json({ error: "No PDF data provided" });
+      }
+
+      console.log(`[PDF Server] Saved PDF ${safeId} (${name || 'unnamed'}) size: ${fs.statSync(targetPath).size} bytes`);
+      res.json({
+        success: true,
+        id: safeId,
+        url: `/api/pdf/${safeId}`,
+      });
+    } catch (err: any) {
+      console.error("Failed to save PDF on server:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Serve PDF file with CORS and streaming support
+  app.get("/api/pdf/:id", (req, res) => {
+    try {
+      const { id } = req.params;
+      const safeId = String(id).replace(/[^a-zA-Z0-9_-]/g, '_');
+      let targetPath = path.join(PDF_UPLOADS_DIR, `${safeId}.pdf`);
+      if (!fs.existsSync(targetPath)) {
+        targetPath = path.join(PDF_UPLOADS_DIR, safeId);
+      }
+
+      if (!fs.existsSync(targetPath)) {
+        return res.status(404).send("ملف الـ PDF غير موجود على الخادم");
+      }
+
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+      res.setHeader("Cache-Control", "public, max-age=86400");
+      res.sendFile(targetPath);
+    } catch (err: any) {
+      console.error("Error reading PDF file:", err);
+      res.status(500).send("Error reading PDF file");
     }
   });
 

@@ -37,7 +37,40 @@ export interface StoredPdfRecord {
 }
 
 /**
- * Save a PDF File (or ArrayBuffer) into IndexedDB
+ * Helper to upload PDF ArrayBuffer to backend server storage
+ */
+export async function uploadPdfToServer(id: string, name: string, buffer: ArrayBuffer): Promise<boolean> {
+  try {
+    const safeId = id.replace(/^local:\/\//, '').replace(/[^a-zA-Z0-9_-]/g, '_');
+    
+    // Convert ArrayBuffer to Base64 in chunks to avoid stack overflow with large files
+    let binary = '';
+    const bytes = new Uint8Array(buffer);
+    const len = bytes.byteLength;
+    const chunkSize = 0x8000;
+    for (let i = 0; i < len; i += chunkSize) {
+      binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, Math.min(i + chunkSize, len))));
+    }
+    const base64 = btoa(binary);
+
+    const res = await fetch('/api/pdf/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: safeId,
+        name,
+        base64,
+      }),
+    });
+    return res.ok;
+  } catch (err) {
+    console.warn('Failed to upload PDF to server:', err);
+    return false;
+  }
+}
+
+/**
+ * Save a PDF File (or ArrayBuffer) into IndexedDB and sync with server
  */
 export async function savePdfToIndexedDB(id: string, name: string, fileOrBuffer: File | ArrayBuffer): Promise<void> {
   const db = await openDB();
@@ -54,7 +87,8 @@ export async function savePdfToIndexedDB(id: string, name: string, fileOrBuffer:
     size = buffer.byteLength;
   }
 
-  return new Promise((resolve, reject) => {
+  // 1. Save locally in IndexedDB for instant 0ms access
+  await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readwrite');
     const store = tx.objectStore(STORE_NAME);
     const record: StoredPdfRecord = {
@@ -69,25 +103,63 @@ export async function savePdfToIndexedDB(id: string, name: string, fileOrBuffer:
     req.onsuccess = () => resolve();
     req.onerror = () => reject(req.error);
   });
+
+  // 2. Concurrently sync with backend server so all remote screens/projectors/students can access it
+  uploadPdfToServer(id, name, buffer).catch((e) => console.warn('Background server sync skipped:', e));
 }
 
 /**
- * Get a PDF ArrayBuffer by its ID from IndexedDB
+ * Get a PDF ArrayBuffer by its ID from IndexedDB with automatic server fallback
  */
 export async function getPdfFromIndexedDB(id: string): Promise<StoredPdfRecord | null> {
+  const cleanId = id.replace(/^local:\/\//, '');
+
   try {
     const db = await openDB();
-    return new Promise((resolve, reject) => {
+    const localRecord = await new Promise<StoredPdfRecord | null>((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readonly');
       const store = tx.objectStore(STORE_NAME);
-      const req = store.get(id);
+      const req = store.get(cleanId);
       req.onsuccess = () => resolve(req.result || null);
       req.onerror = () => reject(req.error);
     });
+
+    if (localRecord && localRecord.data) {
+      return localRecord;
+    }
   } catch (err) {
-    console.warn('Failed to get PDF from IndexedDB:', err);
-    return null;
+    console.warn('IndexedDB read failed, trying server fallback:', err);
   }
+
+  // Fallback: If not found in IndexedDB (e.g. running on another device or projector), fetch from server
+  try {
+    const safeId = cleanId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const res = await fetch(`/api/pdf/${safeId}`);
+    if (res.ok) {
+      const arrayBuffer = await res.arrayBuffer();
+      const record: StoredPdfRecord = {
+        id: cleanId,
+        name: cleanId,
+        size: arrayBuffer.byteLength,
+        type: 'application/pdf',
+        data: arrayBuffer,
+        updatedAt: Date.now(),
+      };
+
+      // Cache into local IndexedDB for future visits
+      try {
+        const db = await openDB();
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        tx.objectStore(STORE_NAME).put(record);
+      } catch {}
+
+      return record;
+    }
+  } catch (fetchErr) {
+    console.warn('Server fallback fetch failed for PDF:', fetchErr);
+  }
+
+  return null;
 }
 
 /**

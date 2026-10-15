@@ -110,6 +110,7 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
 
   // Local copy of annotations per page
   const [annotations, setAnnotations] = useState<Record<number, Array<LivePdfStroke>>>(() => realtimeAnnotations || {});
+  const lastLocalAnnotationsUpdateRef = useRef<number>(0);
 
   // Local/received pointer data for drawing & laser movements
   const [currentPointer, setCurrentPointer] = useState<LivePdfLaserData | null>(() => realtimeLaser || null);
@@ -129,6 +130,9 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
           if (data.type === 'laser') {
             setCurrentPointer(data.laser);
           } else if (data.type === 'annotations') {
+            if (data.updatedAt && data.updatedAt < lastLocalAnnotationsUpdateRef.current) {
+              return;
+            }
             setAnnotations(data.annotations);
           } else if (data.type === 'page' && typeof data.page === 'number') {
             setCurrentPage(data.page);
@@ -147,9 +151,12 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
     }
   }, []);
 
-  // Sync incoming external annotations
+  // Sync incoming external annotations (protect against stale snapshots overwriting recent local edits)
   useEffect(() => {
     if (realtimeAnnotations) {
+      if (Date.now() - lastLocalAnnotationsUpdateRef.current < 1500) {
+        return;
+      }
       setAnnotations(realtimeAnnotations);
     }
   }, [realtimeAnnotations]);
@@ -196,17 +203,24 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
           useWorkerFetch: true,
         };
 
-        // Check if local file from IndexedDB
-        if (pdfUrl.startsWith('local://')) {
-          const fileId = pdfUrl.replace('local://', '');
+        // 1. Local or Server-stored PDF
+        if (pdfUrl.startsWith('local://') || pdfUrl.startsWith('/api/pdf/')) {
+          const fileId = pdfUrl.replace(/^local:\/\//, '').replace(/^\/api\/pdf\//, '');
           const record = await getPdfFromIndexedDB(fileId);
-          if (!record || !record.data) {
-            throw new Error('لم يتم العثور على الملف المحلي المخزن');
+          if (record && record.data) {
+            loadingTask = pdfjsLib.getDocument({
+              ...baseOptions,
+              data: new Uint8Array(record.data),
+            });
+          } else {
+            // Direct fetch from server route /api/pdf/:id
+            const safeId = fileId.replace(/[^a-zA-Z0-9_-]/g, '_');
+            loadingTask = pdfjsLib.getDocument({
+              ...baseOptions,
+              url: `/api/pdf/${safeId}`,
+              withCredentials: false,
+            });
           }
-          loadingTask = pdfjsLib.getDocument({
-            ...baseOptions,
-            data: new Uint8Array(record.data),
-          });
         } else if (pdfUrl.startsWith('data:application/pdf;base64,')) {
           // Base64 direct data
           const base64Data = pdfUrl.split(',')[1];
@@ -220,11 +234,12 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
             data: uint8Array,
           });
         } else {
-          // Check if Google Drive link, convert to download/view stream if possible
+          // Check if Google Drive link, convert to download/view stream through server proxy to bypass CORS
           let directFetchUrl = pdfUrl;
-          const driveMatch = pdfUrl.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
+          const driveMatch = pdfUrl.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/) ||
+                             pdfUrl.match(/[?&]id=([a-zA-Z0-9_-]+)/);
           if (driveMatch && driveMatch[1]) {
-            directFetchUrl = `https://drive.google.com/uc?export=download&id=${driveMatch[1]}`;
+            directFetchUrl = `/api/proxy-drive?id=${driveMatch[1]}`;
           }
 
           loadingTask = pdfjsLib.getDocument({
@@ -651,6 +666,7 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
 
       const pts = currentStrokeRef.current;
       if (pts.length > 1) {
+        lastLocalAnnotationsUpdateRef.current = Date.now();
         const newStroke: LivePdfStroke = {
           type: activeTool as 'pen' | 'highlighter',
           color: penColor,
@@ -667,7 +683,11 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
           onAnnotationsChange(updated);
         }
         if (broadcastChannelRef.current) {
-          broadcastChannelRef.current.postMessage({ type: 'annotations', annotations: updated });
+          broadcastChannelRef.current.postMessage({
+            type: 'annotations',
+            annotations: updated,
+            updatedAt: Date.now(),
+          });
         }
       }
       currentStrokeRef.current = [];
@@ -693,6 +713,7 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
   };
 
   const handleClearPageDrawings = () => {
+    lastLocalAnnotationsUpdateRef.current = Date.now();
     const updated = {
       ...annotations,
       [currentPage]: [],
@@ -702,7 +723,11 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
       onAnnotationsChange(updated);
     }
     if (broadcastChannelRef.current) {
-      broadcastChannelRef.current.postMessage({ type: 'annotations', annotations: updated });
+      broadcastChannelRef.current.postMessage({
+        type: 'annotations',
+        annotations: updated,
+        updatedAt: Date.now(),
+      });
     }
     redrawAnnotations();
   };

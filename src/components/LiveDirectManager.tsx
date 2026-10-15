@@ -91,6 +91,8 @@ import {
   updateLivePdfLaser,
   updateLivePdfAnnotations,
   savePdfToIndexedDB,
+  getPdfFromIndexedDB,
+  uploadPdfToServer,
   deletePdfFromIndexedDB,
 } from '../api';
 import LiveChatModal from './LiveChatModal';
@@ -216,22 +218,29 @@ export default function LiveDirectManager({
       await updateLivePdfLaser(null);
       return;
     }
-    if (now - laserThrottleRef.current > 50) {
+    if (now - laserThrottleRef.current > 150) {
       laserThrottleRef.current = now;
       await updateLivePdfLaser(laser);
     }
   }, []);
 
-  // Realtime annotations update
+  // Realtime annotations update with optimistic local state & server sync
   const handleAnnotationsChange = useCallback(async (annotations: Record<number, Array<{
     type: 'pen' | 'highlighter';
     color: string;
     width: number;
     points: Array<{ x: number; y: number }>;
   }>>) => {
+    // Optimistically update manager state so drawings and clear actions never bounce back
+    setSessionState((prev) => prev ? { ...prev, pdfAnnotations: annotations } : prev);
+
     if (livePdfBroadcastChannelRef.current) {
       try {
-        livePdfBroadcastChannelRef.current.postMessage({ type: 'annotations', annotations });
+        livePdfBroadcastChannelRef.current.postMessage({
+          type: 'annotations',
+          annotations,
+          updatedAt: Date.now(),
+        });
       } catch {}
     }
     await updateLivePdfAnnotations(annotations);
@@ -258,6 +267,17 @@ export default function LiveDirectManager({
     setIsUpdatingPdfVisibility(true);
     try {
       const finalPdfUrl = lesson.storageType === 'file' ? (lesson.url || `local://${lesson.id}`) : formatPdfEmbedUrl(lesson.url || '');
+
+      // If local file, ensure it's synced to the server in background so projector / student devices can access it
+      if (lesson.storageType === 'file') {
+        const fileId = (lesson.url || lesson.id).replace(/^local:\/\//, '');
+        getPdfFromIndexedDB(fileId).then((record) => {
+          if (record && record.data) {
+            uploadPdfToServer(fileId, lesson.title, record.data);
+          }
+        }).catch(() => {});
+      }
+
       const res = await updateLivePdfState({
         showPdfInRoom: true,
         pdfUrl: finalPdfUrl,

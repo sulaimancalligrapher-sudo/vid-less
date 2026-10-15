@@ -2047,6 +2047,7 @@ export {
   savePdfToIndexedDB,
   getPdfFromIndexedDB,
   deletePdfFromIndexedDB,
+  uploadPdfToServer,
 } from './lib/pdfStorage';
 
 // ==========================================
