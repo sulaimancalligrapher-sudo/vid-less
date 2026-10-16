@@ -43,6 +43,7 @@ import {
 import LiveChatModal from './LiveChatModal';
 import { NativePdfViewer } from './NativePdfViewer';
 import LiveQuizArenaDisplay from './LiveQuizArenaDisplay';
+import LiveAttendanceChart from './LiveAttendanceChart';
 
 interface LiveDirectDisplayRoomProps {
   // Theater projector screen
@@ -638,41 +639,23 @@ export default function LiveDirectDisplayRoom({}: LiveDirectDisplayRoomProps = {
           /* STANDARD STAGE: EXPLANATION PODIUM OR INLINE QUESTION CARD */
           /* ========================================================================= */
           <>
-            {/* SCENARIO 1: EXPLANATION / WAITING MODE */}
+            {/* SCENARIO 1: EXPLANATION / WAITING MODE WITH LIVE STUDENTS & CHART */}
             {(!sessionState || 
               (sessionState.status !== 'question_active' && 
                sessionState.status !== 'revealed')) && (
               <motion.div
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="w-full text-center space-y-8 my-auto"
+                className="w-full my-auto py-4"
               >
-                {/* Majestic Animated Podium Icon */}
-                <div className="relative inline-block">
-                  <div className="absolute -inset-6 bg-gradient-to-r from-amber-500/20 via-indigo-500/20 to-teal-500/20 rounded-full blur-2xl animate-pulse" />
-                  <div className="relative w-28 h-28 sm:w-36 sm:h-36 rounded-3xl bg-slate-900 border-2 border-amber-500/40 text-amber-400 flex items-center justify-center shadow-2xl mx-auto">
-                    <Mic className="w-14 h-14 sm:w-18 sm:h-18 animate-bounce text-amber-400" />
-                  </div>
-                </div>
-
-                <div className="space-y-3 max-w-2xl mx-auto">
-                  <span className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full font-bold text-xs sm:text-sm border ${
-                    sessionState?.isProgramActive
-                      ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
-                      : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
-                  }`}>
-                    <Sparkles className="w-4 h-4 text-amber-400" />
-                    <span>{sessionState?.isProgramActive ? 'الأستاذ يشرح الآن 🎙️' : 'في انتظار بدء المعلم للحصة المباشرة ⏳'}</span>
-                  </span>
-                  <h2 className="text-2xl sm:text-4xl md:text-5xl font-black text-slate-100 tracking-tight leading-tight">
-                    {sessionState?.lessonTitle || (sessionState?.isProgramActive ? 'حصة تدريبية تفاعلية حية' : 'القاعة المباشرة')}
-                  </h2>
-                  <p className="text-sm sm:text-base text-slate-400 leading-relaxed max-w-lg mx-auto">
-                    {sessionState?.isProgramActive
-                      ? 'استمع بتركيز للشرح والملاحظات • سيتم طرح الأسئلة التفاعلية على هذه الشاشة وفي هواتفكم في أي لحظة.'
-                      : 'بمجرد أن يبدأ المعلم الحصة من لوحة التحكم، ستفتح القاعة وتظهر الأسئلة التفاعلية لحظياً.'}
-                  </p>
-                </div>
+                <LiveAttendanceChart
+                  students={sessionState?.connectedStudents || []}
+                  title={sessionState?.lessonTitle || (sessionState?.isProgramActive ? 'حصة تدريبية تفاعلية حية' : 'القاعة المباشرة')}
+                  subtitle={sessionState?.isProgramActive
+                    ? 'الأستاذ يشرح الآن 🎙️ • انظر للأسماء والرسم البياني للطلاب المتصلين حالياً بالقاعة'
+                    : 'في انتظار بدء المعلم للحصة المباشرة ⏳ • شاشة العرض ترصد حضور الطلاب وتفاعلهم لحظياً'}
+                  roomPin={sessionState?.roomPin}
+                />
               </motion.div>
             )}
 

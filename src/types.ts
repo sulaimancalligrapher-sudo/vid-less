@@ -293,6 +293,7 @@ export interface LiveSessionState {
   connectedStudents: LiveConnectedStudent[];
   answersForCurrentQuestion: Record<string, LiveStudentAnswerSubmission>;
   allSessionAnswers: Record<string, Record<number, string>>;
+  roomPin?: string; // Room security entry PIN for live direct classroom
   quizState?: QuizActiveState | null; // Quiz / Challenge Mode (Questions-Qui & Answers-Qui)
 }
 

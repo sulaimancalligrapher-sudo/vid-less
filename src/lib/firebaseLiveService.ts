@@ -1148,7 +1148,7 @@ export async function updateLivePdfAnnotations(
 // --- REAL-TIME LIVE QUIZ / CHALLENGE ARENA ---
 // ==========================================
 
-export async function startLiveQuiz(config: {
+export async function openLiveQuizLobby(config: {
   title: string;
   questions: QuizQuestionItem[];
   timerDurationSeconds: number;
@@ -1160,12 +1160,78 @@ export async function startLiveQuiz(config: {
   try {
     const quizState: QuizActiveState = {
       isActive: true,
-      quizStatus: 'in_progress',
+      quizStatus: 'waiting', // Waiting in Lobby with students chart!
       quizTitle: config.title || 'مسابقة التحدي التفاعلي',
       questions: config.questions || [],
       timerDurationSeconds: config.timerDurationSeconds || 0,
-      startTime: Date.now(),
-      endTime: config.timerDurationSeconds > 0 ? Date.now() + (config.timerDurationSeconds * 1000) : null,
+      startTime: null,
+      endTime: null,
+      shuffleQuestions: Boolean(config.shuffleQuestions),
+      showInstantFeedback: Boolean(config.showInstantFeedback),
+      allowRetryWrong: Boolean(config.allowRetryWrong),
+      podiumCount: config.podiumCount || 3,
+      participants: {},
+    };
+
+    await updateDoc(LIVE_DOC_REF, {
+      quizState,
+      updatedAt: serverTimestamp(),
+    });
+
+    cachedState = { ...cachedState, quizState };
+    return { success: true, quizState };
+  } catch (err: any) {
+    console.error('Failed to open live quiz lobby:', err);
+    return { success: false };
+  }
+}
+
+export async function launchLiveQuizQuestions(): Promise<{ success: boolean }> {
+  try {
+    if (!cachedState.quizState) return { success: false };
+    const currentQuiz = { ...cachedState.quizState };
+    currentQuiz.quizStatus = 'in_progress';
+    currentQuiz.startTime = Date.now();
+    currentQuiz.endTime = currentQuiz.timerDurationSeconds > 0
+      ? Date.now() + (currentQuiz.timerDurationSeconds * 1000)
+      : null;
+
+    await updateDoc(LIVE_DOC_REF, {
+      quizState: currentQuiz,
+      updatedAt: serverTimestamp(),
+    });
+
+    cachedState = { ...cachedState, quizState: currentQuiz };
+    return { success: true };
+  } catch (err: any) {
+    console.error('Failed to launch live quiz questions:', err);
+    return { success: false };
+  }
+}
+
+export async function startLiveQuiz(config: {
+  title: string;
+  questions: QuizQuestionItem[];
+  timerDurationSeconds: number;
+  shuffleQuestions: boolean;
+  showInstantFeedback: boolean;
+  allowRetryWrong: boolean;
+  podiumCount: number;
+  initialStatus?: 'waiting' | 'in_progress';
+}): Promise<{ success: boolean; quizState?: QuizActiveState }> {
+  try {
+    const status = config.initialStatus || 'in_progress';
+    const now = Date.now();
+    const quizState: QuizActiveState = {
+      isActive: true,
+      quizStatus: status,
+      quizTitle: config.title || 'مسابقة التحدي التفاعلي',
+      questions: config.questions || [],
+      timerDurationSeconds: config.timerDurationSeconds || 0,
+      startTime: status === 'in_progress' ? now : null,
+      endTime: (status === 'in_progress' && config.timerDurationSeconds > 0)
+        ? now + (config.timerDurationSeconds * 1000)
+        : null,
       shuffleQuestions: Boolean(config.shuffleQuestions),
       showInstantFeedback: Boolean(config.showInstantFeedback),
       allowRetryWrong: Boolean(config.allowRetryWrong),
@@ -1182,6 +1248,36 @@ export async function startLiveQuiz(config: {
     return { success: true, quizState };
   } catch (err: any) {
     console.error('Failed to start live quiz:', err);
+    return { success: false };
+  }
+}
+
+export async function launchActiveQuiz(): Promise<{ success: boolean }> {
+  try {
+    const snap = await getDoc(LIVE_DOC_REF);
+    if (!snap.exists()) return { success: false };
+    const data = snap.data() as any;
+    const currentQuiz = data.quizState as QuizActiveState;
+    if (!currentQuiz || !currentQuiz.isActive) return { success: false };
+
+    const now = Date.now();
+    const duration = currentQuiz.timerDurationSeconds || 0;
+    const updatedQuiz: QuizActiveState = {
+      ...currentQuiz,
+      quizStatus: 'in_progress',
+      startTime: now,
+      endTime: duration > 0 ? now + (duration * 1000) : null,
+    };
+
+    await updateDoc(LIVE_DOC_REF, {
+      quizState: updatedQuiz,
+      updatedAt: serverTimestamp(),
+    });
+
+    cachedState = { ...cachedState, quizState: updatedQuiz };
+    return { success: true };
+  } catch (err: any) {
+    console.error('Failed to launch active quiz:', err);
     return { success: false };
   }
 }
@@ -1275,6 +1371,8 @@ export async function submitStudentQuizAnswer(
     const participants = { ...(currentQuiz.participants || {}) };
     let student = participants[studentKey];
 
+    const effectiveTotal = Math.max(1, currentQuiz.questions?.length || 0, payload.totalQuizQuestions || 0, student?.totalQuestions || 0);
+
     if (!student) {
       student = {
         studentKey,
@@ -1286,12 +1384,14 @@ export async function submitStudentQuizAnswer(
         totalScore: 0,
         correctCount: 0,
         wrongCount: 0,
-        totalQuestions: payload.totalQuizQuestions || currentQuiz.questions.length || 1,
+        totalQuestions: effectiveTotal,
         streak: 0,
         isFinished: false,
         totalTimeTaken: 0,
         wrongQuestionIndices: [],
       };
+    } else if (student.totalQuestions < effectiveTotal) {
+      student.totalQuestions = effectiveTotal;
     }
 
     // Points calculation (Quizizz / Kahoot style)
@@ -1322,7 +1422,6 @@ export async function submitStudentQuizAnswer(
     };
 
     const updatedAnswers = { ...(student.answers || {}) };
-    const wasAlreadyAnswered = Boolean(updatedAnswers[payload.questionIndex]);
     updatedAnswers[payload.questionIndex] = answerDetail;
 
     let updatedWrong = [...(student.wrongQuestionIndices || [])];
@@ -1340,7 +1439,7 @@ export async function submitStudentQuizAnswer(
     const newTotalScore = Math.max(0, (student.totalScore || 0) + points);
     const newTotalTime = (student.totalTimeTaken || 0) + payload.timeTaken;
     const nextQIndex = payload.isRetry ? student.currentQuestionIndex : (student.currentQuestionIndex + 1);
-    const isNowFinished = !payload.isRetry && (Object.keys(updatedAnswers).length >= student.totalQuestions);
+    const isNowFinished = !payload.isRetry && (Object.keys(updatedAnswers).length >= effectiveTotal);
 
     student = {
       ...student,

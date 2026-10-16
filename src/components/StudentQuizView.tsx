@@ -68,8 +68,20 @@ export default function StudentQuizView({
     }
   }, [quizState.questions, quizState.shuffleQuestions, studentKey]);
 
+  // Local step index to ensure instant, reliable transition from question to question
+  const [localStep, setLocalStep] = useState<number>(() => {
+    return studentProgress?.currentQuestionIndex || 0;
+  });
+
+  // Re-sync localStep if remote progress is further ahead (e.g. on page refresh)
+  useEffect(() => {
+    if (studentProgress?.currentQuestionIndex !== undefined && studentProgress.currentQuestionIndex > localStep) {
+      setLocalStep(studentProgress.currentQuestionIndex);
+    }
+  }, [studentProgress?.currentQuestionIndex]);
+
   // Current active question index in the queue
-  const currentStep = studentProgress?.currentQuestionIndex || 0;
+  const currentStep = localStep;
   const isRetryRound = Boolean(studentProgress?.isInRetryRound);
 
   // When in retry round, questions to review
@@ -97,12 +109,36 @@ export default function StudentQuizView({
     setFeedback(null);
   }, [currentStep, isRetryRound, currentRetryIdx]);
 
-  // Check if finished
-  const totalQuestions = quizState.questions.length;
-  const isFinished = (currentStep >= questionQueue.length) || Boolean(studentProgress?.isFinished);
+  // Check if finished - only when student has actually completed all questions in the queue
+  const totalQuestions = questionQueue.length || quizState.questions.length || 1;
+  const isFinished = (questionQueue.length > 0 && currentStep >= questionQueue.length);
+
+  // When student finishes all questions in queue, notify server
+  useEffect(() => {
+    if (isFinished && !isRetryRound && !studentProgress?.isFinished) {
+      markStudentQuizFinished(studentKey).catch(() => {});
+    }
+  }, [isFinished, isRetryRound, studentKey, studentProgress?.isFinished]);
+
+  // Advance step helper (clears inputs, increments question index)
+  const advanceToNext = () => {
+    setFeedback(null);
+    setSelectedOption(null);
+    setTextInput('');
+    setIsSubmitting(false);
+    if (isRetryRound) {
+      if (currentRetryIdx + 1 < retryQuestions.length) {
+        setCurrentRetryIdx(prev => prev + 1);
+      } else {
+        setStudentQuizRetryMode(studentKey, false);
+      }
+    } else {
+      setLocalStep(prev => prev + 1);
+    }
+  };
 
   // Submit Answer handler
-  const handleSelectOption = async (optionText: string, optIndex: number) => {
+  const handleSelectOption = (optionText: string, optIndex: number) => {
     if (isSubmitting || feedback !== null || !currentQ) return;
     setIsSubmitting(true);
     setSelectedOption(optionText);
@@ -132,50 +168,32 @@ export default function StudentQuizView({
       setFeedback({ isCorrect, pointsEarned: points });
     }
 
-    try {
-      await submitStudentQuizAnswer(studentKey, {
-        username,
-        studentName: studentName || username,
-        sheetNumber,
-        questionIndex: currentQ.index,
-        questionText: currentQ.question,
-        answer: optionText,
-        isCorrect,
-        timeTaken,
-        isRetry: isRetryRound,
-        totalQuizQuestions: totalQuestions,
-      });
+    // Background non-blocking sync to Firebase hub
+    submitStudentQuizAnswer(studentKey, {
+      username,
+      studentName: studentName || username,
+      sheetNumber,
+      questionIndex: currentQ.index ?? currentStep,
+      questionText: currentQ.question,
+      answer: optionText,
+      isCorrect,
+      timeTaken,
+      isRetry: isRetryRound,
+      totalQuizQuestions: totalQuestions,
+    }).catch(err => {
+      console.warn('Background sync error (answer recorded locally):', err);
+    });
 
-      if (quizState.showInstantFeedback) {
-        setTimeout(() => {
-          setFeedback(null);
-          setIsSubmitting(false);
-          if (isRetryRound) {
-            if (currentRetryIdx + 1 < retryQuestions.length) {
-              setCurrentRetryIdx(prev => prev + 1);
-            } else {
-              setStudentQuizRetryMode(studentKey, false);
-            }
-          }
-        }, 1100);
-      } else {
-        setIsSubmitting(false);
-        if (isRetryRound) {
-          if (currentRetryIdx + 1 < retryQuestions.length) {
-            setCurrentRetryIdx(prev => prev + 1);
-          } else {
-            setStudentQuizRetryMode(studentKey, false);
-          }
-        }
-      }
-    } catch (err) {
-      console.error('Submit answer error:', err);
-      setIsSubmitting(false);
+    // Automatically transition to next question after 1s (or immediately if feedback disabled)
+    if (quizState.showInstantFeedback) {
+      setTimeout(advanceToNext, 1100);
+    } else {
+      advanceToNext();
     }
   };
 
   // Submit Text Answer handler
-  const handleTextSubmit = async (e: React.FormEvent) => {
+  const handleTextSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!textInput.trim() || isSubmitting || feedback !== null || !currentQ) return;
     setIsSubmitting(true);
@@ -196,47 +214,26 @@ export default function StudentQuizView({
       setFeedback({ isCorrect, pointsEarned: points });
     }
 
-    try {
-      await submitStudentQuizAnswer(studentKey, {
-        username,
-        studentName: studentName || username,
-        sheetNumber,
-        questionIndex: currentQ.index,
-        questionText: currentQ.question,
-        answer: textInput.trim(),
-        isCorrect,
-        timeTaken,
-        isRetry: isRetryRound,
-        totalQuizQuestions: totalQuestions,
-      });
+    // Background non-blocking sync to Firebase
+    submitStudentQuizAnswer(studentKey, {
+      username,
+      studentName: studentName || username,
+      sheetNumber,
+      questionIndex: currentQ.index ?? currentStep,
+      questionText: currentQ.question,
+      answer: textInput.trim(),
+      isCorrect,
+      timeTaken,
+      isRetry: isRetryRound,
+      totalQuizQuestions: totalQuestions,
+    }).catch(err => {
+      console.warn('Background sync error (text answer recorded locally):', err);
+    });
 
-      if (quizState.showInstantFeedback) {
-        setTimeout(() => {
-          setFeedback(null);
-          setTextInput('');
-          setIsSubmitting(false);
-          if (isRetryRound) {
-            if (currentRetryIdx + 1 < retryQuestions.length) {
-              setCurrentRetryIdx(prev => prev + 1);
-            } else {
-              setStudentQuizRetryMode(studentKey, false);
-            }
-          }
-        }, 1100);
-      } else {
-        setTextInput('');
-        setIsSubmitting(false);
-        if (isRetryRound) {
-          if (currentRetryIdx + 1 < retryQuestions.length) {
-            setCurrentRetryIdx(prev => prev + 1);
-          } else {
-            setStudentQuizRetryMode(studentKey, false);
-          }
-        }
-      }
-    } catch (err) {
-      console.error('Submit text answer error:', err);
-      setIsSubmitting(false);
+    if (quizState.showInstantFeedback) {
+      setTimeout(advanceToNext, 1100);
+    } else {
+      advanceToNext();
     }
   };
 
@@ -301,7 +298,48 @@ export default function StudentQuizView({
 
       {/* Main Content Area */}
       <main className="flex-grow flex flex-col items-center justify-center p-4 md:p-6 max-w-2xl mx-auto w-full">
-        {isFinished && !isRetryRound ? (
+        {quizState.quizStatus === 'waiting' ? (
+          /* ============================================================== */
+          /* STUDENT WAITING LOBBY (قبل بدء المسابقة) */
+          /* ============================================================== */
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="w-full bg-slate-900/90 border border-slate-800 rounded-3xl p-6 md:p-8 text-center space-y-6 shadow-2xl backdrop-blur-md"
+          >
+            <div className="relative w-24 h-24 mx-auto">
+              <div className="absolute inset-0 rounded-full bg-amber-400/20 animate-ping" />
+              <div className="relative w-24 h-24 rounded-full bg-gradient-to-tr from-amber-400 to-orange-500 border-4 border-amber-300 flex items-center justify-center text-4xl shadow-xl shadow-amber-500/30">
+                🎯
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-bold">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span>أنت مسجل وجاهز في المسابقة!</span>
+              </div>
+              <h2 className="text-2xl md:text-3xl font-black text-slate-100">
+                استعد للتحدي يا {studentName || username} ⚡
+              </h2>
+              <p className="text-xs md:text-sm text-slate-400 max-w-md mx-auto leading-relaxed">
+                المعلم يقوم بإعداد التحدي حالياً وسيطلق شارة البدء قريباً. انظر للشاشة الرئيسية وابقَ مستعداً على جهازك!
+              </p>
+            </div>
+
+            <div className="p-4 bg-slate-950/80 border border-slate-800 rounded-2xl max-w-sm mx-auto space-y-2 text-right">
+              <div className="text-xs font-bold text-amber-400 flex items-center gap-2">
+                <Sparkles className="w-4 h-4" />
+                <span>إرشادات المسابقة:</span>
+              </div>
+              <ul className="text-[11px] text-slate-300 space-y-1 list-disc list-inside">
+                <li>الأسئلة ستظهر تباعاً وتنتقل للسؤال التالي فور إجابتك.</li>
+                <li>كلما أجبت أسرع وبدقة، حصلت على نقاط ومضاعفات أعلى (Streak 🔥).</li>
+                <li>حافظ على اتصال هاتفك ولا تغلق الصفحة.</li>
+              </ul>
+            </div>
+          </motion.div>
+        ) : isFinished && !isRetryRound ? (
           /* ============================================================== */
           /* STUDENT FINISHED SCREEN */
           /* ============================================================== */
@@ -412,23 +450,33 @@ export default function StudentQuizView({
                     initial={{ opacity: 0, scale: 0.9 }}
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.95 }}
-                    className={`p-4 rounded-2xl border text-center font-black text-sm flex items-center justify-center gap-2 shadow-xl ${
+                    className={`p-4 rounded-2xl border text-center font-black text-sm flex flex-col items-center justify-center gap-2.5 shadow-xl ${
                       feedback.isCorrect
                         ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
                         : 'bg-rose-500/20 border-rose-500 text-rose-300'
                     }`}
                   >
-                    {feedback.isCorrect ? (
-                      <>
-                        <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                        <span>إجابة صحيحة وممتازة! (+{feedback.pointsEarned} نقطة) 🎯</span>
-                      </>
-                    ) : (
-                      <>
-                        <XCircle className="w-5 h-5 text-rose-400" />
-                        <span>إجابة غير صحيحة، ركز في السؤال القادم! 💪</span>
-                      </>
-                    )}
+                    <div className="flex items-center justify-center gap-2">
+                      {feedback.isCorrect ? (
+                        <>
+                          <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                          <span>إجابة صحيحة وممتازة! (+{feedback.pointsEarned} نقطة) 🎯</span>
+                        </>
+                      ) : (
+                        <>
+                          <XCircle className="w-5 h-5 text-rose-400" />
+                          <span>إجابة غير صحيحة، ركز في السؤال القادم! 💪</span>
+                        </>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => advanceToNext()}
+                      className="px-4 py-1.5 bg-white/20 hover:bg-white/30 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95"
+                    >
+                      <span>الانتقال للسؤال التالي فوراً</span>
+                      <ArrowLeft className="w-4 h-4" />
+                    </button>
                   </motion.div>
                 )}
               </AnimatePresence>

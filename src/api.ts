@@ -22,7 +22,7 @@ export function getWebAppUrl(): string {
   }
 
   // 3. Default fallback hardcoded URL
-  const fallbackUrl: string = 'https://script.google.com/macros/s/AKfycbzWLWYc2-EgD_hP2bF-aS-lTJsvVjkRuKnwiQzqGvWoHC61KJNWmwAYCPxGD7sH_rZyQA/exec';
+  const fallbackUrl: string = 'https://script.google.com/macros/s/AKfycbxGevf7A1xcC6DIa6h_L89Yro6Sufrk8fqF_uBXw9x-Bsi2SlOz2S8D4XMq1nvsUuk77A/exec';
   if (fallbackUrl && fallbackUrl.trim().length > 0) {
     return fallbackUrl.trim();
   }
@@ -2144,6 +2144,8 @@ export {
   updateLivePdfLaser,
   updateLivePdfAnnotations,
   startLiveQuiz,
+  openLiveQuizLobby,
+  launchLiveQuizQuestions,
   updateLiveQuizSettings,
   endLiveQuiz,
   resetLiveQuiz,

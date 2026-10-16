@@ -721,7 +721,7 @@ function getWords(sheetName, username) {
       var retryResetCount = (studentRetryResetCount !== null && !isNaN(studentRetryResetCount)) ? studentRetryResetCount : defaultRetryResetCount;
 
       var letterSounds = rawLinks
-        .split(/[,،]\\s*/)
+        .split(new RegExp("[,\\u060C]\\\\s*"))
         .map(function(s) { return s.trim(); })
         .filter(function(s) { return s.indexOf('http') === 0; });
 
@@ -1734,7 +1734,7 @@ function getPercent(text) {
 function arabicToWestern(numStr) {
   var arabicNums = '٠١٢٣٤٥٦٧٨٩';
   var westernNums = '0123456789';
-  return numStr.replace(/[٠-٩]/g, function(d) {
+  return numStr.replace(new RegExp("[\\u0660-\\u0669]", "g"), function(d) {
     return westernNums[arabicNums.indexOf(d)];
   });
 }
@@ -2842,7 +2842,7 @@ function getLiveQuestionsT() {
           if (typeOrOptsStr === 'نص') {
             isTextAnswer = true;
           } else if (typeOrOptsStr) {
-            options = typeOrOptsStr.split(/[,،]/).map(function(s) { return s.trim(); }).filter(Boolean);
+            options = typeOrOptsStr.split(new RegExp("[,\\u060C]")).map(function(s) { return s.trim(); }).filter(Boolean);
           } else {
             isTextAnswer = true;
           }
@@ -2966,7 +2966,7 @@ function normalizeLiveKey(val) {
   if (val === null || val === undefined) return '';
   return String(val)
     .trim()
-    .replace(/[٠-٩]/g, function(d) { return String(d.charCodeAt(0) - 1632); })
+    .replace(new RegExp("[\\u0660-\\u0669]", "g"), function(d) { return String(d.charCodeAt(0) - 1632); })
     .toLowerCase();
 }
 
@@ -3270,7 +3270,7 @@ function getLiveQuestionsDirect() {
           if (typeOrOptsStr === 'نص') {
             isTextAnswer = true;
           } else if (typeOrOptsStr) {
-            options = typeOrOptsStr.split(/[,،]/).map(function(s) { return s.trim(); }).filter(Boolean);
+            options = typeOrOptsStr.split(new RegExp("[,\\u060C]")).map(function(s) { return s.trim(); }).filter(Boolean);
           } else {
             isTextAnswer = true;
           }
@@ -3684,7 +3684,7 @@ function getQuizQuestionsDirect() {
           if (typeOrOptsStr.toLowerCase() === 'نص' || typeOrOptsStr.toLowerCase() === 'text') {
             isTextAnswer = true;
           } else if (typeOrOptsStr) {
-            options = typeOrOptsStr.split(/[,،]/).map(function(s) { return s.trim(); }).filter(Boolean);
+            options = typeOrOptsStr.split(new RegExp("[,\\u060C]")).map(function(s) { return s.trim(); }).filter(Boolean);
           }
           
           questions.push({

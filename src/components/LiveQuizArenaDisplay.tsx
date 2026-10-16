@@ -6,6 +6,8 @@ import {
   TrendingUp, BarChart3, Star, Zap, Check, ChevronDown, ChevronUp
 } from 'lucide-react';
 import { QuizActiveState, QuizStudentProgress } from '../types';
+import LiveAttendanceChart from './LiveAttendanceChart';
+import { launchLiveQuizQuestions } from '../api';
 
 interface LiveQuizArenaDisplayProps {
   quizState: QuizActiveState;
@@ -203,8 +205,12 @@ export default function LiveQuizArenaDisplay({
               <span className="text-xs font-bold text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-full">
                 تحدي كويز المباشر ⚡
               </span>
-              <span className="text-xs text-slate-400">
-                {quizState.quizStatus === 'in_progress' ? 'المسابقة جارية الآن' : 'انتهى التحدي'}
+              <span className="text-xs text-slate-400 font-bold">
+                {quizState.quizStatus === 'waiting'
+                  ? 'قاعة الانتظار والاستعداد ⏳'
+                  : quizState.quizStatus === 'in_progress'
+                    ? 'المسابقة جارية الآن ⚡'
+                    : 'انتهى التحدي 🏆'}
               </span>
             </div>
             <h1 className="text-lg md:text-xl font-black text-slate-100 tracking-tight">
@@ -241,6 +247,17 @@ export default function LiveQuizArenaDisplay({
 
         {/* Right Controls */}
         <div className="flex items-center gap-2">
+          {/* Presenter Quick Launch in Header when in waiting */}
+          {quizState.quizStatus === 'waiting' && isPresenter && (
+            <button
+              onClick={async () => { await launchLiveQuizQuestions(); }}
+              className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-amber-500/25 flex items-center gap-1.5 cursor-pointer transition-all animate-pulse"
+            >
+              <Zap className="w-4 h-4 fill-slate-950 text-slate-950" />
+              <span>ابدأ الآن ({participants.length})</span>
+            </button>
+          )}
+
           {/* Sound Toggle */}
           <button
             onClick={() => setSoundEnabled(!soundEnabled)}
@@ -274,7 +291,26 @@ export default function LiveQuizArenaDisplay({
 
       {/* Main Body */}
       <main className="relative z-10 flex-grow p-4 md:p-8 flex flex-col items-center justify-start max-w-7xl mx-auto w-full">
-        {quizState.quizStatus === 'in_progress' ? (
+        {quizState.quizStatus === 'waiting' ? (
+          /* ============================================================== */
+          /* STAGE 0: PRE-QUIZ WAITING LOBBY & LIVE ATTENDANCE CHART */
+          /* ============================================================== */
+          <div className="w-full my-auto py-4">
+            <LiveAttendanceChart
+              students={sortedParticipants.map(p => ({
+                username: p.username,
+                studentName: p.studentName || p.username,
+                sheetNumber: p.sheetNumber,
+                isReady: true,
+              }))}
+              title={`قاعة الانتظار: ${quizState.quizTitle || 'مسابقة التحدي التفاعلي'}`}
+              subtitle="الطلاب مسجلون وحاضرون بالقاعة • يتم رصد أسمائهم وإعداد الرسم البياني للجولة قبل إشارة البدء ⚡"
+              showLaunchButton={isPresenter}
+              onLaunch={async () => { await launchLiveQuizQuestions(); }}
+              launchLabel="ابدأ المسابقة والتحدي الآن لجميع الطلاب"
+            />
+          </div>
+        ) : quizState.quizStatus === 'in_progress' ? (
           /* ============================================================== */
           /* LIVE RACING LEADERBOARD (أشرطة السباق التفاعلية اللحظية) */
           /* ============================================================== */

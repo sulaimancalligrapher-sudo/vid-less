@@ -15,7 +15,8 @@ import {
   fetchQuizQuestionsDirect, saveQuizLessonDirect, 
   fetchQuizAnswersDirect, recordQuizAnswersBatchDirect, 
   setupQuizDirectSheetsApi, startLiveQuiz, endLiveQuiz, 
-  resetLiveQuiz, updateLiveQuizSettings, formatDriveImageUrl
+  resetLiveQuiz, updateLiveQuizSettings, formatDriveImageUrl,
+  openLiveQuizLobby, launchLiveQuizQuestions
 } from '../api';
 
 interface QuizManagerPanelProps {
@@ -123,7 +124,7 @@ export default function QuizManagerPanel({
   const currentQuizState = sessionState?.quizState || null;
   const isQuizActive = Boolean(currentQuizState?.isActive && currentQuizState.quizStatus === 'in_progress');
 
-  // Trigger Start Quiz
+  // Trigger Start Quiz directly
   const handleStartQuiz = async () => {
     const activeQuiz = quizzes[selectedQuizIdx];
     if (!activeQuiz || !activeQuiz.questions || activeQuiz.questions.length === 0) {
@@ -142,6 +143,42 @@ export default function QuizManagerPanel({
         podiumCount,
       });
       setSaveSuccessMsg('تم إطلاق المسابقة بنجاح! 🚀 الطلاب يمكنهم الحل الآن.');
+      setTimeout(() => setSaveSuccessMsg(null), 4000);
+    } catch (err: any) {
+      alert('تعذر إطلاق المسابقة: ' + err.message);
+    }
+  };
+
+  // Open Pre-Quiz Waiting Lobby with live students and chart
+  const handleOpenLobby = async () => {
+    const activeQuiz = quizzes[selectedQuizIdx];
+    if (!activeQuiz || !activeQuiz.questions || activeQuiz.questions.length === 0) {
+      alert('يرجى اختيار مسابقة تحتوي على أسئلة للبدء!');
+      return;
+    }
+
+    try {
+      await openLiveQuizLobby({
+        title: activeQuiz.title,
+        questions: activeQuiz.questions,
+        timerDurationSeconds: timerMinutes * 60,
+        shuffleQuestions,
+        showInstantFeedback,
+        allowRetryWrong,
+        podiumCount,
+      });
+      setSaveSuccessMsg('تم فتح قاعة الانتظار بنجاح! 👥 شاشة العرض تعرض الآن حضور الطلاب والرسم البياني.');
+      setTimeout(() => setSaveSuccessMsg(null), 4000);
+    } catch (err: any) {
+      alert('تعذر فتح قاعة الانتظار: ' + err.message);
+    }
+  };
+
+  // Launch questions to in_progress from lobby
+  const handleLaunchQuestionsNow = async () => {
+    try {
+      await launchLiveQuizQuestions();
+      setSaveSuccessMsg('تم إطلاق المسابقة والأسئلة لجميع الطلاب الآن! ⚡');
       setTimeout(() => setSaveSuccessMsg(null), 4000);
     } catch (err: any) {
       alert('تعذر إطلاق المسابقة: ' + err.message);
@@ -448,19 +485,45 @@ export default function QuizManagerPanel({
             </div>
 
             {/* Quick Action Buttons */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
-              {!isQuizActive ? (
-                <button
-                  onClick={handleStartQuiz}
-                  className="w-full py-4 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-slate-950 font-black rounded-2xl text-sm shadow-xl shadow-emerald-500/20 flex items-center justify-center gap-2 transition-all cursor-pointer"
-                >
-                  <Play className="w-5 h-5 fill-slate-950" />
-                  <span>ابدأ التحدي الآن 🚀</span>
-                </button>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 pt-2">
+              {currentQuizState?.isActive && currentQuizState.quizStatus === 'waiting' ? (
+                <>
+                  <button
+                    onClick={handleLaunchQuestionsNow}
+                    className="w-full py-4 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black rounded-2xl text-xs sm:text-sm shadow-xl shadow-amber-500/25 flex items-center justify-center gap-2 transition-all cursor-pointer animate-pulse"
+                  >
+                    <Play className="w-5 h-5 fill-slate-950" />
+                    <span>إطلاق الأسئلة للجميع ({Object.keys(currentQuizState.participants || {}).length}) ⚡</span>
+                  </button>
+                  <button
+                    onClick={handleEndQuiz}
+                    className="w-full py-4 bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-300 font-bold rounded-2xl text-xs flex items-center justify-center gap-2 transition-all cursor-pointer"
+                  >
+                    <Square className="w-4 h-4" />
+                    <span>إلغاء القاعة</span>
+                  </button>
+                </>
+              ) : !isQuizActive ? (
+                <>
+                  <button
+                    onClick={handleOpenLobby}
+                    className="w-full py-4 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-black rounded-2xl text-xs sm:text-sm shadow-xl shadow-indigo-500/20 flex items-center justify-center gap-2 transition-all cursor-pointer"
+                  >
+                    <Users className="w-5 h-5 text-indigo-200" />
+                    <span>فتح قاعة الانتظار والرسم البياني 👥</span>
+                  </button>
+                  <button
+                    onClick={handleStartQuiz}
+                    className="w-full py-4 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-slate-950 font-black rounded-2xl text-xs sm:text-sm shadow-xl shadow-emerald-500/20 flex items-center justify-center gap-2 transition-all cursor-pointer"
+                  >
+                    <Play className="w-5 h-5 fill-slate-950" />
+                    <span>إطلاق التحدي فوراً 🚀</span>
+                  </button>
+                </>
               ) : (
                 <button
                   onClick={handleEndQuiz}
-                  className="w-full py-4 bg-gradient-to-r from-rose-500 to-red-600 hover:from-rose-600 hover:to-red-700 text-white font-black rounded-2xl text-sm shadow-xl shadow-rose-500/20 flex items-center justify-center gap-2 transition-all cursor-pointer"
+                  className="w-full py-4 bg-gradient-to-r from-rose-500 to-red-600 hover:from-rose-600 hover:to-red-700 text-white font-black rounded-2xl text-sm shadow-xl shadow-rose-500/20 flex items-center justify-center gap-2 transition-all cursor-pointer col-span-1 sm:col-span-2"
                 >
                   <Square className="w-5 h-5 fill-white" />
                   <span>إنهاء وإعلان الفائزين 🏆</span>
