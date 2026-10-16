@@ -293,6 +293,7 @@ export interface LiveSessionState {
   connectedStudents: LiveConnectedStudent[];
   answersForCurrentQuestion: Record<string, LiveStudentAnswerSubmission>;
   allSessionAnswers: Record<string, Record<number, string>>;
+  quizState?: QuizActiveState | null; // Quiz / Challenge Mode (Questions-Qui & Answers-Qui)
 }
 
 export interface LivePdfDrawingStroke {
@@ -349,6 +350,93 @@ export interface LiveDirectAnswerRecord {
   lessonTitle: string;
   answers: Record<number, string>;
   totalScore?: string;
+  percentage?: number;
+}
+
+// ==========================================
+// --- LIVE CHALLENGE QUIZ (Questions-Qui & Answers-Qui) ---
+// ==========================================
+export interface QuizQuestionItem {
+  index: number;
+  question: string;
+  options: string[];
+  isTextAnswer?: boolean;
+  correctAnswer: string;
+  timeLimit?: number; // Optional per-question timer
+  image?: string;
+}
+
+export interface QuizLessonRow {
+  id?: string;
+  rowIndex?: number;
+  title: string;
+  description?: string;
+  questions: QuizQuestionItem[];
+  timerMinutes?: number; // 0 for unlimited, or 1, 2, 3, 5, 10
+  shuffleQuestions?: boolean;
+  showInstantFeedback?: boolean;
+  allowRetryWrong?: boolean;
+  podiumCount?: number; // 3 or 10
+  createdAt?: number;
+}
+
+export interface QuizStudentAnswerDetail {
+  questionIndex: number;
+  questionText: string;
+  answer: string;
+  isCorrect: boolean;
+  timeTaken: number; // in seconds
+  scoreEarned: number;
+  isRetry?: boolean;
+}
+
+export interface QuizStudentProgress {
+  studentKey: string;
+  username: string;
+  studentName?: string;
+  sheetNumber: string;
+  currentQuestionIndex: number; // 0-indexed into their question queue
+  answers: Record<number, QuizStudentAnswerDetail>;
+  totalScore: number;
+  correctCount: number;
+  wrongCount: number;
+  totalQuestions: number;
+  streak: number;
+  isFinished: boolean;
+  finishTime?: number;
+  rank?: number;
+  totalTimeTaken: number; // seconds
+  wrongQuestionIndices?: number[];
+  isInRetryRound?: boolean;
+}
+
+export interface QuizActiveState {
+  isActive: boolean;
+  quizStatus: 'waiting' | 'in_progress' | 'ended';
+  quizTitle: string;
+  lessonId?: string;
+  questions: QuizQuestionItem[];
+  timerDurationSeconds: number; // 0 for unlimited
+  startTime: number | null;
+  endTime: number | null;
+  shuffleQuestions: boolean;
+  showInstantFeedback: boolean;
+  allowRetryWrong: boolean;
+  podiumCount: number; // 3 or 10
+  participants: Record<string, QuizStudentProgress>;
+}
+
+export interface QuizAnswerRecord {
+  rowIndex?: number;
+  timestamp: string;      // Column A: تاريخ و وقت
+  sheetNumber: string;    // Column B: الرقم (رقم الطالب)
+  username: string;       // Column C: اسم المستخدم
+  studentName?: string;
+  quizTitle: string;      // Column D: الموضوع
+  score: number;          // Column E: الدرجة
+  rank: number;           // Column F: الترتيب الفائز
+  totalTime: number;      // Column G: وقت الإنجاز (ثواني)
+  answers: Record<number, string>; // Columns H+: س1، س2، س3...
   percentage?: number;
 }
 

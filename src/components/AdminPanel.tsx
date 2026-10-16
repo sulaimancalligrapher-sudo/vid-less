@@ -7,13 +7,14 @@ import {
   Trash2, ChevronDown, ChevronUp, Link as LinkIcon, Settings as SettingsIcon,
   HelpCircle, MessageSquare, Calendar, Clock, Eye, EyeOff,
   UserCheck, Users, UserPlus, User, ChevronLeft, Edit3, Sparkles, Globe, Send, Bot,
-  FileSpreadsheet, Tv
+  FileSpreadsheet, Tv, Trophy
 } from 'lucide-react';
 import { AdminQuestionRow, AdminAnswerRow, AdminQuestionItem, LiveLessonRow } from '../types';
 import TranslationEditor from './TranslationEditor';
 import TelegramManager from './TelegramManager';
 import LiveClassManager from './LiveClassManager';
 import LiveDirectManager from './LiveDirectManager';
+import QuizManagerPanel from './QuizManagerPanel';
 import { 
   fetchAdminQuestions, saveAdminQuestion, deleteAdminQuestion, fetchAdminAnswers, 
   updateAdminAnswer, saveBatchAdminQuestions,
@@ -30,7 +31,7 @@ interface AdminPanelProps {
 }
 
 export default function AdminPanel({ onClose, onStartTeacherTheater, onOpenLiveDirectDisplay }: AdminPanelProps) {
-  const [activeTab, setActiveTab] = useState<'questions' | 'answers' | 'translations' | 'telegram' | 'live' | 'live-direct'>('questions');
+  const [activeTab, setActiveTab] = useState<'questions' | 'answers' | 'translations' | 'telegram' | 'live' | 'live-direct' | 'quiz-challenge'>('questions');
 
   // Questions state
   const [questions, setQuestions] = useState<AdminQuestionRow[]>([]);
@@ -837,6 +838,18 @@ export default function AdminPanel({ onClose, onStartTeacherTheater, onOpenLiveD
             <Mic className="w-4 h-4 text-amber-400 animate-pulse" />
             <span>Live 🎙️ (شرح مباشر)</span>
           </button>
+
+          <button
+            onClick={() => setActiveTab('quiz-challenge')}
+            className={`px-5 py-3 rounded-t-2xl font-bold text-xs sm:text-sm flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
+              activeTab === 'quiz-challenge'
+                ? 'bg-slate-900 text-amber-400 border-amber-500 shadow-sm'
+                : 'text-slate-400 hover:text-slate-200 border-transparent'
+            }`}
+          >
+            <Trophy className="w-4 h-4 text-amber-400" />
+            <span>تحدي كويز 🏆 (Quiz Arena)</span>
+          </button>
         </div>
 
         {/* Tab Content Body */}
@@ -1143,6 +1156,15 @@ export default function AdminPanel({ onClose, onStartTeacherTheater, onOpenLiveD
             <div className="py-2">
               <LiveDirectManager 
                 onOpenDisplayScreen={onOpenLiveDirectDisplay}
+              />
+            </div>
+          )}
+
+          {/* TAB 7: LIVE CHALLENGE QUIZ (Questions-Qui & Answers-Qui) */}
+          {activeTab === 'quiz-challenge' && (
+            <div className="py-2">
+              <QuizManagerPanel 
+                onOpenArenaDisplay={onOpenLiveDirectDisplay}
               />
             </div>
           )}

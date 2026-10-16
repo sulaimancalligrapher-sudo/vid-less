@@ -280,6 +280,13 @@ function RUN_SETUP_LIVE_DIRECT_SHEETS() {
   return res;
 }
 
+// 4. إنشاء وتهيئة أوراق مسابقة التحدي (Questions-Qui و Answers-Qui) بنقرة واحدة
+function RUN_SETUP_QUIZ_DIRECT_SHEETS() {
+  var res = setupQuizDirectSheets();
+  Logger.log('نتيجة تهيئة أوراق مسابقة التحدي: ' + JSON.stringify(res));
+  return res;
+}
+
 function doGet(e) {
   var action = (e && e.parameter) ? e.parameter.action : '';
   var response;
@@ -311,6 +318,12 @@ function doGet(e) {
       response = getLiveAnswersDirect();
     } else if (action === 'setupLiveDirectSheets') {
       response = setupLiveDirectSheets();
+    } else if (action === 'getQuizQuestionsDirect') {
+      response = getQuizQuestionsDirect();
+    } else if (action === 'getQuizAnswersDirect') {
+      response = getQuizAnswersDirect();
+    } else if (action === 'setupQuizDirectSheets') {
+      response = setupQuizDirectSheets();
     } else if (action === 'getAdminQuestions') {
       response = getAdminQuestions();
     } else if (action === 'getAdminAnswers') {
@@ -431,6 +444,12 @@ function doPost(e) {
       response = batchRecordLiveAnswersDirect(payload.records || []);
     } else if (action === 'setupLiveDirectSheets') {
       response = setupLiveDirectSheets();
+    } else if (action === 'saveQuizLessonDirect') {
+      response = saveQuizLessonDirect(payload.lesson || payload);
+    } else if (action === 'batchRecordQuizAnswersDirect') {
+      response = batchRecordQuizAnswersDirect(payload.records || []);
+    } else if (action === 'setupQuizDirectSheets') {
+      response = setupQuizDirectSheets();
     } else if (action === 'getAllSettingsStudents') {
       response = getAllSettingsStudents();
     } else {
@@ -3529,5 +3548,342 @@ function saveLiveAnswerDirect(payload) {
   }
 }
 
+// ==========================================
+// --- دوال مسابقة التحدي التفاعلي (Questions-Qui & Answers-Qui) ---
+// ==========================================
+
+function getOrCreateQuizQuestionsDirectSheet() {
+  var ss = getSpreadsheet();
+  var sheet = ss.getSheetByName('Questions-Qui');
+  if (!sheet) {
+    sheet = ss.insertSheet('Questions-Qui');
+    // هيكل ورقة Questions-Qui (مطابق لهيكل ورقة Questions-Live):
+    // عمود A: الموضوع
+    // وكل سؤال له 4 أعمدة: رابط صورة، نص السؤال، خيارات الإجابة، طريقة الإجابة
+    var headers = ['الموضوع'];
+    for (var i = 1; i <= 25; i++) {
+      headers.push('رابط صورة س' + i);
+      headers.push('نص س' + i);
+      headers.push('خيارات الإجابة / نص س' + i);
+      headers.push('طريقة إجابة س' + i);
+    }
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#f3e8ff');
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+function getOrCreateQuizAnswersDirectSheet() {
+  var ss = getSpreadsheet();
+  var sheet = ss.getSheetByName('Answers-Qui');
+  if (!sheet) {
+    sheet = ss.insertSheet('Answers-Qui');
+    // هيكل ورقة Answers-Qui:
+    // الأعمدة الأساسية الأولى:
+    // A: تاريخ و وقت | B: الرقم | C: اسم المستخدم | D: الموضوع | E: الدرجة | F: الترتيب الفائز | G: وقت الإنجاز (ث)
+    // وباقي الأعمدة من H فصاعداً: إجابات الأسئلة بالتتابع س1، س2...
+    var headers = ['تاريخ و وقت', 'الرقم', 'اسم المستخدم', 'الموضوع', 'الدرجة', 'الترتيب الفائز', 'وقت الإنجاز (ث)'];
+    for (var i = 1; i <= 30; i++) {
+      headers.push('س' + i);
+    }
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#ecfdf5');
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+function setupQuizDirectSheets() {
+  try {
+    var qSheet = getOrCreateQuizQuestionsDirectSheet();
+    var headersQ = ['الموضوع'];
+    for (var i = 1; i <= 25; i++) {
+      headersQ.push('رابط صورة س' + i);
+      headersQ.push('نص س' + i);
+      headersQ.push('خيارات الإجابة / نص س' + i);
+      headersQ.push('طريقة إجابة س' + i);
+    }
+    qSheet.getRange(1, 1, 1, headersQ.length).setValues([headersQ]);
+    qSheet.getRange(1, 1, 1, headersQ.length).setFontWeight('bold').setBackground('#f3e8ff');
+    qSheet.setFrozenRows(1);
+
+    var aSheet = getOrCreateQuizAnswersDirectSheet();
+    var headersA = ['تاريخ و وقت', 'الرقم', 'اسم المستخدم', 'الموضوع', 'الدرجة', 'الترتيب الفائز', 'وقت الإنجاز (ث)'];
+    for (var j = 1; j <= 30; j++) {
+      headersA.push('س' + j);
+    }
+    aSheet.getRange(1, 1, 1, headersA.length).setValues([headersA]);
+    aSheet.getRange(1, 1, 1, headersA.length).setFontWeight('bold').setBackground('#ecfdf5');
+    aSheet.setFrozenRows(1);
+
+    return {
+      success: true,
+      message: 'تم تحديث وتهيئة ورقة (Questions-Qui) وورقة (Answers-Qui) لمسابقة التحدي بنجاح! 🏆'
+    };
+  } catch (err) {
+    return { success: false, message: err.message };
+  }
+}
+
+function getQuizQuestionsDirect() {
+  try {
+    var sheet = getOrCreateQuizQuestionsDirectSheet();
+    var lastRow = sheet.getLastRow();
+    if (lastRow <= 1) return { success: true, data: [] };
+    
+    var lastCol = sheet.getLastColumn();
+    if (lastCol < 2) return { success: true, data: [] };
+    
+    var rows = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    var list = [];
+    
+    for (var r = 0; r < rows.length; r++) {
+      var row = rows[r];
+      var title = String(row[0] || '').trim();
+      if (!title) continue;
+      
+      var questions = [];
+      var qIndex = 0;
+      
+      for (var col = 1; col < row.length; col += 4) {
+        var rawCol0 = row[col];
+        var rawCol1 = row[col + 1];
+        var rawCol2 = row[col + 2];
+        var rawCol3 = row[col + 3];
+        
+        var qImageStr = String(rawCol0 || '').trim();
+        var qTextStr = String(rawCol1 || '').trim();
+        var typeOrOptsStr = String(rawCol2 || '').trim();
+        var correctAnswer = String(rawCol3 !== undefined && rawCol3 !== null ? rawCol3 : '').trim();
+        
+        var qImage = '';
+        var qText = qTextStr;
+        
+        if (qImageStr) {
+          var isImgUrl = qImageStr.indexOf('http://') === 0 || 
+                         qImageStr.indexOf('https://') === 0 || 
+                         qImageStr.indexOf('drive.google.com') !== -1 ||
+                         qImageStr.indexOf('.png') !== -1 ||
+                         qImageStr.indexOf('.jpg') !== -1 ||
+                         qImageStr.indexOf('.jpeg') !== -1 ||
+                         qImageStr.indexOf('.webp') !== -1;
+          if (isImgUrl) {
+            qImage = formatDriveImageUrl(qImageStr);
+          } else if (!qTextStr) {
+            qText = qImageStr;
+          } else {
+            qImage = formatDriveImageUrl(qImageStr);
+          }
+        }
+        
+        if (qText !== '' || qImage !== '' || typeOrOptsStr !== '') {
+          var options = [];
+          var isTextAnswer = false;
+          
+          if (typeOrOptsStr.toLowerCase() === 'نص' || typeOrOptsStr.toLowerCase() === 'text') {
+            isTextAnswer = true;
+          } else if (typeOrOptsStr) {
+            options = typeOrOptsStr.split(/[,،]/).map(function(s) { return s.trim(); }).filter(Boolean);
+          }
+          
+          questions.push({
+            index: qIndex,
+            image: qImage,
+            question: qText,
+            options: options,
+            isTextAnswer: isTextAnswer,
+            correctAnswer: correctAnswer,
+            timeLimit: 30
+          });
+          qIndex++;
+        }
+      }
+      
+      list.push({
+        rowIndex: r + 2,
+        title: title,
+        questions: questions
+      });
+    }
+    
+    return { success: true, data: list };
+  } catch (err) {
+    return { success: false, message: err.message };
+  }
+}
+
+function saveQuizLessonDirect(lesson) {
+  try {
+    if (!lesson || !lesson.title) {
+      return { success: false, message: 'عنوان موضوع المسابقة مطلوب' };
+    }
+    var sheet = getOrCreateQuizQuestionsDirectSheet();
+    var questions = lesson.questions || [];
+    
+    var rowValues = [String(lesson.title).trim()];
+    
+    for (var i = 0; i < 25; i++) {
+      if (i < questions.length) {
+        var q = questions[i];
+        rowValues.push(q.image || '');
+        rowValues.push(q.question || '');
+        if (q.isTextAnswer) {
+          rowValues.push('نص');
+        } else {
+          rowValues.push((q.options || []).join(', '));
+        }
+        rowValues.push(q.correctAnswer || '');
+      } else {
+        rowValues.push('', '', '', '');
+      }
+    }
+    
+    var targetRow = 0;
+    if (lesson.rowIndex && lesson.rowIndex > 1) {
+      targetRow = lesson.rowIndex;
+    } else {
+      var lastRow = sheet.getLastRow();
+      if (lastRow > 1) {
+        var titles = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+        for (var t = 0; t < titles.length; t++) {
+          if (String(titles[t][0]).trim() === String(lesson.title).trim()) {
+            targetRow = t + 2;
+            break;
+          }
+        }
+      }
+    }
+    
+    if (targetRow > 1) {
+      sheet.getRange(targetRow, 1, 1, rowValues.length).setValues([rowValues]);
+    } else {
+      sheet.appendRow(rowValues);
+    }
+    
+    return { success: true, message: 'تم حفظ أسئلة المسابقة في ورقة Questions-Qui بنجاح' };
+  } catch (err) {
+    return { success: false, message: err.message };
+  }
+}
+
+function getQuizAnswersDirect() {
+  try {
+    var sheet = getOrCreateQuizAnswersDirectSheet();
+    var lastRow = sheet.getLastRow();
+    if (lastRow <= 1) return { success: true, data: [] };
+    
+    var lastCol = sheet.getLastColumn();
+    if (lastCol < 7) return { success: true, data: [] };
+    
+    var rows = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    var list = [];
+    for (var r = 0; r < rows.length; r++) {
+      var row = rows[r];
+      var answersMap = {};
+      // الأعمدة من H فصاعداً (index 7) هي نتائج الأسئلة س1، س2...
+      for (var a = 7; a < row.length; a++) {
+        var val = String(row[a] !== undefined && row[a] !== null ? row[a] : '').trim();
+        if (val) answersMap[a - 7] = val;
+      }
+      list.push({
+        rowIndex: r + 2,
+        timestamp: String(row[0] || ''),
+        sheetNumber: String(row[1] || ''),
+        username: String(row[2] || ''),
+        studentName: String(row[2] || ''),
+        quizTitle: String(row[3] || ''),
+        score: parseInt(row[4], 10) || 0,
+        rank: parseInt(row[5], 10) || 0,
+        totalTime: parseInt(row[6], 10) || 0,
+        answers: answersMap
+      });
+    }
+    return { success: true, data: list };
+  } catch (err) {
+    return { success: false, message: err.message };
+  }
+}
+
+function batchRecordQuizAnswersDirect(records) {
+  try {
+    if (!records || !records.length) return { success: true, count: 0 };
+    var sheet = getOrCreateQuizAnswersDirectSheet();
+    var lastRow = sheet.getLastRow();
+    
+    var existingRows = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, 4).getValues() : [];
+    
+    for (var i = 0; i < records.length; i++) {
+      var rec = records[i];
+      var recSheetNum = String(rec.sheetNumber || '').trim();
+      var recUsername = String(rec.username || rec.studentName || '').trim();
+      var recTopic = String(rec.quizTitle || '').trim();
+      var ansMap = rec.answers || {};
+      
+      var normSheet = normalizeLiveKey(recSheetNum);
+      var normUser = normalizeLiveKey(recUsername);
+      var normTopic = normalizeLiveKey(recTopic);
+      
+      var foundRow = 0;
+      var existingTimestamp = '';
+      for (var r = 0; r < existingRows.length; r++) {
+        var rowA = String(existingRows[r][0] || '').trim();
+        var rowB = normalizeLiveKey(existingRows[r][1]);
+        var rowC = normalizeLiveKey(existingRows[r][2]);
+        var rowD = normalizeLiveKey(existingRows[r][3]);
+        
+        var matchTopic = (rowD === normTopic);
+        var matchStudent = (normSheet && rowB && normSheet === rowB) || (normUser && rowC && normUser === rowC);
+        
+        if (matchTopic && matchStudent) {
+          foundRow = r + 2;
+          existingTimestamp = rowA;
+          break;
+        }
+      }
+      
+      var finalTimestamp = rec.timestamp ? String(rec.timestamp) : existingTimestamp || new Date().toLocaleString('ar-SA');
+      
+      // الأعمدة السبعة الأساسية A:G:
+      // A: تاريخ و وقت | B: الرقم | C: اسم المستخدم | D: الموضوع | E: الدرجة | F: الترتيب | G: وقت الإنجاز
+      var rowValues = [
+        finalTimestamp,
+        recSheetNum,
+        recUsername,
+        recTopic,
+        rec.score !== undefined ? rec.score : 0,
+        rec.rank !== undefined ? rec.rank : 0,
+        rec.totalTime !== undefined ? rec.totalTime : 0
+      ];
+      
+      var maxAnswers = 30;
+      if (ansMap) {
+        var keys = Object.keys(ansMap).map(function(k) { return parseInt(k, 10); }).filter(function(n) { return !isNaN(n); });
+        if (keys.length > 0) {
+          maxAnswers = Math.max(30, Math.max.apply(null, keys) + 1);
+        }
+      }
+      for (var a = 0; a < maxAnswers; a++) {
+        rowValues.push(ansMap[a] !== undefined && ansMap[a] !== null ? String(ansMap[a]) : '');
+      }
+      
+      if (sheet.getMaxColumns() < rowValues.length) {
+        sheet.insertColumnsAfter(sheet.getMaxColumns(), rowValues.length - sheet.getMaxColumns());
+      }
+      
+      if (foundRow > 1) {
+        sheet.getRange(foundRow, 1, 1, rowValues.length).setValues([rowValues]);
+        existingRows[foundRow - 2] = [finalTimestamp, recSheetNum, recUsername, recTopic];
+      } else {
+        sheet.appendRow(rowValues);
+        existingRows.push([finalTimestamp, recSheetNum, recUsername, recTopic]);
+      }
+    }
+    
+    return { success: true, count: records.length };
+  } catch (err) {
+    return { success: false, message: err.message };
+  }
+}
 `;
 }

@@ -3,7 +3,8 @@ import {
   HeaderNavButton, HeaderConfig, StudentCorrection,
   TelegramConfig, TelegramTemplateItem, TelegramUserBinding, TelegramBroadcastMessage,
   LiveQuestionItem, LiveLessonRow, LiveAnswerRecord, LiveSessionState, LiveStudentAnswerSubmission,
-  LiveDirectQuestionItem, LiveDirectLessonRow, LiveDirectAnswerRecord, LivePdfItem
+  LiveDirectQuestionItem, LiveDirectLessonRow, LiveDirectAnswerRecord, LivePdfItem,
+  QuizQuestionItem, QuizLessonRow, QuizAnswerRecord, QuizActiveState, QuizStudentProgress
 } from './types';
 
 // Helper to get Web App URL from localStorage or environment variables
@@ -21,7 +22,7 @@ export function getWebAppUrl(): string {
   }
 
   // 3. Default fallback hardcoded URL
-  const fallbackUrl: string = 'https://script.google.com/macros/s/AKfycbyBL4Qjs9PgKVHuO9lLv-IriRtblaqw_Hrlie4-BProdWidMUyEdKu61GQalCsBfXYL/exec';
+  const fallbackUrl: string = 'https://script.google.com/macros/s/AKfycbzWLWYc2-EgD_hP2bF-aS-lTJsvVjkRuKnwiQzqGvWoHC61KJNWmwAYCPxGD7sH_rZyQA/exec';
   if (fallbackUrl && fallbackUrl.trim().length > 0) {
     return fallbackUrl.trim();
   }
@@ -1994,6 +1995,107 @@ export async function setupLiveDirectSheetsApi(): Promise<{ success: boolean; me
   }
 }
 
+// ==========================================
+// --- LIVE CHALLENGE QUIZ (Questions-Qui & Answers-Qui) API ---
+// ==========================================
+const LOCAL_STORAGE_QUIZ_QUESTIONS = 'local_quiz_challenge_questions_cache';
+const LOCAL_STORAGE_QUIZ_ANSWERS = 'local_quiz_challenge_answers_cache';
+
+// Fetch Quiz Lessons / Question Sets from Google Sheets (Questions-Qui)
+export async function fetchQuizQuestionsDirect(): Promise<QuizLessonRow[]> {
+  try {
+    const res = await fetchGas({ action: 'getQuizQuestionsDirect' }, 'GET');
+    if (res && res.success && Array.isArray(res.data)) {
+      const sanitized = res.data.map((lesson: any) => ({
+        ...lesson,
+        questions: (lesson.questions || []).map((q: any, qIdx: number) => ({
+          ...q,
+          index: qIdx,
+          timeLimit: q.timeLimit || 30,
+        })),
+      }));
+      localStorage.setItem(LOCAL_STORAGE_QUIZ_QUESTIONS, JSON.stringify(sanitized));
+      return sanitized;
+    }
+  } catch (err) {
+    console.warn('Could not fetch Questions-Qui from Google Sheets, checking local cache:', err);
+  }
+
+  const cached = localStorage.getItem(LOCAL_STORAGE_QUIZ_QUESTIONS);
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch {}
+  }
+
+  return [];
+}
+
+// Save or Update a Quiz Lesson in Google Sheets (Questions-Qui)
+export async function saveQuizLessonDirect(lesson: QuizLessonRow): Promise<{ success: boolean; message?: string }> {
+  const existing = await fetchQuizQuestionsDirect();
+  const index = existing.findIndex(l => l.title === lesson.title || (lesson.rowIndex && l.rowIndex === lesson.rowIndex));
+  if (index >= 0) {
+    existing[index] = lesson;
+  } else {
+    existing.push(lesson);
+  }
+  localStorage.setItem(LOCAL_STORAGE_QUIZ_QUESTIONS, JSON.stringify(existing));
+
+  try {
+    const res = await fetchGas({ action: 'saveQuizLessonDirect' }, 'POST', lesson);
+    return res || { success: true, message: 'تم حفظ أسئلة التحدي في ورقة Questions-Qui بنجاح! 🎯' };
+  } catch (err: any) {
+    console.error('Failed to save to Google Sheets Questions-Qui:', err);
+    return { success: true, message: 'تم الحفظ محلياً بنجاح (سيتم الرفع للشيت عند توفر الاتصال)' };
+  }
+}
+
+// Fetch Quiz Answers & Scores from Google Sheets (Answers-Qui)
+export async function fetchQuizAnswersDirect(): Promise<QuizAnswerRecord[]> {
+  try {
+    const res = await fetchGas({ action: 'getQuizAnswersDirect' }, 'GET');
+    if (res && res.success && Array.isArray(res.data)) {
+      localStorage.setItem(LOCAL_STORAGE_QUIZ_ANSWERS, JSON.stringify(res.data));
+      return res.data;
+    }
+  } catch (err) {
+    console.warn('Could not fetch Answers-Qui from Google Sheets:', err);
+  }
+  const cached = localStorage.getItem(LOCAL_STORAGE_QUIZ_ANSWERS);
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch {}
+  }
+  return [];
+}
+
+// Batch Record Student Quiz Answers & Scores to Google Sheets (Answers-Qui)
+export async function recordQuizAnswersBatchDirect(records: QuizAnswerRecord[]): Promise<{ success: boolean; count?: number; message?: string }> {
+  try {
+    const res = await fetchGas({ action: 'batchRecordQuizAnswersDirect' }, 'POST', {
+      action: 'batchRecordQuizAnswersDirect',
+      records: records
+    });
+    return res || { success: true, count: records.length };
+  } catch (err: any) {
+    console.error('Error recording batch answers to Answers-Qui:', err);
+    return { success: false, message: err.message };
+  }
+}
+
+// Initialize / Auto-create Questions-Qui and Answers-Qui sheets in Google Spreadsheet
+export async function setupQuizDirectSheetsApi(): Promise<{ success: boolean; message?: string }> {
+  try {
+    const res = await fetchGas({ action: 'setupQuizDirectSheets' }, 'POST', { action: 'setupQuizDirectSheets' });
+    return res || { success: true, message: 'تم إنشاء وتهيئة أوراق التحدي (Questions-Qui) و (Answers-Qui) في الشيت بنجاح! 🏆' };
+  } catch (err: any) {
+    console.error('Error creating quiz sheets in Google Sheets:', err);
+    return { success: false, message: err.message || 'تعذر الاتصال بخادم Google Apps Script' };
+  }
+}
+
 
 // ----------------------------------------------------
 // Real-Time Live Hub (Powered by Firebase Firestore)
@@ -2041,6 +2143,13 @@ export {
   toggleShowPdfInRoom,
   updateLivePdfLaser,
   updateLivePdfAnnotations,
+  startLiveQuiz,
+  updateLiveQuizSettings,
+  endLiveQuiz,
+  resetLiveQuiz,
+  submitStudentQuizAnswer,
+  markStudentQuizFinished,
+  setStudentQuizRetryMode,
 } from './lib/firebaseLiveService';
 
 export {

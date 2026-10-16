@@ -16,6 +16,7 @@ import {
   formatDriveImageUrl, subscribeToLiveSession, sendStudentMessage, replyToStudentMessage, deleteStudentMessage, clearAllStudentMessages, toggleShowChatInRoom
 } from '../api';
 import LiveChatModal from './LiveChatModal';
+import StudentQuizView from './StudentQuizView';
 import { useLanguage } from '../translations';
 
 interface LiveStudentViewProps {
@@ -858,6 +859,17 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
           )}
         </AnimatePresence>
       </div>
+    );
+  }
+
+  // 1.5. Live Challenge Quiz Mode (Quiz Arena - Questions-Qui & Answers-Qui)
+  if (sessionState?.quizState?.isActive) {
+    return (
+      <StudentQuizView
+        quizState={sessionState.quizState}
+        username={username}
+        sheetNumber={sheetNumber}
+      />
     );
   }
 

@@ -42,6 +42,7 @@ import {
 } from '../api';
 import LiveChatModal from './LiveChatModal';
 import { NativePdfViewer } from './NativePdfViewer';
+import LiveQuizArenaDisplay from './LiveQuizArenaDisplay';
 
 interface LiveDirectDisplayRoomProps {
   // Theater projector screen
@@ -558,9 +559,16 @@ export default function LiveDirectDisplayRoom({}: LiveDirectDisplayRoomProps = {
           : 'p-3 sm:p-6 max-w-7xl mx-auto'
       }`}>
         {/* ========================================================================= */}
-        {/* SCENARIO 3: FINISHED SESSION / PROGRAM ENDED MODE */}
+        {/* SCENARIO 0: LIVE CHALLENGE QUIZ ARENA (Questions-Qui & Answers-Qui) */}
         {/* ========================================================================= */}
-        {(sessionState?.status === 'finished' || sessionState?.status === 'program_ended') ? (
+        {sessionState?.quizState?.isActive ? (
+          <div className="fixed inset-0 z-50 w-full h-full">
+            <LiveQuizArenaDisplay
+              quizState={sessionState.quizState}
+              isPresenter={false}
+            />
+          </div>
+        ) : (sessionState?.status === 'finished' || sessionState?.status === 'program_ended') ? (
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}

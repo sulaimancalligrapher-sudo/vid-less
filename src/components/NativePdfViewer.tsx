@@ -18,6 +18,7 @@ import {
   AlertCircle,
   Maximize2,
   Columns,
+  RefreshCw,
 } from 'lucide-react';
 
 export interface LivePdfStroke {
@@ -107,6 +108,7 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
   const [penWidth, setPenWidth] = useState<number>(3.5);
   const [isDrawing, setIsDrawing] = useState<boolean>(false);
   const currentStrokeRef = useRef<Array<{ x: number; y: number }>>([]);
+  const [retryTrigger, setRetryTrigger] = useState(0);
 
   // Local copy of annotations per page
   const [annotations, setAnnotations] = useState<Record<number, Array<LivePdfStroke>>>(() => realtimeAnnotations || {});
@@ -215,6 +217,13 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
           } else {
             // Direct fetch from server route /api/pdf/:id
             const safeId = fileId.replace(/[^a-zA-Z0-9_-]/g, '_');
+            
+            // Check if file is available on server; if still writing, wait briefly and retry
+            let checkRes = await fetch(`/api/pdf/${safeId}`, { method: 'HEAD' }).catch(() => null);
+            if (!checkRes || !checkRes.ok) {
+              await new Promise(r => setTimeout(r, 1200));
+            }
+
             loadingTask = pdfjsLib.getDocument({
               ...baseOptions,
               url: `/api/pdf/${safeId}`,
@@ -272,7 +281,7 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
     return () => {
       isCancelled = true;
     };
-  }, [pdfUrl, onTotalPagesLoaded]);
+  }, [pdfUrl, onTotalPagesLoaded, retryTrigger]);
 
   // Redraw annotations strictly on the overlay drawing canvas (NEVER touches or clears the PDF canvas!)
   const redrawAnnotations = useCallback(() => {
@@ -911,7 +920,17 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
           <div className="flex flex-col items-center justify-center p-6 bg-rose-950/40 border border-rose-800 rounded-2xl max-w-md text-center">
             <AlertCircle className="w-12 h-12 text-rose-400 mb-2" />
             <div className="text-base font-bold text-rose-200 mb-1">تعذر فتح ملف الـ PDF</div>
-            <div className="text-xs text-rose-300 mb-4">{errorMsg}</div>
+            <div className="text-xs text-rose-300 mb-3">{errorMsg}</div>
+            
+            <button
+              type="button"
+              onClick={() => setRetryTrigger(prev => prev + 1)}
+              className="mb-3 px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-md"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>إعادة المحاولة الآن 🔄</span>
+            </button>
+
             <div className="text-xs text-slate-400 bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
               💡 نصيحة: يمكنك رفع ملف الـ PDF مباشرة من جهازك عبر زر &quot;رفع ملف PDF&quot;، ليعمل بأقصى سرعة وبدون قيود.
             </div>

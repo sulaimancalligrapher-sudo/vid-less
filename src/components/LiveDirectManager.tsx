@@ -43,6 +43,7 @@ import {
   FileText,
   Layers,
   Upload,
+  Trophy,
 } from 'lucide-react';
 import {
   LiveDirectLessonRow,
@@ -97,6 +98,7 @@ import {
 } from '../api';
 import LiveChatModal from './LiveChatModal';
 import { NativePdfViewer } from './NativePdfViewer';
+import QuizManagerPanel from './QuizManagerPanel';
 
 interface LiveDirectManagerProps {
   onOpenDisplayScreen?: () => void;
@@ -107,8 +109,8 @@ export default function LiveDirectManager({
   onOpenDisplayScreen,
   onBackToAdmin,
 }: LiveDirectManagerProps) {
-  // Main tabs: 1- أسئلة الشيت | 2- سجل الإجابات | 3- إعدادات التدريس والتحكم المباشر | 4- أدوات التعليم
-  const [activeTab, setActiveTab] = useState<'teaching' | 'tools' | 'questions' | 'answers'>('teaching');
+  // Main tabs: 1- أسئلة الشيت | 2- سجل الإجابات | 3- إعدادات التدريس والتحكم المباشر | 4- أدوات التعليم | 5- تحدي كويز
+  const [activeTab, setActiveTab] = useState<'teaching' | 'tools' | 'questions' | 'answers' | 'quiz-challenge'>('teaching');
 
   // Lessons and Answers
   const [lessons, setLessons] = useState<LiveDirectLessonRow[]>([]);
@@ -268,14 +270,17 @@ export default function LiveDirectManager({
     try {
       const finalPdfUrl = lesson.storageType === 'file' ? (lesson.url || `local://${lesson.id}`) : formatPdfEmbedUrl(lesson.url || '');
 
-      // If local file, ensure it's synced to the server in background so projector / student devices can access it
+      // If local file, ensure it's synced to the server so projector / student devices can access it
       if (lesson.storageType === 'file') {
         const fileId = (lesson.url || lesson.id).replace(/^local:\/\//, '');
-        getPdfFromIndexedDB(fileId).then((record) => {
+        try {
+          const record = await getPdfFromIndexedDB(fileId);
           if (record && record.data) {
-            uploadPdfToServer(fileId, lesson.title, record.data);
+            await uploadPdfToServer(fileId, lesson.title, record.data);
           }
-        }).catch(() => {});
+        } catch (syncErr) {
+          console.warn('PDF server sync warning:', syncErr);
+        }
       }
 
       const res = await updateLivePdfState({
@@ -1227,6 +1232,18 @@ export default function LiveDirectManager({
           <span className="px-2 py-0.5 rounded-full bg-slate-950/40 text-[10px] font-mono">
             {answers.length}
           </span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('quiz-challenge')}
+          className={`px-4 sm:px-5 py-2.5 rounded-2xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer border shrink-0 ${
+            activeTab === 'quiz-challenge'
+              ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-500/20'
+              : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'
+          }`}
+        >
+          <Trophy className="w-4 h-4 text-amber-400" />
+          <span>تحدي كويز 🏆 (Quiz Arena)</span>
         </button>
       </div>
 
@@ -2696,6 +2713,18 @@ export default function LiveDirectManager({
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB 5: LIVE CHALLENGE QUIZ (تحدي كويز - Questions-Qui & Answers-Qui) */}
+      {/* ========================================================================= */}
+      {activeTab === 'quiz-challenge' && (
+        <div className="py-2">
+          <QuizManagerPanel
+            sessionState={sessionState}
+            onOpenArenaDisplay={onOpenDisplayScreen}
+          />
         </div>
       )}
 
