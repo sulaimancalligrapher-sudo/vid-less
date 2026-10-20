@@ -219,6 +219,7 @@ export interface LiveLessonRow {
 
 export interface LiveConnectedStudent {
   username: string;
+  studentName?: string;
   sheetNumber: string;
   joinedAt: number;
   lastPing: number;

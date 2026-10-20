@@ -12,6 +12,8 @@ interface LiveAttendanceChartProps {
   launchLabel?: string;
   roomPin?: string;
   isPresenter?: boolean;
+  readyCount?: number;
+  totalSessionCount?: number;
 }
 
 const AVATAR_GRADIENTS = [
@@ -43,13 +45,13 @@ export default function LiveAttendanceChart({
   launchLabel = 'ابدأ المسابقة والتحدي الآن 🚀',
   roomPin,
   isPresenter = false,
+  readyCount,
+  totalSessionCount,
 }: LiveAttendanceChartProps) {
-  const totalCount = students.length;
+  const totalCount = totalSessionCount !== undefined ? totalSessionCount : students.length;
   const verifiedCount = students.filter(s => (s as any).pinVerified).length;
-  // Estimated readiness: if student connected in last 5 minutes
-  const readyCount = totalCount;
-  const targetMin = Math.max(10, Math.ceil((totalCount || 5) * 1.2));
-  const readinessPercent = totalCount > 0 ? Math.min(100, Math.round((totalCount / Math.max(totalCount, 1)) * 100)) : 0;
+  const actualReadyCount = readyCount !== undefined ? readyCount : students.filter(s => (s as any).isReady !== false).length;
+  const readinessPercent = totalCount > 0 ? Math.min(100, Math.round((actualReadyCount / Math.max(totalCount, 1)) * 100)) : 0;
 
   // Distribution by sheet number (grouping)
   const sheetGroups: Record<string, number> = {};
@@ -86,10 +88,10 @@ export default function LiveAttendanceChart({
               <Users className="w-7 h-7" />
             </div>
             <div>
-              <div className="text-xs text-slate-400 font-bold">الطلاب المتصلين حالياً</div>
-              <div className="text-3xl font-black text-amber-400 font-mono">
-                {totalCount.toLocaleString()}
-                <span className="text-xs text-slate-400 font-sans font-bold mr-1.5">طالب</span>
+              <div className="text-xs text-slate-400 font-bold">جاهزية الطلاب للتحدي</div>
+              <div className="text-2xl sm:text-3xl font-black text-amber-400 font-mono">
+                {actualReadyCount}
+                <span className="text-xs text-slate-400 font-sans font-bold mr-1.5">/ {totalCount} ({readinessPercent}%)</span>
               </div>
             </div>
           </div>
@@ -100,14 +102,14 @@ export default function LiveAttendanceChart({
           <div className="mt-6 pt-5 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="text-xs text-slate-400 flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span>القاعة مكتملة وجاهزة لانطلاق الأسئلة في أي لحظة</span>
+              <span>القاعة في وضع الاستعداد • يمكنك إطلاق الأسئلة في أي لحظة</span>
             </div>
             <button
               onClick={onLaunch}
               className="w-full sm:w-auto px-8 py-3.5 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-sm rounded-2xl shadow-xl shadow-amber-500/30 active:scale-95 transition-all cursor-pointer flex items-center justify-center gap-2 animate-pulse"
             >
               <Zap className="w-5 h-5 fill-slate-950 text-slate-950" />
-              <span>{launchLabel} ({totalCount} جاهز)</span>
+              <span>{launchLabel} ({actualReadyCount} جاهز)</span>
             </button>
           </div>
         )}
@@ -122,17 +124,17 @@ export default function LiveAttendanceChart({
               <CheckCircle2 className="w-4 h-4" />
               <span>نسبة الجاهزية للتحدي</span>
             </span>
-            <span className="font-mono text-emerald-300 font-black">{totalCount > 0 ? '100%' : '0%'}</span>
+            <span className="font-mono text-emerald-300 font-black">{readinessPercent}%</span>
           </div>
           <div className="w-full h-3 bg-slate-950 rounded-full overflow-hidden p-0.5 border border-slate-800">
             <div 
-              className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 rounded-full transition-all duration-500"
-              style={{ width: totalCount > 0 ? '100%' : '0%' }}
+              className="h-full bg-gradient-to-r from-emerald-500 via-teal-400 to-amber-400 rounded-full transition-all duration-500"
+              style={{ width: `${readinessPercent}%` }}
             />
           </div>
           <div className="text-[11px] text-slate-400 flex items-center justify-between">
-            <span>جميع المتصلين جاهزون</span>
-            <span className="font-mono text-slate-300 font-bold">{totalCount} / {totalCount}</span>
+            <span>الطلاب المستعدون للتحدي:</span>
+            <span className="font-mono text-emerald-400 font-bold">{actualReadyCount} / {totalCount} طالب</span>
           </div>
         </div>
 
@@ -170,21 +172,23 @@ export default function LiveAttendanceChart({
           </div>
         </div>
 
-        {/* Metric 3: PIN / Access Code */}
+        {/* Metric 3: PIN / Access Code or Challenge Status */}
         <div className="p-5 bg-slate-900/80 border border-slate-800/80 rounded-2xl backdrop-blur-md flex flex-col justify-between">
           <div className="flex items-center justify-between text-xs text-slate-400 font-bold mb-2">
             <span className="flex items-center gap-1.5 text-amber-400">
               <ShieldCheck className="w-4 h-4" />
-              <span>رمز دخول القاعة</span>
+              <span>{roomPin ? 'رمز دخول القاعة' : 'حالة المسابقة'}</span>
             </span>
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
           </div>
           <div className="text-center py-1">
             <div className="text-2xl font-black font-mono tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-orange-400">
-              {roomPin || '0000'}
+              {roomPin ? roomPin : `${totalCount} مستعد`}
             </div>
             <div className="text-[10px] text-slate-400 mt-1">
-              يُدخل الطالب هذا الرمز عند الانضمام لتأكيد حضوره
+              {roomPin
+                ? 'يُدخل الطالب هذا الرمز عند الانضمام لتأكيد حضوره'
+                : 'الطلاب جاهزون لبدء المنافسة فور إشارة المعلم ⚡'}
             </div>
           </div>
         </div>
@@ -239,7 +243,11 @@ export default function LiveAttendanceChart({
                     animate={{ opacity: 1, scale: 1, y: 0 }}
                     exit={{ opacity: 0, scale: 0.8 }}
                     transition={{ type: 'spring', damping: 20, stiffness: 280 }}
-                    className="p-3 bg-slate-950/80 border border-slate-800/80 hover:border-amber-500/40 rounded-2xl flex items-center gap-2.5 shadow-md hover:scale-[1.02] transition-all group"
+                    className={`p-3 rounded-2xl flex items-center gap-2.5 shadow-md hover:scale-[1.02] transition-all group border ${
+                      (student as any).isReady !== false
+                        ? 'bg-slate-950/90 border-emerald-500/40 shadow-emerald-500/10'
+                        : 'bg-slate-950/50 border-slate-800/80 border-dashed opacity-75'
+                    }`}
                   >
                     {/* Student Avatar */}
                     <div className={`w-9 h-9 rounded-xl bg-gradient-to-tr ${gradient} flex items-center justify-center text-white font-black text-xs shadow-md shrink-0`}>
@@ -253,8 +261,17 @@ export default function LiveAttendanceChart({
                       </div>
                       <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
                         {sheet && <span className="font-mono text-amber-400">#{sheet}</span>}
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                        <span className="text-emerald-400 font-bold">جاهز</span>
+                        {(student as any).isReady !== false ? (
+                          <>
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                            <span className="text-emerald-400 font-bold">مستعد ⚡</span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
+                            <span className="text-amber-400 font-bold">في الانتظار...</span>
+                          </>
+                        )}
                       </div>
                     </div>
                   </motion.div>

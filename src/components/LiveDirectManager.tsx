@@ -95,6 +95,7 @@ import {
   getPdfFromIndexedDB,
   uploadPdfToServer,
   deletePdfFromIndexedDB,
+  clearConnectedStudents,
 } from '../api';
 import LiveChatModal from './LiveChatModal';
 import { NativePdfViewer } from './NativePdfViewer';
@@ -586,6 +587,17 @@ export default function LiveDirectManager({
       console.error('Failed to toggle connected count visibility in room:', e);
     } finally {
       setIsUpdatingConnectedCountVisibility(false);
+    }
+  };
+
+  // Reset / Clear connected students list
+  const handleClearConnectedStudents = async () => {
+    if (!window.confirm('هل تريد تصفير وتنظيف قائمة الطلاب المتصلين بالقاعة؟')) return;
+    try {
+      await clearConnectedStudents();
+      showNotice('تم تصفير وتنظيف قائمة الطلاب المتصلين بنجاح 🔄');
+    } catch (e: any) {
+      showNotice('فشل تصفير القائمة: ' + (e?.message || ''), 'error');
     }
   };
 
@@ -1433,6 +1445,16 @@ export default function LiveDirectManager({
                     }`}
                   >
                     {sessionState?.showConnectedCountInRoom ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                  </button>
+
+                  {/* زر تصفير وتنظيف قائمة المتصلين */}
+                  <button
+                    type="button"
+                    onClick={handleClearConnectedStudents}
+                    title="تصفير وتنظيف قائمة المتصلين بالقاعة"
+                    className="p-1 rounded-lg bg-slate-900 hover:bg-rose-950 text-slate-400 hover:text-rose-300 border border-slate-800 hover:border-rose-700/50 transition-all cursor-pointer"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
                   </button>
                 </div>
 

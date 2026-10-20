@@ -5,7 +5,7 @@ import {
   User, Hash, LogOut, ArrowRight, Volume2, HelpCircle, 
   Award, ShieldAlert, Wifi, WifiOff, Loader2,
   KeyRound, ShieldCheck, Camera, QrCode, X, MessageSquare, Hand, ThumbsUp, ThumbsDown,
-  Image as ImageIcon
+  Image as ImageIcon, Zap
 } from 'lucide-react';
 import { Html5Qrcode } from 'html5-qrcode';
 import { 
@@ -13,7 +13,8 @@ import {
 } from '../types';
 import { 
   getLiveSessionState, joinLiveSession, pingLiveSession, leaveLiveSession, submitLiveAnswer, 
-  formatDriveImageUrl, subscribeToLiveSession, sendStudentMessage, replyToStudentMessage, deleteStudentMessage, clearAllStudentMessages, toggleShowChatInRoom
+  formatDriveImageUrl, subscribeToLiveSession, sendStudentMessage, replyToStudentMessage, deleteStudentMessage, clearAllStudentMessages, toggleShowChatInRoom,
+  joinQuizLobby
 } from '../api';
 import LiveChatModal from './LiveChatModal';
 import StudentQuizView from './StudentQuizView';
@@ -72,6 +73,7 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
   const [currentQuestionKey, setCurrentQuestionKey] = useState<string | null>(null);
   const [timeLeft, setTimeLeft] = useState<number>(30);
   const [joinError, setJoinError] = useState<string | null>(null);
+  const [hasAcceptedQuizChallenge, setHasAcceptedQuizChallenge] = useState<boolean>(false);
   const joinTimeRef = useRef<number>(0);
 
   // Auto-join only if valid credentials AND pin are present in URL
@@ -863,12 +865,16 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
   }
 
   // 1.5. Live Challenge Quiz Mode (Quiz Arena - Questions-Qui & Answers-Qui)
-  if (sessionState?.quizState?.isActive) {
+  const studentQuizKey = `${username.trim().toLowerCase()}_${sheetNumber.trim()}`;
+  const isEnrolledInQuiz = Boolean(sessionState?.quizState?.participants?.[studentQuizKey]);
+
+  if (sessionState?.quizState?.isActive && (hasAcceptedQuizChallenge || isEnrolledInQuiz)) {
     return (
       <StudentQuizView
         quizState={sessionState.quizState}
         username={username}
         sheetNumber={sheetNumber}
+        onExit={() => setHasAcceptedQuizChallenge(false)}
       />
     );
   }
@@ -957,6 +963,55 @@ export default function LiveStudentView({ onBackToMain }: LiveStudentViewProps) 
             >
               <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
               <span>{messageSuccessBanner}</span>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Step 1: Floating Challenge Invitation Banner for students in "شرح مباشر" */}
+        <AnimatePresence>
+          {sessionState?.quizState?.isActive && !hasAcceptedQuizChallenge && !isEnrolledInQuiz && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.92, y: -20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.92, y: -20 }}
+              transition={{ type: 'spring', damping: 20, stiffness: 280 }}
+              className="mb-4 p-4 sm:p-5 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-slate-950 rounded-3xl shadow-2xl border-2 border-white/60 relative overflow-hidden"
+              dir="rtl"
+            >
+              <div className="flex items-start gap-3 sm:gap-4">
+                <div className="w-11 h-11 sm:w-13 sm:h-13 rounded-2xl bg-slate-950 text-amber-400 flex items-center justify-center font-black text-2xl shrink-0 shadow-lg shadow-black/30">
+                  🎯
+                </div>
+                <div className="flex-1 space-y-1.5 text-right min-w-0">
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-950/20 text-slate-950 text-[10px] sm:text-xs font-black">
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>تحدي نهاية البرنامج المباشر</span>
+                  </div>
+                  <h4 className="font-black text-sm sm:text-base leading-snug text-slate-950">
+                    المعلم يستعد لإطلاق مسابقة التحدي النهائي! 🎯 هل أنت مستعد؟
+                  </h4>
+                  <p className="text-xs font-bold text-slate-900/90 leading-relaxed">
+                    اضغط أدناه لتأكيد حضورك والظهور فوراً على شاشة العرض مع زملائك ⚡
+                  </p>
+                  <div className="pt-2">
+                    <button
+                      onClick={async () => {
+                        try {
+                          await joinQuizLobby(studentQuizKey, {
+                            username: username.trim(),
+                            sheetNumber: sheetNumber.trim(),
+                          });
+                        } catch {}
+                        setHasAcceptedQuizChallenge(true);
+                      }}
+                      className="w-full py-3 bg-slate-950 hover:bg-slate-900 text-amber-300 font-black text-xs sm:text-sm rounded-2xl shadow-xl flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95 hover:scale-[1.01]"
+                    >
+                      <Zap className="w-4 h-4 fill-amber-300 text-amber-300" />
+                      <span>أنا مستعد • دخول التحدي ⚡</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>

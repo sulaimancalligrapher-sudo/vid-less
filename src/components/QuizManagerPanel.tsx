@@ -484,7 +484,7 @@ export default function QuizManagerPanel({
               </select>
             </div>
 
-            {/* Quick Action Buttons */}
+            {/* Quick Action Buttons (4-Step Workflow) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 pt-2">
               {currentQuizState?.isActive && currentQuizState.quizStatus === 'waiting' ? (
                 <>
@@ -493,7 +493,7 @@ export default function QuizManagerPanel({
                     className="w-full py-4 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black rounded-2xl text-xs sm:text-sm shadow-xl shadow-amber-500/25 flex items-center justify-center gap-2 transition-all cursor-pointer animate-pulse"
                   >
                     <Play className="w-5 h-5 fill-slate-950" />
-                    <span>إطلاق الأسئلة للجميع ({Object.keys(currentQuizState.participants || {}).length}) ⚡</span>
+                    <span>2. ابدأ التحدي الآن لجميع الطلاب ({Object.keys(currentQuizState.participants || {}).length} قبلوا التحدي) 🚀</span>
                   </button>
                   <button
                     onClick={handleEndQuiz}
@@ -510,14 +510,14 @@ export default function QuizManagerPanel({
                     className="w-full py-4 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-black rounded-2xl text-xs sm:text-sm shadow-xl shadow-indigo-500/20 flex items-center justify-center gap-2 transition-all cursor-pointer"
                   >
                     <Users className="w-5 h-5 text-indigo-200" />
-                    <span>فتح قاعة الانتظار والرسم البياني 👥</span>
+                    <span>1. استعداد (دعوة الطلاب للشاشة والرسم البياني) 👥</span>
                   </button>
                   <button
                     onClick={handleStartQuiz}
                     className="w-full py-4 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-slate-950 font-black rounded-2xl text-xs sm:text-sm shadow-xl shadow-emerald-500/20 flex items-center justify-center gap-2 transition-all cursor-pointer"
                   >
                     <Play className="w-5 h-5 fill-slate-950" />
-                    <span>إطلاق التحدي فوراً 🚀</span>
+                    <span>ابدأ التحدي فوراً ⚡</span>
                   </button>
                 </>
               ) : (
@@ -526,7 +526,7 @@ export default function QuizManagerPanel({
                   className="w-full py-4 bg-gradient-to-r from-rose-500 to-red-600 hover:from-rose-600 hover:to-red-700 text-white font-black rounded-2xl text-sm shadow-xl shadow-rose-500/20 flex items-center justify-center gap-2 transition-all cursor-pointer col-span-1 sm:col-span-2"
                 >
                   <Square className="w-5 h-5 fill-white" />
-                  <span>إنهاء وإعلان الفائزين 🏆</span>
+                  <span>4. إنهاء التحدي إجبارياً وتتويج الفائزين 🏆</span>
                 </button>
               )}
 
@@ -548,6 +548,41 @@ export default function QuizManagerPanel({
               </button>
             </div>
           </div>
+
+          {/* Waiting Lobby Realtime Quick Monitor for Teacher */}
+          {currentQuizState?.isActive && currentQuizState.quizStatus === 'waiting' && (
+            <div className="p-5 bg-gradient-to-r from-indigo-950/60 via-slate-900 to-indigo-950/60 border border-indigo-500/30 rounded-3xl space-y-4 animate-fade-in">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-3 h-3 rounded-full bg-emerald-400 animate-ping" />
+                  <h4 className="text-sm font-black text-slate-100">
+                    قاعة الاستعداد نشطة حالياً على شاشة العرض (البروجكتر) 👥
+                  </h4>
+                </div>
+                <div className="text-xs font-bold text-amber-300 bg-amber-500/10 px-3 py-1 rounded-full border border-amber-500/30">
+                  {Object.keys(currentQuizState.participants || {}).length} طلاب قبلوا التحدي وجاهزون
+                </div>
+              </div>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                تظهر للطلاب الآن نافذة "المعلم يستعد لإطلاق مسابقة التحدي النهائي!". كل طالب يضغط على "أنا مستعد" يُسجل فوراً في القاعة وترتفع نسبة الجاهزية على شاشة العرض. عندما يكتمل العدد اضغط الزر "2. ابدأ التحدي الآن لجميع الطلاب".
+              </p>
+              {/* Ready Students Mini Grid */}
+              <div className="flex flex-wrap gap-2 pt-1 max-h-40 overflow-y-auto">
+                {Object.values(currentQuizState.participants || {}).map((p) => (
+                  <div key={p.studentKey} className="px-3 py-1.5 bg-slate-900 border border-emerald-500/40 rounded-xl text-xs font-bold text-slate-200 flex items-center gap-1.5 shadow-sm">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                    <span>{p.studentName || p.username}</span>
+                    {p.sheetNumber && <span className="text-[10px] text-amber-400 font-mono">#{p.sheetNumber}</span>}
+                  </div>
+                ))}
+                {Object.keys(currentQuizState.participants || {}).length === 0 && (
+                  <div className="text-xs text-slate-500 italic py-2">
+                    في انتظار ضغط الطلاب على [أنا مستعد • دخول التحدي ⚡] على أجهزتهم...
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Settings & Toggles Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

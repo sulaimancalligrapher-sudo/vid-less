@@ -350,6 +350,26 @@ function doGet(e) {
       };
       handleTelegramWebhookUpdate(simUpdate);
       response = { success: true, message: 'تمت معالجة محاكاة التلغرام للطالب رقم ' + sheetNum + ' بنجاح ✅' };
+    } else if (action === 'readDriveFile' || action === 'getPdfFile' || action === 'getDriveFile') {
+      var fileId = (e && e.parameter && (e.parameter.id || e.parameter.fileId)) ? (e.parameter.id || e.parameter.fileId) : '';
+      if (!fileId) {
+        response = { success: false, message: 'معرف الملف id غير موجود' };
+      } else {
+        try {
+          var dFile = DriveApp.getFileById(fileId);
+          var dBlob = dFile.getBlob();
+          var b64Data = Utilities.base64Encode(dBlob.getBytes());
+          response = {
+            success: true,
+            name: dFile.getName(),
+            mimeType: dBlob.getContentType(),
+            size: dFile.getSize(),
+            base64: b64Data
+          };
+        } catch (dErr) {
+          response = { success: false, message: 'خطأ أثناء قراءة الملف من Google Drive: ' + dErr.toString() };
+        }
+      }
     } else {
       // افتراضي: إرجاع البيانات العامة لصفحة الواجهة
       response = getData();
@@ -452,6 +472,26 @@ function doPost(e) {
       response = setupQuizDirectSheets();
     } else if (action === 'getAllSettingsStudents') {
       response = getAllSettingsStudents();
+    } else if (action === 'readDriveFile' || action === 'getPdfFile' || action === 'getDriveFile') {
+      var fileId = payload.id || payload.fileId || (e && e.parameter && (e.parameter.id || e.parameter.fileId));
+      if (!fileId) {
+        response = { success: false, message: 'معرف الملف id غير موجود' };
+      } else {
+        try {
+          var dFile = DriveApp.getFileById(fileId);
+          var dBlob = dFile.getBlob();
+          var b64Data = Utilities.base64Encode(dBlob.getBytes());
+          response = {
+            success: true,
+            name: dFile.getName(),
+            mimeType: dBlob.getContentType(),
+            size: dFile.getSize(),
+            base64: b64Data
+          };
+        } catch (dErr) {
+          response = { success: false, message: 'خطأ أثناء قراءة الملف من Google Drive: ' + dErr.toString() };
+        }
+      }
     } else {
       response = { success: false, message: 'الإجراء المطلوب غير معروف' };
     }
@@ -721,7 +761,7 @@ function getWords(sheetName, username) {
       var retryResetCount = (studentRetryResetCount !== null && !isNaN(studentRetryResetCount)) ? studentRetryResetCount : defaultRetryResetCount;
 
       var letterSounds = rawLinks
-        .split(new RegExp("[,\\u060C]\\\\s*"))
+        .split('،').join(',').split(',')
         .map(function(s) { return s.trim(); })
         .filter(function(s) { return s.indexOf('http') === 0; });
 
@@ -2842,7 +2882,7 @@ function getLiveQuestionsT() {
           if (typeOrOptsStr === 'نص') {
             isTextAnswer = true;
           } else if (typeOrOptsStr) {
-            options = typeOrOptsStr.split(new RegExp("[,\\u060C]")).map(function(s) { return s.trim(); }).filter(Boolean);
+            options = typeOrOptsStr.split('،').join(',').split(',').map(function(s) { return s.trim(); }).filter(Boolean);
           } else {
             isTextAnswer = true;
           }
@@ -3270,7 +3310,7 @@ function getLiveQuestionsDirect() {
           if (typeOrOptsStr === 'نص') {
             isTextAnswer = true;
           } else if (typeOrOptsStr) {
-            options = typeOrOptsStr.split(new RegExp("[,\\u060C]")).map(function(s) { return s.trim(); }).filter(Boolean);
+            options = typeOrOptsStr.split('،').join(',').split(',').map(function(s) { return s.trim(); }).filter(Boolean);
           } else {
             isTextAnswer = true;
           }
@@ -3684,7 +3724,7 @@ function getQuizQuestionsDirect() {
           if (typeOrOptsStr.toLowerCase() === 'نص' || typeOrOptsStr.toLowerCase() === 'text') {
             isTextAnswer = true;
           } else if (typeOrOptsStr) {
-            options = typeOrOptsStr.split(new RegExp("[,\\u060C]")).map(function(s) { return s.trim(); }).filter(Boolean);
+            options = typeOrOptsStr.split('،').join(',').split(',').map(function(s) { return s.trim(); }).filter(Boolean);
           }
           
           questions.push({

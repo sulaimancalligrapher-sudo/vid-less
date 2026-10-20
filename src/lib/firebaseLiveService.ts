@@ -80,6 +80,14 @@ export function subscribeToLiveSession(
     (snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.data() as any;
+        const now = Date.now();
+        const rawStudents = Array.isArray(data.connectedStudents) ? data.connectedStudents : [];
+        // Active heartbeat: lastPing or joinedAt within 60 seconds
+        const activeStudents = rawStudents.filter((s: any) => {
+          const lastActive = s.lastPing || s.joinedAt || 0;
+          return (now - lastActive) < 60000;
+        });
+
         const state: LiveSessionState = {
           sessionId: data.sessionId || 'live-main',
           sessionPin: data.sessionPin || '1234',
@@ -115,7 +123,7 @@ export function subscribeToLiveSession(
           questionTriggeredAt: data.questionTriggeredAt || null,
           timeLimit: data.timeLimit || 30,
           showResult: data.showResult || 'نعم',
-          connectedStudents: Array.isArray(data.connectedStudents) ? data.connectedStudents : [],
+          connectedStudents: activeStudents,
           answersForCurrentQuestion: data.answersForCurrentQuestion || {},
           allSessionAnswers: data.allSessionAnswers || {},
           quizState: data.quizState || null,
@@ -148,6 +156,13 @@ export async function getLiveSessionState(): Promise<LiveSessionState | null> {
     const snap = await getDoc(LIVE_DOC_REF);
     if (snap.exists()) {
       const data = snap.data() as any;
+      const now = Date.now();
+      const rawStudents = Array.isArray(data.connectedStudents) ? data.connectedStudents : [];
+      const activeStudents = rawStudents.filter((s: any) => {
+        const lastActive = s.lastPing || s.joinedAt || 0;
+        return (now - lastActive) < 60000;
+      });
+
       const state: LiveSessionState = {
         sessionId: data.sessionId || 'live-main',
         sessionPin: data.sessionPin || '1234',
@@ -183,7 +198,7 @@ export async function getLiveSessionState(): Promise<LiveSessionState | null> {
         questionTriggeredAt: data.questionTriggeredAt || null,
         timeLimit: data.timeLimit || 30,
         showResult: data.showResult || 'نعم',
-        connectedStudents: Array.isArray(data.connectedStudents) ? data.connectedStudents : [],
+        connectedStudents: activeStudents,
         answersForCurrentQuestion: data.answersForCurrentQuestion || {},
         allSessionAnswers: data.allSessionAnswers || {},
         quizState: data.quizState || null,
@@ -383,6 +398,21 @@ export async function leaveLiveSession(username: string, sheetNumber?: string): 
       updatedAt: serverTimestamp(),
     });
   } catch {}
+}
+
+// Reset / Clear all connected students manually (e.g. by teacher)
+export async function clearConnectedStudents(): Promise<{ success: boolean }> {
+  try {
+    await updateDoc(LIVE_DOC_REF, {
+      connectedStudents: [],
+      updatedAt: serverTimestamp(),
+    });
+    cachedState = { ...cachedState, connectedStudents: [] };
+    return { success: true };
+  } catch (err: any) {
+    console.error('Failed to clear connected students:', err);
+    return { success: false };
+  }
 }
 
 // Teacher initializes a lesson theater
@@ -1300,14 +1330,81 @@ export async function updateLiveQuizSettings(
   }
 }
 
+export async function joinQuizLobby(
+  studentKey: string,
+  payload: {
+    username: string;
+    studentName?: string;
+    sheetNumber: string;
+  }
+): Promise<{ success: boolean }> {
+  try {
+    const snap = await getDoc(LIVE_DOC_REF);
+    if (!snap.exists()) return { success: false };
+    const data = snap.data() as any;
+    const currentQuiz = data.quizState as QuizActiveState;
+    if (!currentQuiz || !currentQuiz.isActive) return { success: false };
+
+    const participants = { ...(currentQuiz.participants || {}) };
+    const totalQ = currentQuiz.questions?.length || 1;
+
+    if (!participants[studentKey]) {
+      participants[studentKey] = {
+        studentKey,
+        username: payload.username,
+        studentName: payload.studentName || payload.username,
+        sheetNumber: payload.sheetNumber,
+        currentQuestionIndex: 0,
+        answers: {},
+        totalScore: 0,
+        correctCount: 0,
+        wrongCount: 0,
+        totalQuestions: totalQ,
+        streak: 0,
+        isFinished: false,
+        totalTimeTaken: 0,
+        wrongQuestionIndices: [],
+      };
+    }
+
+    const updatedQuiz: QuizActiveState = {
+      ...currentQuiz,
+      participants,
+    };
+
+    await updateDoc(LIVE_DOC_REF, {
+      quizState: updatedQuiz,
+      updatedAt: serverTimestamp(),
+    });
+
+    cachedState = { ...cachedState, quizState: updatedQuiz };
+    return { success: true };
+  } catch (err: any) {
+    console.error('Failed to join quiz lobby:', err);
+    return { success: false };
+  }
+}
+
 export async function endLiveQuiz(): Promise<{ success: boolean }> {
   try {
     if (!cachedState.quizState) return { success: false };
     const currentQuiz = { ...cachedState.quizState };
     currentQuiz.quizStatus = 'ended';
 
-    // Calculate final ranks
+    const totalQ = currentQuiz.questions?.length || 1;
     const participantsList = Object.values(currentQuiz.participants || {});
+
+    // For any student who hasn't completed, mark their remaining unanswered questions as wrong
+    participantsList.forEach((p) => {
+      const answeredCount = Object.keys(p.answers || {}).length;
+      if (!p.isFinished) {
+        p.isFinished = true;
+        const remainingUnanswered = Math.max(0, totalQ - answeredCount);
+        p.wrongCount = (p.wrongCount || 0) + remainingUnanswered;
+      }
+    });
+
+    // Calculate final ranks
     participantsList.sort((a, b) => {
       if (b.totalScore !== a.totalScore) return b.totalScore - a.totalScore;
       return (a.totalTimeTaken || 99999) - (b.totalTimeTaken || 99999);
@@ -1370,8 +1467,11 @@ export async function submitStudentQuizAnswer(
 
     const participants = { ...(currentQuiz.participants || {}) };
     let student = participants[studentKey];
-
-    const effectiveTotal = Math.max(1, currentQuiz.questions?.length || 0, payload.totalQuizQuestions || 0, student?.totalQuestions || 0);
+    // Calculate true total questions from quizState or payload
+    const quizCount = Array.isArray(currentQuiz.questions) ? currentQuiz.questions.length : 0;
+    const payloadCount = typeof payload.totalQuizQuestions === 'number' ? payload.totalQuizQuestions : 0;
+    const studentCount = typeof student?.totalQuestions === 'number' ? student.totalQuestions : 0;
+    const effectiveTotal = Math.max(quizCount, payloadCount, studentCount, 1);
 
     if (!student) {
       student = {
@@ -1390,8 +1490,10 @@ export async function submitStudentQuizAnswer(
         totalTimeTaken: 0,
         wrongQuestionIndices: [],
       };
-    } else if (student.totalQuestions < effectiveTotal) {
-      student.totalQuestions = effectiveTotal;
+    } else {
+      if (effectiveTotal > student.totalQuestions) {
+        student.totalQuestions = effectiveTotal;
+      }
     }
 
     // Points calculation (Quizizz / Kahoot style)
@@ -1434,12 +1536,15 @@ export async function submitStudentQuizAnswer(
       updatedWrong = updatedWrong.filter(idx => idx !== payload.questionIndex);
     }
 
-    const newCorrectCount = Object.values(updatedAnswers).filter(a => a.isCorrect).length;
+    const newCorrectCount = Object.values(updatedAnswers).filter((a: any) => a.isCorrect).length;
     const newWrongCount = updatedWrong.length;
     const newTotalScore = Math.max(0, (student.totalScore || 0) + points);
     const newTotalTime = (student.totalTimeTaken || 0) + payload.timeTaken;
     const nextQIndex = payload.isRetry ? student.currentQuestionIndex : (student.currentQuestionIndex + 1);
-    const isNowFinished = !payload.isRetry && (Object.keys(updatedAnswers).length >= effectiveTotal);
+    
+    // Only mark finished if all questions have truly been answered
+    const totalAnswered = Object.keys(updatedAnswers).length;
+    const isNowFinished = !payload.isRetry && (effectiveTotal > 1 ? totalAnswered >= effectiveTotal : (quizCount === 1 && totalAnswered >= 1));
 
     student = {
       ...student,
@@ -1451,8 +1556,8 @@ export async function submitStudentQuizAnswer(
       wrongCount: newWrongCount,
       totalTimeTaken: newTotalTime,
       wrongQuestionIndices: updatedWrong,
-      isFinished: isNowFinished || student.isFinished,
-      finishTime: (isNowFinished && !student.finishTime) ? Date.now() : student.finishTime,
+      isFinished: isNowFinished,
+      finishTime: (isNowFinished && !student.finishTime) ? Date.now() : (isNowFinished ? student.finishTime : undefined),
     };
 
     participants[studentKey] = student;

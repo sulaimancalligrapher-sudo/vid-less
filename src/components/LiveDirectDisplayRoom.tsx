@@ -566,6 +566,7 @@ export default function LiveDirectDisplayRoom({}: LiveDirectDisplayRoomProps = {
           <div className="fixed inset-0 z-50 w-full h-full">
             <LiveQuizArenaDisplay
               quizState={sessionState.quizState}
+              connectedStudents={sessionState?.connectedStudents || []}
               isPresenter={false}
             />
           </div>

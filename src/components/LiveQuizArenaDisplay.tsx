@@ -5,12 +5,13 @@ import {
   Crown, Sparkles, Volume2, VolumeX, Maximize2, Flag, ArrowRight,
   TrendingUp, BarChart3, Star, Zap, Check, ChevronDown, ChevronUp
 } from 'lucide-react';
-import { QuizActiveState, QuizStudentProgress } from '../types';
+import { QuizActiveState, QuizStudentProgress, LiveConnectedStudent } from '../types';
 import LiveAttendanceChart from './LiveAttendanceChart';
 import { launchLiveQuizQuestions } from '../api';
 
 interface LiveQuizArenaDisplayProps {
   quizState: QuizActiveState;
+  connectedStudents?: LiveConnectedStudent[];
   onEndQuiz?: () => void;
   onBackToPresentation?: () => void;
   isPresenter?: boolean;
@@ -85,6 +86,7 @@ class ArenaSoundEffects {
 
 export default function LiveQuizArenaDisplay({
   quizState,
+  connectedStudents = [],
   onEndQuiz,
   onBackToPresentation,
   isPresenter = false,
@@ -291,26 +293,61 @@ export default function LiveQuizArenaDisplay({
 
       {/* Main Body */}
       <main className="relative z-10 flex-grow p-4 md:p-8 flex flex-col items-center justify-start max-w-7xl mx-auto w-full">
-        {quizState.quizStatus === 'waiting' ? (
-          /* ============================================================== */
-          /* STAGE 0: PRE-QUIZ WAITING LOBBY & LIVE ATTENDANCE CHART */
-          /* ============================================================== */
-          <div className="w-full my-auto py-4">
-            <LiveAttendanceChart
-              students={sortedParticipants.map(p => ({
-                username: p.username,
-                studentName: p.studentName || p.username,
-                sheetNumber: p.sheetNumber,
-                isReady: true,
-              }))}
-              title={`قاعة الانتظار: ${quizState.quizTitle || 'مسابقة التحدي التفاعلي'}`}
-              subtitle="الطلاب مسجلون وحاضرون بالقاعة • يتم رصد أسمائهم وإعداد الرسم البياني للجولة قبل إشارة البدء ⚡"
-              showLaunchButton={isPresenter}
-              onLaunch={async () => { await launchLiveQuizQuestions(); }}
-              launchLabel="ابدأ المسابقة والتحدي الآن لجميع الطلاب"
-            />
-          </div>
-        ) : quizState.quizStatus === 'in_progress' ? (
+        {quizState.quizStatus === 'waiting' ? (() => {
+          // Merge participants with live connected students
+          const readyMap = quizState.participants || {};
+          const readyKeys = new Set(Object.keys(readyMap));
+          const lobbyList: Array<{ username: string; studentName?: string; sheetNumber?: string; isReady: boolean }> = [];
+          const processed = new Set<string>();
+
+          // 1. Students who clicked 'أنا مستعد' (ready)
+          sortedParticipants.forEach(p => {
+            lobbyList.push({
+              username: p.username,
+              studentName: p.studentName || p.username,
+              sheetNumber: p.sheetNumber,
+              isReady: true,
+            });
+            processed.add(p.studentKey);
+          });
+
+          // 2. Connected students from live explanation who haven't clicked yet
+          if (connectedStudents && connectedStudents.length > 0) {
+            connectedStudents.forEach(cs => {
+              const key = `${cs.username.trim().toLowerCase()}_${String(cs.sheetNumber || '').trim()}`;
+              if (!processed.has(key)) {
+                lobbyList.push({
+                  username: cs.username,
+                  studentName: cs.studentName || cs.username,
+                  sheetNumber: cs.sheetNumber,
+                  isReady: readyKeys.has(key),
+                });
+                processed.add(key);
+              }
+            });
+          }
+
+          const totalLobbyCount = Math.max(lobbyList.length, sortedParticipants.length);
+          const readyLobbyCount = sortedParticipants.length;
+
+          return (
+            /* ============================================================== */
+            /* STAGE 0: PRE-QUIZ WAITING LOBBY & LIVE ATTENDANCE CHART */
+            /* ============================================================== */
+            <div className="w-full my-auto py-4">
+              <LiveAttendanceChart
+                students={lobbyList}
+                readyCount={readyLobbyCount}
+                totalSessionCount={totalLobbyCount}
+                title={`قاعة الانتظار: ${quizState.quizTitle || 'مسابقة التحدي التفاعلي'}`}
+                subtitle="الطلاب الحاضرون بالقاعة • كل طالب ينقر على [أنا مستعد] تظهر بطاقته فوراً ويرتفع مؤشر الجاهزية ⚡"
+                showLaunchButton={isPresenter}
+                onLaunch={async () => { await launchLiveQuizQuestions(); }}
+                launchLabel="ابدأ المسابقة والتحدي الآن لجميع الطلاب"
+              />
+            </div>
+          );
+        })() : quizState.quizStatus === 'in_progress' ? (
           /* ============================================================== */
           /* LIVE RACING LEADERBOARD (أشرطة السباق التفاعلية اللحظية) */
           /* ============================================================== */

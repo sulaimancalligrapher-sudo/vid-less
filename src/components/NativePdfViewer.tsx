@@ -6,6 +6,7 @@ import {
   PDF_STANDARD_FONT_DATA_URL,
 } from '../lib/pdfLib';
 import { getPdfFromIndexedDB } from '../lib/pdfStorage';
+import { fetchDriveFileBase64 } from '../api';
 import {
   ChevronLeft,
   ChevronRight,
@@ -243,19 +244,56 @@ export const NativePdfViewer: React.FC<NativePdfViewerProps> = ({
             data: uint8Array,
           });
         } else {
-          // Check if Google Drive link, convert to download/view stream through server proxy to bypass CORS
-          let directFetchUrl = pdfUrl;
+          // Check if Google Drive link, convert to download/view stream through server proxy or Apps Script
           const driveMatch = pdfUrl.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/) ||
                              pdfUrl.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-          if (driveMatch && driveMatch[1]) {
-            directFetchUrl = `/api/proxy-drive?id=${driveMatch[1]}`;
-          }
+          const driveId = driveMatch ? driveMatch[1] : null;
 
-          loadingTask = pdfjsLib.getDocument({
-            ...baseOptions,
-            url: directFetchUrl,
-            withCredentials: false,
-          });
+          if (driveId) {
+            // Attempt 1: Fetch via proxy
+            let loadedViaProxy = false;
+            try {
+              loadingTask = pdfjsLib.getDocument({
+                ...baseOptions,
+                url: `/api/proxy-drive?id=${driveId}`,
+                withCredentials: false,
+              });
+              const doc = await loadingTask.promise;
+              if (isCancelled) return;
+              setPdfDoc(doc);
+              setTotalPages(doc.numPages);
+              if (onTotalPagesLoaded) onTotalPagesLoaded(doc.numPages);
+              setLoading(false);
+              loadedViaProxy = true;
+              return;
+            } catch (proxyErr) {
+              console.warn('Proxy-drive direct stream unavailable, falling back to Apps Script DriveApp...', proxyErr);
+            }
+
+            if (!loadedViaProxy) {
+              // Attempt 2: Direct read from Google Drive via Google Apps Script (Bypasses all Google Drive download limits)
+              const gasRes = await fetchDriveFileBase64(driveId);
+              if (gasRes.success && gasRes.base64) {
+                const rawData = atob(gasRes.base64);
+                const uint8Array = new Uint8Array(rawData.length);
+                for (let i = 0; i < rawData.length; i++) {
+                  uint8Array[i] = rawData.charCodeAt(i);
+                }
+                loadingTask = pdfjsLib.getDocument({
+                  ...baseOptions,
+                  data: uint8Array,
+                });
+              } else {
+                throw new Error(gasRes.message || 'تعذر تحميل ملف الـ PDF من Google Drive. يرجى التأكد من أن الملف بصيغة PDF وأنه مشارك بصلاحية العرض للجميع.');
+              }
+            }
+          } else {
+            loadingTask = pdfjsLib.getDocument({
+              ...baseOptions,
+              url: pdfUrl,
+              withCredentials: false,
+            });
+          }
         }
 
         const doc = await loadingTask.promise;

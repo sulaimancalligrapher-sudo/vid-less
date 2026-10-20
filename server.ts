@@ -454,6 +454,13 @@ async function startServer() {
         break;
       }
 
+      if (response.status === 404) {
+        return res.status(404).send("الملف غير موجود في Google Drive أو تم حذفه");
+      }
+      if (response.status === 403) {
+        return res.status(403).send("ملف Google Drive مقيد الوصول. يرجى ضبط المشاركة إلى: أي شخص لديه الرابط (Anyone with the link)");
+      }
+
       const contentType = response.headers.get('content-type') || '';
       
       // If Google Drive returns HTML, it means a virus confirmation page is shown!

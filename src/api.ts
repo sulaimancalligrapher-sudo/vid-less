@@ -22,7 +22,7 @@ export function getWebAppUrl(): string {
   }
 
   // 3. Default fallback hardcoded URL
-  const fallbackUrl: string = 'https://script.google.com/macros/s/AKfycbxGevf7A1xcC6DIa6h_L89Yro6Sufrk8fqF_uBXw9x-Bsi2SlOz2S8D4XMq1nvsUuk77A/exec';
+  const fallbackUrl: string = 'https://script.google.com/macros/s/AKfycbyBL4Qjs9PgKVHuO9lLv-IriRtblaqw_Hrlie4-BProdWidMUyEdKu61GQalCsBfXYL/exec';
   if (fallbackUrl && fallbackUrl.trim().length > 0) {
     return fallbackUrl.trim();
   }
@@ -2147,11 +2147,13 @@ export {
   openLiveQuizLobby,
   launchLiveQuizQuestions,
   updateLiveQuizSettings,
+  joinQuizLobby,
   endLiveQuiz,
   resetLiveQuiz,
   submitStudentQuizAnswer,
   markStudentQuizFinished,
   setStudentQuizRetryMode,
+  clearConnectedStudents,
 } from './lib/firebaseLiveService';
 
 export {
@@ -2160,6 +2162,19 @@ export {
   deletePdfFromIndexedDB,
   uploadPdfToServer,
 } from './lib/pdfStorage';
+
+// Fetch Google Drive File or PDF as Base64 via Google Apps Script (Bypasses CORS and Download blocks completely)
+export async function fetchDriveFileBase64(fileId: string): Promise<{ success: boolean; base64?: string; mimeType?: string; name?: string; message?: string }> {
+  try {
+    const res = await fetchGas({ action: 'readDriveFile', id: fileId });
+    if (res && res.success && res.base64) {
+      return res;
+    }
+    return { success: false, message: res?.message || 'تعذر استرجاع ملف الـ PDF من Google Drive' };
+  } catch (err: any) {
+    return { success: false, message: err?.message || 'فشل الاتصال بـ Google Apps Script' };
+  }
+}
 
 // ==========================================
 // --- PDF LESSONS & TEACHING TOOLS HELPERS ---

@@ -51,34 +51,36 @@ export default function StudentQuizView({
   const studentKey = `${username.trim().toLowerCase()}_${sheetNumber.trim()}`;
   const studentProgress = quizState.participants?.[studentKey];
 
+  // Base questions from state
+  const baseQuestions = (quizState.questions && quizState.questions.length > 0) ? quizState.questions : [];
+
   // Ordered questions queue (shuffled if admin enabled shuffle)
   const [questionQueue, setQuestionQueue] = useState<QuizQuestionItem[]>(() => {
-    if (quizState.shuffleQuestions) {
-      return deterministicShuffle(quizState.questions, studentKey);
+    if (quizState.shuffleQuestions && baseQuestions.length > 0) {
+      return deterministicShuffle(baseQuestions, studentKey);
     }
-    return quizState.questions;
+    return baseQuestions;
   });
 
   // Re-sync queue if questions change or shuffle toggle changes
   useEffect(() => {
-    if (quizState.shuffleQuestions) {
-      setQuestionQueue(deterministicShuffle(quizState.questions, studentKey));
-    } else {
-      setQuestionQueue(quizState.questions);
+    if (baseQuestions.length > 0) {
+      if (quizState.shuffleQuestions) {
+        setQuestionQueue(deterministicShuffle(baseQuestions, studentKey));
+      } else {
+        setQuestionQueue(baseQuestions);
+      }
     }
   }, [quizState.questions, quizState.shuffleQuestions, studentKey]);
 
-  // Local step index to ensure instant, reliable transition from question to question
+  // Guaranteed active questions list
+  const activeQuestions = (questionQueue && questionQueue.length > 0) ? questionQueue : baseQuestions;
+  const totalQuestions = activeQuestions.length;
+
+  // Local step index - initialized only on mount to prevent remote sync race conditions
   const [localStep, setLocalStep] = useState<number>(() => {
     return studentProgress?.currentQuestionIndex || 0;
   });
-
-  // Re-sync localStep if remote progress is further ahead (e.g. on page refresh)
-  useEffect(() => {
-    if (studentProgress?.currentQuestionIndex !== undefined && studentProgress.currentQuestionIndex > localStep) {
-      setLocalStep(studentProgress.currentQuestionIndex);
-    }
-  }, [studentProgress?.currentQuestionIndex]);
 
   // Current active question index in the queue
   const currentStep = localStep;
@@ -86,19 +88,28 @@ export default function StudentQuizView({
 
   // When in retry round, questions to review
   const wrongIndices = studentProgress?.wrongQuestionIndices || [];
-  const retryQuestions = quizState.questions.filter(q => wrongIndices.includes(q.index));
+  const retryQuestions = baseQuestions.filter(q => wrongIndices.includes(q.index));
 
   const [currentRetryIdx, setCurrentRetryIdx] = useState(0);
 
-  // Active question being displayed
+  // Active question being displayed with guaranteed fallback
   const currentQ: QuizQuestionItem | undefined = isRetryRound
     ? retryQuestions[currentRetryIdx]
-    : questionQueue[currentStep];
+    : (activeQuestions[currentStep] || (currentStep < totalQuestions ? activeQuestions[Math.min(currentStep, Math.max(0, totalQuestions - 1))] : undefined));
 
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
   const [textInput, setTextInput] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<{ isCorrect: boolean; pointsEarned: number } | null>(null);
+
+  // Timer ref to ensure clean timeouts
+  const advanceTimerRef = useRef<any>(null);
+
+  useEffect(() => {
+    return () => {
+      if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
+    };
+  }, []);
 
   // Timing
   const questionStartTimeRef = useRef<number>(Date.now());
@@ -107,11 +118,13 @@ export default function StudentQuizView({
     setSelectedOption(null);
     setTextInput('');
     setFeedback(null);
+    setIsSubmitting(false);
   }, [currentStep, isRetryRound, currentRetryIdx]);
 
-  // Check if finished - only when student has actually completed all questions in the queue
-  const totalQuestions = questionQueue.length || quizState.questions.length || 1;
-  const isFinished = (questionQueue.length > 0 && currentStep >= questionQueue.length);
+  // Check if finished - only when all questions in queue are answered, or teacher ended the quiz
+  const isFinished = (totalQuestions > 0 && currentStep >= totalQuestions) || 
+    (quizState.quizStatus === 'ended') || 
+    (Boolean(studentProgress?.isFinished) && totalQuestions > 0 && Object.keys(studentProgress?.answers || {}).length >= totalQuestions);
 
   // When student finishes all questions in queue, notify server
   useEffect(() => {
@@ -120,12 +133,17 @@ export default function StudentQuizView({
     }
   }, [isFinished, isRetryRound, studentKey, studentProgress?.isFinished]);
 
-  // Advance step helper (clears inputs, increments question index)
+  // Advance step helper (clears inputs, increments question index smoothly)
   const advanceToNext = () => {
+    if (advanceTimerRef.current) {
+      clearTimeout(advanceTimerRef.current);
+      advanceTimerRef.current = null;
+    }
     setFeedback(null);
     setSelectedOption(null);
     setTextInput('');
     setIsSubmitting(false);
+
     if (isRetryRound) {
       if (currentRetryIdx + 1 < retryQuestions.length) {
         setCurrentRetryIdx(prev => prev + 1);
@@ -184,12 +202,18 @@ export default function StudentQuizView({
       console.warn('Background sync error (answer recorded locally):', err);
     });
 
-    // Automatically transition to next question after 1s (or immediately if feedback disabled)
+    // Automatically transition to next question after 1.1s (or immediately if feedback disabled)
     if (quizState.showInstantFeedback) {
-      setTimeout(advanceToNext, 1100);
+      if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
+      advanceTimerRef.current = setTimeout(advanceToNext, 1100);
     } else {
       advanceToNext();
     }
+
+    // Safety fallback: ensure isSubmitting is never permanently stuck
+    setTimeout(() => {
+      setIsSubmitting(false);
+    }, 2500);
   };
 
   // Submit Text Answer handler
@@ -231,10 +255,16 @@ export default function StudentQuizView({
     });
 
     if (quizState.showInstantFeedback) {
-      setTimeout(advanceToNext, 1100);
+      if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
+      advanceTimerRef.current = setTimeout(advanceToNext, 1100);
     } else {
       advanceToNext();
     }
+
+    // Safety fallback
+    setTimeout(() => {
+      setIsSubmitting(false);
+    }, 2500);
   };
 
   const handleStartRetryRound = () => {
@@ -339,9 +369,9 @@ export default function StudentQuizView({
               </ul>
             </div>
           </motion.div>
-        ) : isFinished && !isRetryRound ? (
+        ) : ((isFinished && !isRetryRound) || quizState.quizStatus === 'ended' || (totalQuestions > 0 && currentStep >= totalQuestions)) ? (
           /* ============================================================== */
-          /* STUDENT FINISHED SCREEN */
+          /* STUDENT FINISHED SCREEN (Requirement 3) */
           /* ============================================================== */
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
@@ -354,44 +384,61 @@ export default function StudentQuizView({
 
             <div className="space-y-2">
               <h2 className="text-2xl md:text-3xl font-black text-slate-100">
-                أحسنت يا بطل! أتممت التحدي 🌟
+                تم الانتهاء من جميع الأسئلة بنجاح 🎉
               </h2>
-              <p className="text-xs md:text-sm text-slate-400">
-                تم تسجيل كافة إجاباتك بنجاح. انظر للشاشة الرئيسية لمتابعة التتويج والمراكز النهائية!
+              <p className="text-xs md:text-sm text-slate-400 max-w-md mx-auto">
+                أحسنت يا {studentName || username}! تم تسجيل كافة إجاباتك بنجاح في النظام.
               </p>
             </div>
 
-            {/* Score Cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              <div className="p-3.5 bg-slate-950/80 border border-slate-800 rounded-2xl">
-                <div className="text-xs text-slate-400 mb-1">النقاط الكلية</div>
-                <div className="text-xl font-black text-amber-400">
+            {/* Score & Answers Count Cards */}
+            <div className="grid grid-cols-3 gap-3 max-w-md mx-auto">
+              <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl">
+                <div className="text-[11px] text-emerald-400 font-bold mb-1">الإجابات الصحيحة</div>
+                <div className="text-2xl font-black text-emerald-300 font-mono">
+                  {studentProgress?.correctCount || 0}
+                </div>
+              </div>
+              <div className="p-3.5 bg-rose-500/10 border border-rose-500/30 rounded-2xl">
+                <div className="text-[11px] text-rose-400 font-bold mb-1">الإجابات الخاطئة</div>
+                <div className="text-2xl font-black text-rose-300 font-mono">
+                  {studentProgress?.wrongCount || 0}
+                </div>
+              </div>
+              <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-2xl">
+                <div className="text-[11px] text-amber-400 font-bold mb-1">إجمالي النقاط</div>
+                <div className="text-2xl font-black text-amber-300 font-mono">
                   {(studentProgress?.totalScore || 0).toLocaleString()}
-                </div>
-              </div>
-              <div className="p-3.5 bg-slate-950/80 border border-slate-800 rounded-2xl">
-                <div className="text-xs text-slate-400 mb-1">الإجابات الصحيحة</div>
-                <div className="text-xl font-black text-emerald-400">
-                  {studentProgress?.correctCount || 0} / {totalQuestions}
-                </div>
-              </div>
-              <div className="col-span-2 sm:col-span-1 p-3.5 bg-slate-950/80 border border-slate-800 rounded-2xl">
-                <div className="text-xs text-slate-400 mb-1">المركز الحالي</div>
-                <div className="text-xl font-black text-sky-400">
-                  {studentProgress?.rank ? `#${studentProgress.rank}` : '-'}
                 </div>
               </div>
             </div>
 
+            {/* Waiting for Podium / Final Results Announcement */}
+            <div className="p-4 bg-slate-950/80 border border-slate-800 rounded-2xl max-w-md mx-auto space-y-2">
+              <div className="flex items-center justify-center gap-2 text-amber-400 font-bold text-xs">
+                <Trophy className="w-4 h-4 animate-bounce" />
+                <span>
+                  {quizState.quizStatus === 'ended' && studentProgress?.rank
+                    ? `أنت في المركز #${studentProgress.rank} في الترتيب النهائي!`
+                    : 'في انتظار إعلان النتيجة النهائية وترتيب الفائزين على شاشة العرض الرئيسية 🏆'}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400">
+                {quizState.quizStatus === 'ended'
+                  ? 'تم إنهاء التحدي واعتماد النتائج وتتويج الفائزين على شاشة العرض.'
+                  : 'تابع شاشة العرض الآن لمشاهدة منصة التتويج والمراكز الأولى فور إنهاء المسابقة.'}
+              </p>
+            </div>
+
             {/* Option to Retry Wrong Answers if enabled and has wrong questions */}
-            {quizState.allowRetryWrong && (studentProgress?.wrongCount || 0) > 0 && (
-              <div className="p-4 bg-purple-500/10 border border-purple-500/30 rounded-2xl space-y-2 text-right">
+            {quizState.allowRetryWrong && (studentProgress?.wrongCount || 0) > 0 && quizState.quizStatus !== 'ended' && (
+              <div className="p-4 bg-purple-500/10 border border-purple-500/30 rounded-2xl space-y-2 text-right max-w-md mx-auto">
                 <div className="flex items-center gap-2 text-purple-300 font-bold text-xs">
                   <RefreshCw className="w-4 h-4" />
                   <span>فرصة إضافية للتعلم والتميز!</span>
                 </div>
                 <p className="text-xs text-slate-400 leading-relaxed">
-                  لديك ({studentProgress?.wrongCount}) أسئلة يمكنك إعادة محاولة حلها الآن لترسيخ الفهم وكسب نقاط إضافية:
+                  لديك ({studentProgress?.wrongCount}) أسئلة يمكنك إعادة محاولة حلها الآن لترسيخ الفهم:
                 </p>
                 <button
                   onClick={handleStartRetryRound}
@@ -402,10 +449,6 @@ export default function StudentQuizView({
                 </button>
               </div>
             )}
-
-            <div className="pt-2 text-xs text-slate-500">
-              في انتظار إعلان المعلم للمراكز الأولى على شاشة العرض... 🏆
-            </div>
           </motion.div>
         ) : currentQ ? (
           /* ============================================================== */
@@ -483,7 +526,7 @@ export default function StudentQuizView({
             </div>
 
             {/* Options Area */}
-            {currentQ.isTextAnswer ? (
+            {Boolean(currentQ.isTextAnswer || !currentQ.options || currentQ.options.length === 0) ? (
               /* Text Input Form */
               <form onSubmit={handleTextSubmit} className="space-y-3">
                 <input
@@ -495,14 +538,23 @@ export default function StudentQuizView({
                   className="w-full px-5 py-4 bg-slate-900 border border-slate-800 rounded-2xl text-slate-100 placeholder-slate-500 text-base font-medium outline-none focus:border-amber-500 transition-all text-right"
                   autoFocus
                 />
-                <button
-                  type="submit"
-                  disabled={!textInput.trim() || isSubmitting || feedback !== null}
-                  className="w-full py-4 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 disabled:opacity-40 text-slate-950 font-black rounded-2xl text-base shadow-lg shadow-amber-500/20 transition-all cursor-pointer flex items-center justify-center gap-2"
-                >
-                  <Send className="w-5 h-5" />
-                  <span>تأكيد الإجابة</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="submit"
+                    disabled={!textInput.trim() || isSubmitting || feedback !== null}
+                    className="flex-1 py-4 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 disabled:opacity-40 text-slate-950 font-black rounded-2xl text-base shadow-lg shadow-amber-500/20 transition-all cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    <Send className="w-5 h-5" />
+                    <span>تأكيد الإجابة</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => advanceToNext()}
+                    className="px-5 py-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-2xl text-sm transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <span>تخطي ⬅️</span>
+                  </button>
+                </div>
               </form>
             ) : (
               /* Multiple Choice Buttons */
@@ -513,12 +565,12 @@ export default function StudentQuizView({
                   const colorClass = OPTION_COLORS[optIdx % OPTION_COLORS.length];
 
                   return (
-                    <motion.button
+                    <button
                       key={optIdx}
-                      whileTap={{ scale: 0.98 }}
+                      type="button"
                       onClick={() => handleSelectOption(opt, optIdx)}
                       disabled={isSubmitting || feedback !== null}
-                      className={`relative p-4 md:p-5 rounded-2xl bg-gradient-to-r border text-right font-black text-sm md:text-base flex items-center gap-3 transition-all cursor-pointer shadow-md ${colorClass} ${
+                      className={`relative p-4 md:p-5 rounded-2xl bg-gradient-to-r border text-right font-black text-sm md:text-base flex items-center gap-3 transition-all cursor-pointer shadow-md touch-manipulation active:scale-95 ${colorClass} ${
                         isSelected ? 'ring-4 ring-white/60 scale-[1.02]' : ''
                       }`}
                     >
@@ -526,13 +578,74 @@ export default function StudentQuizView({
                         {letter}
                       </span>
                       <span className="flex-grow leading-snug">{opt}</span>
-                    </motion.button>
+                    </button>
                   );
                 })}
               </div>
             )}
+
+            {/* Quick Navigation Footer */}
+            <div className="flex items-center justify-between pt-3 px-1 text-xs border-t border-slate-800/60">
+              <button
+                type="button"
+                onClick={() => {
+                  if (currentStep > 0) setLocalStep(prev => prev - 1);
+                }}
+                disabled={currentStep === 0}
+                className="px-3 py-2 bg-slate-800/80 hover:bg-slate-700 text-slate-300 disabled:opacity-30 rounded-xl font-bold flex items-center gap-1.5 cursor-pointer"
+              >
+                <ArrowRight className="w-4 h-4" />
+                <span className="hidden sm:inline">السابق</span>
+              </button>
+
+              <div className="flex items-center gap-1.5 overflow-x-auto max-w-[200px] sm:max-w-none py-1">
+                {activeQuestions.map((_, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => setLocalStep(i)}
+                    className={`w-7 h-7 rounded-lg text-xs font-black flex items-center justify-center transition-all cursor-pointer ${
+                      i === currentStep
+                        ? 'bg-amber-500 text-slate-950 shadow-md scale-110'
+                        : i < currentStep
+                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                          : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {i + 1}
+                  </button>
+                ))}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => advanceToNext()}
+                className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black rounded-xl flex items-center gap-1.5 cursor-pointer shadow-md"
+              >
+                <span>السؤال التالي</span>
+                <ArrowLeft className="w-4 h-4" />
+              </button>
+            </div>
           </div>
-        ) : null}
+        ) : (
+          <div className="w-full text-center py-12 px-6 bg-slate-900/80 border border-slate-800 rounded-3xl space-y-4">
+            <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center mx-auto">
+              <Sparkles className="w-7 h-7 animate-spin-slow" />
+            </div>
+            <h3 className="text-lg font-bold text-slate-100">جاري مزامنة وتجهيز السؤال...</h3>
+            <p className="text-xs text-slate-400 max-w-sm mx-auto">
+              إذا لم يظهر السؤال تلقائياً، اضغط على الزر أدناه لبدء المحاولة
+            </p>
+            <button
+              onClick={() => {
+                setLocalStep(0);
+              }}
+              className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl shadow-lg cursor-pointer"
+            >
+              عرض السؤال الأول ⚡
+            </button>
+          </div>
+        )}
       </main>
     </div>
   );
